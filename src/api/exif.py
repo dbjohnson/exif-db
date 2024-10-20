@@ -17,7 +17,7 @@ def load_csv(force_reload=False):
             """
             CREATE OR REPLACE TABLE exif AS
             SELECT *, ?::TIMESTAMP AS last_modified
-            FROM read_csv_auto(?)
+            FROM read_csv_auto(?, sample_size=-1)
             WHERE MIMEType LIKE 'image/%'
             QUALIFY
             ROW_NUMBER() OVER (PARTITION BY SourceFile ORDER BY FileAccessDate DESC) = 1;
