@@ -1,7 +1,10 @@
 import datetime
 import base64
+import random
 from io import BytesIO
 
+import rawpy
+import imageio
 from PIL import Image
 from pillow_heif import register_heif_opener
 from fastapi import FastAPI, HTTPException
@@ -75,29 +78,48 @@ async def _onthisday(month: int = -1, day: int = -1, response_class=HTMLResponse
             date = datetime.date(month=month, day=day, year=datetime.date.today().year)
         else:
             date = datetime.date.today()
-        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d}").to_dict(orient='records')
+        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ").to_dict(orient='records')
+        if len(pics) > 20:
+            random.shuffle(pics)
+            pics = pics[:20]
 
         if len(pics) == 0:
             return f"No pictures found for {date}"
         else:
             def load_image(pic):
-                # HEIC images need to be converted to JPEG or browsers won't display them
                 path = pic["SourceFile"]
-                if path.lower().endswith(".heic"):
+                extension = pic["FileType"]
+                if extension == 'HEIC':
+                    # HEIC images need to be converted to JPEG or browsers won't display them
                     im = Image.open(path)
                     buffered = BytesIO()
                     im.save(buffered, format="JPEG")
                     img_str = base64.b64encode(buffered.getvalue())
                     return f"data:image/png;base64, {img_str.decode()}"
+                elif extension in ('ARW', 'CR2', "NEF"):
+                    # extract thumnails for raw
+                    if False:
+                        with rawpy.imread(path) as raw:
+                            rgb = raw.postprocess(half_size=True)
+                        buffered = BytesIO()
+                        imageio.imsave(buffered, rgb, format='JPG') 
+                        img_bytes = buffered.getvalue()
+                    else:
+                        with rawpy.imread(path) as raw:
+                            img_bytes = raw.extract_thumb().data
+                    return f"data:image/png;base64, {base64.b64encode(img_bytes).decode()}"
                 else:
                     return path
+
+            def label(pic):
+                return pic['DateTimeOriginal'].split(' ')[0].replace(':', '/')
 
             return HTMLResponse(f"""
             <html>
             <body>
-            {"\n".join([
-                f'<img src="{load_image(pic)}" alt="{pic["DateTimeOriginal"]}" style="height:80%;margin-bottom:5px">'
-                for pic in pics
+            {"<br>".join([
+                f'<img src="{load_image(pic)}" title="{label(pic)}" style="display:block;max-height:90%;max-width:90%;margin-bottom:5px;margin-left:auto;margin-right:auto">'
+                for pic in reversed(sorted(pics, key=lambda p: p["DateTimeOriginal"]))
             ])}
             </div>
             </body>
