@@ -4,8 +4,7 @@ services:
     ports:
       - "8668:8000" 
     volumes:
-      - /Users/bryan/Pictures:/photo
-      # - /volume1/photo:/photo
+      - /volume1/photo:/photo
       - .:/storage
       - .:/src
     environment:
