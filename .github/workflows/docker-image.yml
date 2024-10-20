@@ -1,0 +1,30 @@
+name: push to dockerhub
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build-and-push:
+    environment: dockerhub
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        name: Fetch repository
+        uses: actions/checkout@main
+      -
+        name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      -
+        name: amd64
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: ./
+          file: ./Dockerfile
+          push: true
+          tags: dbryanjohnson/exif-db:latest
+      -
+        name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}

@@ -1,0 +1,14 @@
+services:
+  exif-db:
+    build: .
+    ports:
+      - "8668:8000" 
+    volumes:
+      - /Users/bryan/Pictures:/photo
+      # - /volume1/photo:/photo
+      - .:/storage
+      - .:/src
+    environment:
+      - PYTHON_PATH=.
+    working_dir: /src
+    command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload
