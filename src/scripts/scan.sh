@@ -26,5 +26,5 @@ if [ -f ${EXIF_CSV} ]; then
         exiftool -@ taglist.txt -f -api "missingtagvalue^=" -csv {} \; \
         | tail -n +2 >> "${EXIF_CSV}"
 else
-    exiftool -MIMEType -all -csv -r /photo > "${EXIF_CSV}"
+    exiftool -MIMEType -all -csv -i @eaDir -fast -r /photo > "${EXIF_CSV}"
 fi

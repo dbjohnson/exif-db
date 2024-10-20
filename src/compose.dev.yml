@@ -6,8 +6,6 @@ services:
     volumes:
       - /volume1/photo:/photo
       - .:/storage
-      - .:/src
-    environment:
-      - PYTHON_PATH=.
-    working_dir: /src
+      - .:/src/app
+    working_dir: /src/app
     command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload
