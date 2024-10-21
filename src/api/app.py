@@ -17,7 +17,6 @@ from api import exif
 app = FastAPI()
 app.mount("/photo", StaticFiles(directory="/photo"), name="photo")
 
-register_heif_opener()
 exif.load_csv()
 
 
