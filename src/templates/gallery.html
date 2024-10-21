@@ -1,76 +1,10 @@
 <html>
   <head>
-    <style>
-      body, html {
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-      }
-
-      button {
-        background-color: rgba(0, 0, 0, 0.5);
-        color: #ddd;
-        border: none;
-        padding: 8px;
-        text-align: center;
-        display: inline-block;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: background-color 0.3s;
-      }
-
-      button:hover {
-          background-color: rgba(50, 50, 50, 0.9);
-      }
-
-      .image-container {
-          position: relative;
-          display: inline-block;
-          margin-bottom: 5px;
-          background-color: red;
-      }
-
-      .image-container img {
-          display: block;
-          max-width: 90vw;
-          max-height: 90vh;
-          background-color: blue;
-      }
-
-      .button-container {
-        position: absolute;
-        bottom: 5px;
-        width: 100%;
-        padding: 10px;
-        display: flex;
-        justify-content: center;
-        gap: 3px;
-        opacity: 0;
-        transition: opacity 0.3s;
-      }
-
-      .button-container:hover {
-          opacity: 1;
-      }
-
-      .badge {
-        position: absolute;
-        top: 5px;
-        left: 25px;
-        color: #ddd;
-        background-color: rgba(0, 0, 0, 0.5);
-        padding: 8px;
-        border-radius: 6px;
-        opacity: 0;
-        transition: opacity 0.3s;
-      }
-
-      .image-container:hover .badge {
-          opacity: 1;
-      }
-    </style>
+    <title>Exif DB</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/style.css">
     <script>
       function downloadImage(href) {
           var downloadLink = document.createElement('a');
@@ -83,7 +17,7 @@
 
       function deleteImage(href, button) {
         if (confirm('Are you sure you want to delete this image?')) {
-          fetch('/api/images?path=' + href, {
+          fetch('/api/image?path=' + href, {
             method: 'DELETE'
           })
           .then(response=>{
@@ -109,7 +43,6 @@
     <div class="image-container">
       <img
         src="{{ im['src'] }}"
-        title="{{ im['date'] }} ({{ im['path'].split('/').pop() }})"
         alt="{{ im['path'] }}"
       />
       <div class="badge">
