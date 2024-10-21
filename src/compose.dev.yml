@@ -4,8 +4,8 @@ services:
     ports:
       - "8668:8000" 
     volumes:
-      - ./photo:/photo
-      - ./storage:/storage
+      - ../photo:/photo
+      - ../storage:/storage
       - .:/src/app
     environment:
       - TZ=America/Detroit
