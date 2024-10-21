@@ -8,7 +8,7 @@ import rawpy
 import pyheif
 from PIL import Image
 from jinja2 import Environment, FileSystemLoader
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -31,22 +31,21 @@ async def _ping():
 async def _reload():
     try:
         exif.load_csv()
-
         return f"Last modified: {exif.last_modified()}"
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/image")
-async def _delete_image(path: str, request: Request):
-    try:
+async def _delete_image(path: str, background_tasks: BackgroundTasks):
+    def delete():
         exif.delete_image(path)
         # move file to deleted directory (user can then permanently delete)
         deleted_dir = '/storage/deleted'
         os.makedirs(deleted_dir, exist_ok=True)
         shutil.move(path, os.path.join(deleted_dir, os.path.basename(path)))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    background_tasks.add_task(delete)
 
 
 @app.get("/api/image")

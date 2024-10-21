@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script>
       function downloadImage(href) {
           var downloadLink = document.createElement('a');
@@ -48,17 +49,17 @@
       <div class="badge">
         <span>{{ im['date'] }}</span>
         <span>{{ im['title'] }}</span>
-      </div>
-      <div class="button-container">
         <button
           onclick="downloadImage('{{ im['path'] }}')"
+          title="Download original"
         >
-          Download original
+          <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
         </button>
         <button
           onclick="deleteImage('{{ im['path'] }}', this)"
+          title="Permanent delete"
         >
-          Permanently delete
+          <i class="fa fa-trash-o" aria-hidden="true"></i>
         </button>
       </div>
     </div>
