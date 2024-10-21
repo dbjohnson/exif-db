@@ -48,6 +48,20 @@ def tags():
     return db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
 
 
+def delete_image(path):
+    db.execute(
+        f"""
+        COPY (
+            SELECT * FROM exif
+            WHERE SourceFile <> ?
+        )
+        TO '{EXIF_CSV}' (HEADER, DELIMITER ',')
+        """,
+        [path]
+    )
+    load_csv()
+
+
 def prune_deleted():
     """
     Remove rows for files that have been deleted or moved

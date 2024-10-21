@@ -1,0 +1,134 @@
+<html>
+  <head>
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      button {
+        background-color: rgba(0, 0, 0, 0.5);
+        color: #ddd;
+        border: none;
+        padding: 8px;
+        text-align: center;
+        display: inline-block;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+
+      button:hover {
+          background-color: rgba(50, 50, 50, 0.9);
+      }
+
+      .image-container {
+          position: relative;
+          display: inline-block;
+          margin-bottom: 5px;
+          background-color: red;
+      }
+
+      .image-container img {
+          display: block;
+          max-width: 90vw;
+          max-height: 90vh;
+          background-color: blue;
+      }
+
+      .button-container {
+        position: absolute;
+        bottom: 5px;
+        width: 100%;
+        padding: 10px;
+        display: flex;
+        justify-content: center;
+        gap: 3px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      .button-container:hover {
+          opacity: 1;
+      }
+
+      .badge {
+        position: absolute;
+        top: 5px;
+        left: 25px;
+        color: #ddd;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 8px;
+        border-radius: 6px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      .image-container:hover .badge {
+          opacity: 1;
+      }
+    </style>
+    <script>
+      function downloadImage(href) {
+          var downloadLink = document.createElement('a');
+          downloadLink.href = href;
+          downloadLink.download = href.split('/').pop();
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+      }
+
+      function deleteImage(href) {
+        if (confirm('Are you sure you want to delete this image?')) {
+          fetch('/api/images?path=' + href, {
+            method: 'DELETE'
+          })
+          .then(response=>{
+            if (!response.ok) {
+              throw new Error('Network response was not ok. Status: ' + response.status);
+            }
+            return response.json()
+          })
+          .then(data => {
+            console.log('Success:', data);
+            location.reload();
+          })
+          .catch((error) => {
+            console.log(error)
+            alert(error);
+          })
+        }
+      }
+    </script>
+  </head>
+  <body style="background-color:#000">
+    {% for im in images %}
+    <div class="image-container">
+      <img
+        src="{{ im['src'] }}"
+        title="{{ im['date'] }} ({{ im['path'].split('/').pop() }})"
+        alt="{{ im['path'] }}"
+      />
+      <div class="badge">
+        <span>{{ im['date'] }}</span>
+        <span>{{ im['title'] }}</span>
+      </div>
+      <div class="button-container">
+        <button
+          onclick="downloadImage('{{ im['path'] }}')"
+        >
+          Download original
+        </button>
+        <button
+          onclick="deleteImage('{{ im['path'] }}')"
+        >
+          Permanently delete
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </body>
+</html>

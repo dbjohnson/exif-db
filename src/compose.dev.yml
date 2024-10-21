@@ -4,10 +4,11 @@ services:
     ports:
       - "8668:8000" 
     volumes:
-      - /volume1/photo:/photo
-      - .:/storage
+      - ./photo:/photo
+      - ./storage:/storage
       - .:/src/app
     environment:
       - TZ=America/Detroit
+      - MAX_IMAGE_SIZE=2000
     working_dir: /src/app
     command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload
