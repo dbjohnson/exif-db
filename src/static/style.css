@@ -43,7 +43,7 @@ button:hover {
   left: 5px;
   color: #ddd;
   background-color: rgba(0, 0, 0, 0.5);
-  padding: 8px;
+  padding: 5px;
   border-radius: 6px;
   opacity: 0;
   transition: opacity 0.3s;

@@ -9,7 +9,7 @@ import pyheif
 from PIL import Image
 from jinja2 import Environment, FileSystemLoader
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse, HTMLResponse, Response
+from fastapi.responses import StreamingResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import exif
@@ -20,6 +20,9 @@ app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
 app.mount("/photo", StaticFiles(directory="/photo"), name="photo")
 
 exif.load_csv()
+
+
+DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
 
 
 @app.get("/api/ping")
@@ -118,8 +121,8 @@ async def _dump():
             raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/onthisday")
-async def _onthisday(month: int = -1, day: int = -1, n: int = 10, response_class=HTMLResponse):
+@app.get("/onthisday")
+async def _onthisday(month: int = -1, day: int = -1, n: int = DEFAULT_NUM_IMAGES, response_class=HTMLResponse):
     try:
         if min(month, day) > 0:
             date = datetime.date(month=month, day=day, year=datetime.date.today().year)
@@ -130,17 +133,13 @@ async def _onthisday(month: int = -1, day: int = -1, n: int = 10, response_class
             random.shuffle(pics)
             pics = pics[:n]
 
-        if len(pics) == 0:
-            return f"No pictures found for {date}"
-        else:
-            return HTMLResponse(_html_for_pics(pics))
-
+        return HTMLResponse(_html_for_pics(pics))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/random")
-async def _random(n: int = 10, response_class=HTMLResponse):
+@app.get("/random")
+async def _random(n: int = DEFAULT_NUM_IMAGES, response_class=HTMLResponse):
     try:
         pics = exif.dataframe()
         if len(pics) > n:
@@ -148,6 +147,11 @@ async def _random(n: int = 10, response_class=HTMLResponse):
         return HTMLResponse(_html_for_pics(pics.to_dict(orient='records')))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/")
+async def _index(response_class=HTMLResponse):
+    return RedirectResponse(url='/random')
 
 
 def _html_for_pics(pics):

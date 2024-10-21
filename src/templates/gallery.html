@@ -40,6 +40,22 @@
     </script>
   </head>
   <body style="background-color:#000">
+    <div
+      style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
+    >
+      <button
+        onclick="window.location.href='/random'"
+        style="border:2px solid #ddd;"
+      >
+        Random photos
+      </button>
+      <button
+        onclick="window.location.href='/onthisday'"
+        style="border:2px solid #ddd;"
+      >
+        Photos from this date
+      </button>
+    </div>
     {% for im in images %}
     <div class="image-container">
       <img
