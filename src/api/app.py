@@ -7,7 +7,6 @@ import rawpy
 import imageio
 import pyheif
 from PIL import Image
-from pillow_heif import register_heif_opener
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
