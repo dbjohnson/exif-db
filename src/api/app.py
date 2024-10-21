@@ -112,7 +112,10 @@ async def _onthisday(month: int = -1, day: int = -1, response_class=HTMLResponse
                     return path
 
             def label(pic):
-                return pic['DateTimeOriginal'].split(' ')[0].replace(':', '/')
+                return '{} ({})'.format(
+                    pic['DateTimeOriginal'].split(' ')[0].replace(':', '/'),
+                    pic['SourceFile'].split('/')[-1]
+                )
 
             return HTMLResponse(f"""
             <html>

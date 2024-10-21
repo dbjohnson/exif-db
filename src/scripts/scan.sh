@@ -12,19 +12,17 @@ if [ -f ${EXIF_CSV} ]; then
 
     IFS=',' read -ra TAGS <<< "$HEADER_CLEAN"
 
-    # Create or empty the taglist.txt file
     TAGLIST_FILE="taglist.txt"
     > "$TAGLIST_FILE"
 
-    # Loop through the tag names and write them to taglist.txt
     for TAG in "${TAGS[@]}"; do
         if [ "$TAG" != "SourceFile" ]; then
             echo "-$TAG" >> "$TAGLIST_FILE"
         fi
     done
     find /photo -newer ${EXIF_CSV} -exec \
-        exiftool -@ taglist.txt -f -api "missingtagvalue^=" -csv {} \; \
+        exiftool -@ taglist.txt -fast -n -api "missingtagvalue^=" -csv {} \; \
         | tail -n +2 >> "${EXIF_CSV}"
 else
-    exiftool -MIMEType -all -csv -i @eaDir -fast -r /photo > "${EXIF_CSV}"
+    exiftool -MIMEType -all -csv -i @eaDir -fast -progress -n -r /photo > "${EXIF_CSV}"
 fi

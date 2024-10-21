@@ -5,7 +5,7 @@ This codebase contains scripts to collect exif data and expose via database and 
 
 ## Usage
 
-Modify [compose.prod.yml](./src/compose.prod.yaml) to mount your media directory and a volume for storage
+Modify [compose.yml](./src/compose.yml) to mount your media directory and a volume for storage
 
 
 Scan all files for exif data; by default subsequent runs will only check files created or modified since the last run
