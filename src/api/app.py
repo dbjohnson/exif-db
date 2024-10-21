@@ -17,6 +17,7 @@ from api import exif
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
+app.mount("/photo", StaticFiles(directory="/photo"), name="photo")
 
 exif.load_csv()
 
