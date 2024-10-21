@@ -1,0 +1,13 @@
+services:
+  exif-db:
+    image: dbryanjohnson/exif-db:latest
+    ports:
+      - "8668:8000" 
+    volumes:
+      - /volume1/photo:/photo
+      - /volume1/docker/appdata/exif-db:/storage
+    environment:
+      - TZ=America/Detroit
+    working_dir: /src/app
+    command: uvicorn api:app --workers 2 --host 0.0.0.0 --port 8000
+

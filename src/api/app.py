@@ -5,13 +5,14 @@ from io import BytesIO
 
 import rawpy
 import imageio
+import pyheif
 from PIL import Image
 from pillow_heif import register_heif_opener
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import exif
+from api import exif
 
 
 app = FastAPI()
@@ -91,22 +92,16 @@ async def _onthisday(month: int = -1, day: int = -1, response_class=HTMLResponse
                 extension = pic["FileType"]
                 if extension == 'HEIC':
                     # HEIC images need to be converted to JPEG or browsers won't display them
-                    im = Image.open(path)
+                    heif_file = pyheif.read(pic['SourceFile'])
+                    im = Image.frombytes(heif_file.mode, heif_file.size, heif_file.data, "raw", heif_file.mode, heif_file.stride)
                     buffered = BytesIO()
                     im.save(buffered, format="JPEG")
-                    img_str = base64.b64encode(buffered.getvalue())
-                    return f"data:image/png;base64, {img_str.decode()}"
+                    img_bytes = buffered.getvalue()
+                    return f"data:image/png;base64, {base64.b64encode(img_bytes).decode()}"
                 elif extension in ('ARW', 'CR2', "NEF"):
                     # extract thumnails for raw
-                    if False:
-                        with rawpy.imread(path) as raw:
-                            rgb = raw.postprocess(half_size=True)
-                        buffered = BytesIO()
-                        imageio.imsave(buffered, rgb, format='JPG') 
-                        img_bytes = buffered.getvalue()
-                    else:
-                        with rawpy.imread(path) as raw:
-                            img_bytes = raw.extract_thumb().data
+                    with rawpy.imread(path) as raw:
+                        img_bytes = raw.extract_thumb().data
                     return f"data:image/png;base64, {base64.b64encode(img_bytes).decode()}"
                 else:
                     return path
@@ -117,16 +112,19 @@ async def _onthisday(month: int = -1, day: int = -1, response_class=HTMLResponse
                     pic['SourceFile'].split('/')[-1]
                 )
 
-            return HTMLResponse(f"""
-            <html>
-            <body>
-            {"<br>".join([
-                f'<img src="{load_image(pic)}" title="{label(pic)}" style="display:block;max-height:90%;max-width:90%;margin-bottom:5px;margin-left:auto;margin-right:auto">'
-                for pic in reversed(sorted(pics, key=lambda p: p["DateTimeOriginal"]))
-            ])}
-            </div>
-            </body>
-            </html>
-            """)
+            return HTMLResponse(
+                f"""
+                <html>
+                <body>
+                {"<br>".join([
+                    f'<img src="{load_image(pic)}" title="{label(pic)}" style="display:block;max-height:90%;max-width:90%;margin-bottom:5px;margin-left:auto;margin-right:auto">'
+                    for pic in reversed(sorted(pics, key=lambda p: p["DateTimeOriginal"]))
+                ])}
+                </div>
+                </body>
+                </html>
+                """
+            )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
