@@ -19,6 +19,7 @@ def load_csv(force_reload=False):
             SELECT *, ?::TIMESTAMP AS last_modified
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
+            AND DateTimeOriginal IS NOT NULL
             QUALIFY
             ROW_NUMBER() OVER (PARTITION BY SourceFile ORDER BY FileAccessDate DESC) = 1;
             """,
