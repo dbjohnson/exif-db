@@ -1,7 +1,6 @@
 import os
 import shutil
 import datetime
-import random
 from io import BytesIO
 
 import rawpy
@@ -112,21 +111,23 @@ async def _onthisday(request: Request, month: int = -1, day: int = -1, n: int = 
         date = datetime.date(month=month, day=day, year=datetime.date.today().year)
     else:
         date = datetime.date.today()
-    pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ").to_dict(orient='records')
+    pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
     if len(pics) > n:
-        random.shuffle(pics)
-        pics = pics[:n]
+        pics = pics.sample(n=n)
 
     return templates.TemplateResponse(
         request=request,
         name="gallery.html",
-        context={"images": [{
-            'path': pic['SourceFile'],
-            'src': f"/api/image?path={pic['SourceFile']}",
-            'date': pic['DateTimeOriginal'].split(' ')[0].replace(':', '/'),
+        context={
+            "images": pics.assign(
+                date=pics['DateTimeOriginal'].map(
+                    lambda d: d.split(' ')[0].replace(':', '/')
+                )
+            ).sort_values(
+                by='DateTimeOriginal',
+                ascending=False
+            ).to_dict(orient='records')
         }
-            for pic in sorted(pics, key=lambda x: x['DateTimeOriginal'], reverse=True)
-        ]}
     )
 
 
