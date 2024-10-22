@@ -7,21 +7,20 @@ from io import BytesIO
 import rawpy
 import pyheif
 from PIL import Image
-from jinja2 import Environment, FileSystemLoader
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from api import exif
 
 
-app = FastAPI()
+app = FastAPI(
+    root_path=os.getenv('ROOT_PATH'),
+)
 app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
-app.mount("/photo", StaticFiles(directory="/photo"), name="photo")
-
+templates = Jinja2Templates(directory="templates")
 exif.load_csv()
-
-
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
 
 
@@ -32,14 +31,11 @@ async def _ping():
 
 @app.get("/api/reload")
 async def _reload():
-    try:
-        exif.load_csv()
-        return f"Last modified: {exif.last_modified()}"
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    exif.load_csv()
+    return f"Last modified: {exif.last_modified()}"
 
 
-@app.delete("/api/image")
+@app.delete("/api/image{path:path}")
 async def _delete_image(path: str, background_tasks: BackgroundTasks):
     def delete():
         exif.delete_image(path)
@@ -51,8 +47,8 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(delete)
 
 
-@app.get("/api/image")
-async def _get_image(path: str, request: Request):
+@app.get("/api/image{path:path}")
+async def _image(request: Request, path: str):
     extension = path.split('.')[-1].upper()
     if extension == 'HEIC':
         # HEIC images need to be converted to JPEG or browsers won't display them
@@ -87,20 +83,14 @@ async def _get_image(path: str, request: Request):
 
 @app.get("/api/tags")
 async def _tags():
-    try:
-        return exif.tags()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return exif.tags()
 
 
 @app.get("/api/exif")
 async def _exif(source_file: str):
-    try:
-        return exif.db.execute(
-            f"SELECT * FROM exif WHERE SourceFile = '{source_file}'"
-        ).fetchdf().fillna('').to_dict(orient='records')[0]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return exif.db.execute(
+        f"SELECT * FROM exif WHERE SourceFile = '{source_file}'"
+    ).fetchdf().fillna('').to_dict(orient='records')[0]
 
 
 @app.get("/api/dump")
@@ -114,58 +104,54 @@ async def _dump():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=exif-db.csv"}
     )
-    if False:
-        try:
-            return exif.dataframe().fillna('').to_csv(index=False)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/onthisday")
-async def _onthisday(month: int = -1, day: int = -1, n: int = DEFAULT_NUM_IMAGES, response_class=HTMLResponse):
-    try:
-        if min(month, day) > 0:
-            date = datetime.date(month=month, day=day, year=datetime.date.today().year)
-        else:
-            date = datetime.date.today()
-        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ").to_dict(orient='records')
-        if len(pics) > n:
-            random.shuffle(pics)
-            pics = pics[:n]
+async def _onthisday(request: Request, month: int = -1, day: int = -1, n: int = DEFAULT_NUM_IMAGES):
+    if min(month, day) > 0:
+        date = datetime.date(month=month, day=day, year=datetime.date.today().year)
+    else:
+        date = datetime.date.today()
+    pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ").to_dict(orient='records')
+    if len(pics) > n:
+        random.shuffle(pics)
+        pics = pics[:n]
 
-        return HTMLResponse(_html_for_pics(pics))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/random")
-async def _random(n: int = DEFAULT_NUM_IMAGES, response_class=HTMLResponse):
-    try:
-        pics = exif.dataframe()
-        if len(pics) > n:
-            pics = pics.sample(n=n)
-        return HTMLResponse(_html_for_pics(pics.to_dict(orient='records')))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/")
-async def _index(response_class=HTMLResponse):
-    return RedirectResponse(url='/random')
-
-
-def _html_for_pics(pics):
-
-    return Environment(
-        loader=FileSystemLoader("./templates")
-    ).get_template("gallery.html").render(
-        images=[{
+    return templates.TemplateResponse(
+        request=request,
+        name="gallery.html",
+        context={"images": [{
             'path': pic['SourceFile'],
             'src': f"/api/image?path={pic['SourceFile']}",
             'date': pic['DateTimeOriginal'].split(' ')[0].replace(':', '/'),
         }
             for pic in sorted(pics, key=lambda x: x['DateTimeOriginal'], reverse=True)
-        ]
+        ]}
     )
 
-    return
+
+@app.get("/random")
+async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
+    pics = exif.dataframe()
+    if len(pics) > n:
+        pics = pics.sample(n=n)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="gallery.html",
+        context={
+            "images": pics.assign(
+                date=pics['DateTimeOriginal'].map(
+                    lambda d: d.split(' ')[0].replace(':', '/')
+                )
+            ).sort_values(
+                by='DateTimeOriginal',
+                ascending=False
+            ).to_dict(orient='records')
+        }
+    )
+
+
+@app.get("/")
+async def _index(request: Request, response_class=HTMLResponse):
+    return RedirectResponse(url=request.url_for('_random'))
