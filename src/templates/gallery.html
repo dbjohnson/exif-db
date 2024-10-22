@@ -44,13 +44,13 @@
       style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
     >
       <button
-        onclick="window.location.href='{{ url_for('_random') }}'"
+        onclick="window.location.href='/random'"
         style="border:2px solid #ddd;"
       >
         Random photos
       </button>
       <button
-        onclick="window.location.href='{{ url_for('_onthisday') }}'"
+        onclick="window.location.href='/onthisday'"
         style="border:2px solid #ddd;"
       >
         Photos from this date
@@ -59,20 +59,20 @@
     {% for im in images %}
     <div class="image-container">
       <img
-        src="{{ url_for('_image', path=im['SourceFile']) }}"
+        src="/api/image{{ im['SourceFile'] }}"
         alt="{{ im['SourceFile'] }}"
       />
       <div class="badge">
         <span>{{ im['date'] }}</span>
         <span>{{ im['title'] }}</span>
         <button
-          onclick="downloadImage('{{ url_for('_image', path=im['SourceFile']) }}')"
+          onclick="downloadImage('/api/image{{ im['SourceFile'] }}')"
           title="Download original"
         >
           <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
         </button>
         <button
-          onclick="deleteImage('{{ url_for('_delete_image', path=im['SourceFile']) }}', this)"
+          onclick="deleteImage('/api/image{{ im['SourceFile'] }}', this)"
           title="Permanent delete"
         >
           <i class="fa fa-trash-o" aria-hidden="true"></i>

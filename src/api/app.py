@@ -14,9 +14,7 @@ from fastapi.templating import Jinja2Templates
 from api import exif
 
 
-app = FastAPI(
-    root_path=os.getenv('ROOT_PATH'),
-)
+app = FastAPI()
 app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
 templates = Jinja2Templates(directory="templates")
 exif.load_csv()
