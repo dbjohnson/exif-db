@@ -42,14 +42,17 @@ def update_available():
 
 
 def dataframe(query='select * from exif'):
+    load_csv()
     return db.execute(query).df()
 
 
 def tags():
+    load_csv()
     return db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
 
 
 def delete_image(path):
+    load_csv()
     db.execute(
         f"""
         COPY (
@@ -67,6 +70,7 @@ def prune_deleted():
     """
     Remove rows for files that have been deleted or moved
     """
+    load_csv()
     db.execute(
         f"""
         COPY (
@@ -81,6 +85,7 @@ def prune_deleted():
 
 
 def select_by_date(datestring):
+    load_csv()
     return db.execute(
         f"""
         SELECT * FROM exif
