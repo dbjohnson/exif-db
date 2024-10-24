@@ -4,8 +4,7 @@ EXIF_CSV="/storage/exif.csv"
 TAGS_FILE=$(dirname "$(realpath "$0")")/tags.txt
 
 if [ -f ${EXIF_CSV} ]; then
-    # find /photo -type f -newer ${EXIF_CSV} -exec \
-    find /photo -exec \
+    find /photo -not -path '*/[@.]*' -type f -newer ${EXIF_CSV} -exec \
         exiftool -@ "${TAGS_FILE}" -i @eaDir -fast -n -api "missingtagvalue^=" -csv {} \; \
         | tail -n +2 >> "${EXIF_CSV}"
 else
