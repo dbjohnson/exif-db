@@ -16,18 +16,23 @@ def load_csv(force_reload=False):
         db.execute(
             """
             CREATE OR REPLACE TABLE exif AS
-            SELECT *, ?::TIMESTAMP AS last_modified
+            SELECT *
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
             AND DateTimeOriginal IS NOT NULL
             QUALIFY
             ROW_NUMBER() OVER (PARTITION BY SourceFile ORDER BY FileAccessDate DESC) = 1;
             """,
-            [
-                last_modified(),
-                EXIF_CSV
-            ]
+            [EXIF_CSV]
         )
+        db.execute(
+            """
+            UPDATE exif
+            SET last_modified = ?::TIMESTAMP
+            """,
+            [last_modified()]
+        )
+
 
 
 def last_modified():
