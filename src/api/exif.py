@@ -14,25 +14,20 @@ def load_csv(force_reload=False):
     # Load the CSV data into a DuckDB table, and keep only the last row for each file
     if force_reload or update_available():
         db.execute(
-            """
+            f"""
             CREATE OR REPLACE TABLE exif AS
-            SELECT *
+            SELECT *, ?::TIMESTAMP last_modified
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
             AND DateTimeOriginal IS NOT NULL
             QUALIFY
             ROW_NUMBER() OVER (PARTITION BY SourceFile ORDER BY FileAccessDate DESC) = 1;
             """,
-            [EXIF_CSV]
+            [
+                last_modified(),
+                EXIF_CSV
+            ]
         )
-        db.execute(
-            """
-            UPDATE exif
-            SET last_modified = ?::TIMESTAMP
-            """,
-            [last_modified()]
-        )
-
 
 
 def last_modified():
@@ -53,22 +48,28 @@ def dataframe(query='select * from exif'):
 
 def tags():
     load_csv()
-    return db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
+    return [
+        col 
+        for col in db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
+        if col != 'last_modified'
+    ]
 
 
 def delete_image(path):
     load_csv()
     db.execute(
-        f"""
+        """
         COPY (
-            SELECT * FROM exif
+            SELECT {} FROM exif
             WHERE SourceFile <> ?
         )
-        TO '{EXIF_CSV}' (HEADER, DELIMITER ',')
-        """,
+        TO '{}' (HEADER, DELIMITER ',')
+        """.format(
+            ",".join(tags()),
+            EXIF_CSV
+        ),
         [path]
     )
-    load_csv()
 
 
 def prune_deleted():
@@ -77,13 +78,16 @@ def prune_deleted():
     """
     load_csv()
     db.execute(
-        f"""
+        """
         COPY (
-            SELECT * FROM exif
+            SELECT {} FROM exif
             WHERE SourceFile IN ?
         )
-        TO '{EXIF_CSV}' (HEADER, DELIMITER ',')
-        """,
+        TO '{}' (HEADER, DELIMITER ',')
+        """.format(
+            ",".join(tags()),
+            EXIF_CSV
+        ),
         [glob.glob(f"{LIBRARY_ROOT}/**/*", recursive=True)]
     )
     load_csv()
