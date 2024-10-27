@@ -1,4 +1,3 @@
--SourceFile
 -Aperture
 -ApertureValue
 -CircleOfConfusion
