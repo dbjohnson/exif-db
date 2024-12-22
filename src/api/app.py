@@ -151,6 +151,29 @@ async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
     )
 
 
+@app.get("/kiosk")
+async def _kiosk(request: Request, refresh_secs: int = 300):
+    date = datetime.date.today()
+    while True:
+        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
+        if len(pics) > 0:
+            break
+        date = date - datetime.timedelta(days=1)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="kiosk.html",
+        context={
+            "refresh_secs": refresh_secs,
+            "image": pics.sample(n=1).assign(
+                date=pics['DateTimeOriginal'].map(
+                    lambda d: d.split(' ')[0].replace(':', '/')
+                )
+            ).to_dict(orient='records')[0]
+        }
+    )
+
+
 @app.get("/")
 async def _index(request: Request, response_class=HTMLResponse):
     return RedirectResponse(url=request.url_for('_random'))

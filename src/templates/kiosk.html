@@ -1,0 +1,53 @@
+<html>
+  <head>
+    <title>Exif DB</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="refresh" content="{{refresh_secs}}">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/kiosk.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+      function deleteImage(href, button) {
+        if (confirm('Are you sure you want to delete this image?')) {
+          fetch(href, {
+            method: 'DELETE'
+          })
+          .then(response=>{
+            if (!response.ok) {
+              throw new Error('Network response was not ok. Status: ' + response.status);
+            }
+            return response.json()
+          })
+          .then(data => {
+            console.log('Success:', data);
+            button.closest('.image-container').remove();
+          })
+          .catch((error) => {
+            console.log(error)
+            alert(error);
+          })
+        }
+      }
+    </script>
+  </head>
+  <body style="background-color:#000">
+    <div class="image-container">
+      <img
+        src="/api/image{{ image['SourceFile'] }}"
+        alt="{{ image['SourceFile'] }}"
+		style="height:100%;width:100%"
+      />
+      <div class="badge">
+        <span>{{ image['date'] }}</span>
+        <span>{{ image['title'] }}</span>
+        <button
+          onclick="deleteImage('/api/image{{ image['SourceFile'] }}', this)"
+          title="Permanent delete"
+        >
+          <i class="fa fa-trash-o" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+  </body>
+</html>
