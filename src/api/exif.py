@@ -22,13 +22,13 @@ def load_csv(force_reload=False):
             AND DateTimeOriginal IS NOT NULL
             -- prefer JPEGs, then PNGs, then HEICs, then everything else
             QUALIFY ROW_NUMBER() OVER (
-               PARTITION BY LOWER(REGEXP_REPLACE(SourceFile, '\\.[^.]*$', ''))
+               PARTITION BY LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', ''))
                ORDER BY CASE FileType
-                            WHEN 'JPEG' THEN 1
-                            WHEN 'PNG'  THEN 2
-                            WHEN 'HEIC' THEN 3
-                            ELSE 4
-                        END
+                    WHEN 'JPEG' THEN 1
+                    WHEN 'PNG'  THEN 2
+                    WHEN 'HEIC' THEN 3
+                    ELSE 4
+                END
             ) = 1;
             """,
             [
