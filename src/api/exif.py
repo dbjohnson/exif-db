@@ -14,14 +14,22 @@ def load_csv(force_reload=False):
     # Load the CSV data into a DuckDB table, and keep only the last row for each file
     if force_reload or update_available():
         db.execute(
-            f"""
+            """
             CREATE OR REPLACE TABLE exif AS
             SELECT *, ?::TIMESTAMP last_modified
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
             AND DateTimeOriginal IS NOT NULL
-            QUALIFY
-            ROW_NUMBER() OVER (PARTITION BY SourceFile ORDER BY FileAccessDate DESC) = 1;
+            -- prefer JPEGs, then PNGs, then HEICs, then everything else
+            QUALIFY ROW_NUMBER() OVER (
+               PARTITION BY LOWER(REGEXP_REPLACE(SourceFile, '\\.[^.]*$', ''))
+               ORDER BY CASE FileType
+                            WHEN 'JPEG' THEN 1
+                            WHEN 'PNG'  THEN 2
+                            WHEN 'HEIC' THEN 3
+                            ELSE 4
+                        END
+            ) = 1;
             """,
             [
                 last_modified(),
@@ -49,7 +57,7 @@ def dataframe(query='select * from exif'):
 def tags():
     load_csv()
     return [
-        col 
+        col
         for col in db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
         if col != 'last_modified'
     ]

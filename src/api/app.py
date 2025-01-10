@@ -1,6 +1,7 @@
 import os
 import shutil
 import datetime
+import glob
 from io import BytesIO
 
 import rawpy
@@ -39,7 +40,9 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
         # move file to deleted directory (user can then permanently delete)
         deleted_dir = '/storage/deleted'
         os.makedirs(deleted_dir, exist_ok=True)
-        shutil.move(path, os.path.join(deleted_dir, os.path.basename(path)))
+        # assume any files differing only by extension should also be deleted
+        for f in glob.glob(f"{os.path.splitext(path)[0]}.*"):
+            shutil.move(f, os.path.join(deleted_dir, os.path.basename(f)))
 
     background_tasks.add_task(delete)
 
