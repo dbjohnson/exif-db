@@ -7,6 +7,7 @@ body, html {
   justify-content: center;
   background-color: #000;
   font-family: Arial, sans-serif;
+  font-size: 24px;
 }
 
 .image-container {
@@ -28,20 +29,20 @@ img {
   position: absolute;
   top: 5px;
   left: 5px;
-  color: #ddd;
   background-color: rgba(0, 0, 0, 0.5);
   padding: 5px;
   border-radius: 6px;
   opacity: 1;
+  color: #888;
 }
 
 button {
   background-color: rgba(0, 0, 0, 0.5);
-  color: #ddd;
   border: none;
   padding: 8px;
   text-align: center;
   display: inline-block;
   border-radius: 6px;
   cursor: pointer;
+  color: #888;
 }

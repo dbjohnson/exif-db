@@ -168,11 +168,13 @@ async def _kiosk(request: Request, refresh_secs: int = 300):
         name="kiosk.html",
         context={
             "refresh_secs": refresh_secs,
-            "image": pics.sample(n=1).assign(
+            "images": pics.assign(
                 date=pics['DateTimeOriginal'].map(
                     lambda d: d.split(' ')[0].replace(':', '/')
                 )
-            ).to_dict(orient='records')[0]
+            )[[
+                'SourceFile', 'date'
+            ]].to_dict(orient='records')
         }
     )
 
