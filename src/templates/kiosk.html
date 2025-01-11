@@ -12,12 +12,13 @@
       let images = {{ images | tojson }};
 
       function deleteImage(button) {
-		// protect against race condition if image refreshes while waiting
-		// for user confirmation
-	    const deleteIndex = currentIndex;
+        // protect against race condition if image refreshes while waiting
+        // for user confirmation
+        const deleteIndex = currentIndex;
+        const path = images[deleteIndex].SourceFile;
         if (confirm('Are you sure you want to delete this image?')) {
           fetch(
-            `/api/image${images[deleteIndex].SourceFile}`, {
+            `/api/image${path}`, {
             method: 'DELETE'
           })
           .then(response=>{
@@ -29,8 +30,8 @@
           .then(data => {
              // remove image from list
              images.splice(deleteIndex, 1);
-			 // get a new one
-			 refreshImage();
+             // get a new one
+             refreshImage();
           })
           .catch((error) => {
             console.log(error)
@@ -47,8 +48,15 @@
         tempImg.src = `/api/image${image.SourceFile}`;
         // When it loads, swap it in
         tempImg.onload = () => {
-          document.getElementById("date").textContent = image.date;
-          document.getElementById("img").src = tempImg.src;
+          // fade transition
+          let im = document.getElementById("img");
+          im.classList.add("hidden");
+          // fade back in after transition time
+          setTimeout(() => {
+            im.src = tempImg.src;
+            im.classList.remove("hidden");
+            document.getElementById("date").textContent = image.date;
+          }, 200)
         };
       }
 

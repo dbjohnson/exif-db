@@ -155,26 +155,33 @@ async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
 
 
 @app.get("/kiosk")
-async def _kiosk(request: Request, refresh_secs: int = 300):
+async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 100):
     date = datetime.date.today()
-    while True:
-        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
-        if len(pics) > 0:
-            break
-        date = date - datetime.timedelta(days=1)
+    pics = []
+    offs = 0
+    while len(pics) < min_pics and offs < 10:
+        for sign in (-1, 1):
+            dt = date + datetime.timedelta(days=offs * sign)
+            df = exif.select_by_date(f"%{dt.month:02d}:{dt.day:02d} ")
+            if len(df):
+                df = df.assign(
+                    date=df['DateTimeOriginal'].map(
+                        lambda d: d.split(' ')[0].replace(':', '/')
+                    )
+                )[[
+                    'SourceFile', 'date'
+                ]]
+                pics.extend(
+                    df.to_dict(orient='records')
+                )
+        offs += 1
 
     return templates.TemplateResponse(
         request=request,
         name="kiosk.html",
         context={
             "refresh_secs": refresh_secs,
-            "images": pics.assign(
-                date=pics['DateTimeOriginal'].map(
-                    lambda d: d.split(' ')[0].replace(':', '/')
-                )
-            )[[
-                'SourceFile', 'date'
-            ]].to_dict(orient='records')
+            "images": pics
         }
     )
 
