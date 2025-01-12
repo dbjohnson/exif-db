@@ -155,12 +155,14 @@ async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
 
 
 @app.get("/kiosk")
-async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 100):
+async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
     date = datetime.date.today()
     pics = []
     offs = 0
+    # search up to +/- 10 days for images until we get to the minimum
+    # number requested
     while len(pics) < min_pics and offs < 10:
-        for sign in (-1, 1):
+        for sign in (-1, 1) if offs else (1,):
             dt = date + datetime.timedelta(days=offs * sign)
             df = exif.select_by_date(f"%{dt.month:02d}:{dt.day:02d} ")
             if len(df):
