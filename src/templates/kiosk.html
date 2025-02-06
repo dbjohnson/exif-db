@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script>
       let currentIndex = 0;
+      let timeoutId = undefined;
       let images = {{ images | tojson }};
 
       function deleteImage(button) {
@@ -58,13 +59,17 @@
             document.getElementById("date").textContent = image.date;
           }, 200)
         };
+
+        // cancel existing timeout in case the user pressed fast forward
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
+        // reload after defined interval
+        timeoutId = setTimeout(refreshImage, {{ refresh_secs * 1000 }});
       }
 
       // Load the image once on page load
       refreshImage();
-      // Then refresh every 15 seconds
-      setInterval(refreshImage, {{ refresh_secs * 1000 }});
-
     </script>
   </head>
   <body style="background-color:#000">
@@ -82,6 +87,13 @@
         >
           <i class="fa fa-trash-o fa-2x" aria-hidden="true"></i>
         </button>
+        <button
+          onclick="refreshImage()"
+          title="Next image"
+        >
+          <i class="fa fa-fast-forward fa-2x" aria-hidden="true"></i>
+          <i class="fa fa-trash-o fa-2x" aria-hidden="true"></i>
+        </button>        
       </div>
     </div>
   </body>
