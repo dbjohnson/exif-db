@@ -48,7 +48,7 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(delete)
 
 # not concerned about cross worker caching, etc.
-@lru_cache(maxsize=100)
+@lru_cache(maxsize=1000)
 @app.get("/api/image{path:path}")
 async def _image(request: Request, path: str):
     extension = path.split('.')[-1].upper()
