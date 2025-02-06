@@ -3,6 +3,7 @@ import shutil
 import datetime
 import glob
 from io import BytesIO
+from functools import lru_cache
 
 import rawpy
 import pyheif
@@ -46,7 +47,8 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(delete)
 
-
+# not concerned about cross worker caching, etc.
+@lru_cache(maxsize=100)
 @app.get("/api/image{path:path}")
 async def _image(request: Request, path: str):
     extension = path.split('.')[-1].upper()
@@ -109,7 +111,8 @@ async def _dump():
 @app.get("/onthisday")
 async def _onthisday(request: Request, month: int = -1, day: int = -1, n: int = DEFAULT_NUM_IMAGES):
     if min(month, day) > 0:
-        date = datetime.date(month=month, day=day, year=datetime.date.today().year)
+        today = datetime.date.today()
+        date = datetime.date(month=month, day=day, year=today.year)
     else:
         date = datetime.date.today()
     pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
