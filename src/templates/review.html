@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Review photos</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+      const QUERY = {{ query | tojson }};
+      const DONE_URL = {{ done_url | tojson }};
+      // the normal queue starts with everything approved; hidden photos start unchanged
+      const RESTORING = QUERY.status === 'rejected';
+      const GAP = 6;
+      // aim for about this many photos on screen, within sensible thumbnail sizes
+      const TARGET_PHOTOS = 24;
+      const MIN_THUMB = 110;
+      const MAX_THUMB = 280;
+
+      let offset = 0;
+      let limit = 0;
+      let total = 0;
+      let items = [];
+      let latestLoad = 0;
+      // photos the user has changed from the default, kept when moving between pages
+      const flipped = new Set();
+
+      const isChecked = id => flipped.has(id) === RESTORING;
+      const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
+      const pageUrl = (start, count) => '/api/review?' + new URLSearchParams({...QUERY, offset: start, limit: count});
+
+      function fitPage() {
+        const grid = document.getElementById('grid');
+        const width = grid.clientWidth;
+        const height = grid.clientHeight;
+        const target = Math.min(MAX_THUMB, Math.max(MIN_THUMB, Math.sqrt(width * height / TARGET_PHOTOS)));
+        const columns = Math.max(1, Math.floor((width + GAP) / (target + GAP)));
+        const cell = (width - GAP * (columns - 1)) / columns;
+        const rows = Math.max(1, Math.floor((height + GAP) / (cell + GAP)));
+        grid.style.setProperty('--columns', columns);
+        return columns * rows;
+      }
+
+      function showError(message) {
+        document.getElementById('error').textContent = message;
+      }
+
+      function renderActions() {
+        const checked = items.filter(item => isChecked(item.id)).length;
+        const unchecked = items.length - checked;
+        const save = document.getElementById('save');
+        const parts = [];
+        if (RESTORING) {
+          parts.push(`Restore ${checked}`);
+        } else {
+          if (checked) parts.push(`Approve ${checked}`);
+          if (unchecked) parts.push(`hide ${unchecked}`);
+        }
+        const label = parts.join(', ');
+        save.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+        save.disabled = !items.length || (RESTORING && !checked);
+        document.getElementById('toggle-all').textContent = checked ? 'Uncheck all' : 'Check all';
+        document.getElementById('previous').disabled = offset === 0;
+        document.getElementById('next').disabled = offset + items.length >= total;
+        document.getElementById('summary').textContent = items.length
+          ? `{{ scope }} · ${offset + 1}–${offset + items.length} of ${total.toLocaleString()}`
+          : '{{ scope }}';
+      }
+
+      function setChecked(id, checked) {
+        if (checked === RESTORING) {
+          flipped.add(id);
+        } else {
+          flipped.delete(id);
+        }
+      }
+
+      function renderItem(item) {
+        const label = document.createElement('label');
+        label.className = 'review-item';
+
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = isChecked(item.id);
+        box.setAttribute('aria-label', item.path);
+        box.onchange = () => {
+          setChecked(item.id, box.checked);
+          renderActions();
+        };
+
+        const image = document.createElement('img');
+        image.alt = '';
+        image.src = `/api/thumb${encodePath(item.path)}`;
+        image.onerror = () => {
+          image.style.display = 'none';
+          const message = document.createElement('span');
+          message.className = 'no-preview';
+          message.textContent = `No preview: ${item.path.split('/').pop()}`;
+          label.appendChild(message);
+        };
+
+        const check = document.createElement('span');
+        check.className = 'check';
+        check.textContent = '✓';
+
+        const date = document.createElement('span');
+        date.className = 'date';
+        date.textContent = item.date;
+
+        const zoom = document.createElement('a');
+        zoom.className = 'zoom';
+        zoom.href = `/api/image${encodePath(item.path)}`;
+        zoom.target = '_blank';
+        zoom.rel = 'noopener';
+        zoom.title = 'Open full size';
+        zoom.textContent = '⤢';
+
+        label.append(box, image, check, date, zoom);
+        return label;
+      }
+
+      // the first view of a thumbnail is slow while the NAS makes it, so make the next
+      // page's ahead of time, once the current page is finished with the connection
+      async function prepareNextPage(load, images) {
+        await Promise.allSettled(images.map(image => image.decode()));
+        if (load !== latestLoad || offset + items.length >= total) {
+          return;
+        }
+        const response = await fetch(pageUrl(offset + items.length, limit));
+        if (response.ok && load === latestLoad) {
+          for (const item of (await response.json()).items) {
+            new Image().src = `/api/thumb${encodePath(item.path)}`;
+          }
+        }
+      }
+
+      async function load() {
+        const thisLoad = ++latestLoad;
+        showError('');
+        try {
+          const response = await fetch(pageUrl(offset, limit));
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          const page = await response.json();
+          if (thisLoad !== latestLoad) {
+            return;
+          }
+          if (!page.total) {
+            window.location.href = DONE_URL;
+            return;
+          }
+          ({total, offset, items} = page);
+          const grid = document.getElementById('grid');
+          grid.replaceChildren(...items.map(renderItem));
+          grid.scrollTop = 0;
+          renderActions();
+          prepareNextPage(thisLoad, [...grid.querySelectorAll('img')]);
+        } catch (error) {
+          showError(`Couldn't load photos: ${error.message}`);
+        }
+      }
+
+      async function save() {
+        const button = document.getElementById('save');
+        button.disabled = true;
+        showError('');
+        const checked = items.filter(item => isChecked(item.id)).map(item => item.id);
+        const unchecked = items.filter(item => !isChecked(item.id)).map(item => item.id);
+        try {
+          const response = await fetch('/api/review', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({approved: checked, rejected: RESTORING ? [] : unchecked})
+          });
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          checked.forEach(id => flipped.delete(id));
+          if (!RESTORING) {
+            unchecked.forEach(id => flipped.delete(id));
+          }
+          // saved photos leave the queue, so the next ones move up to this offset
+          await load();
+        } catch (error) {
+          showError(`Couldn't save: ${error.message}`);
+          button.disabled = false;
+        }
+      }
+
+      function toggleAll() {
+        const check = !items.some(item => isChecked(item.id));
+        items.forEach(item => setChecked(item.id, check));
+        document.querySelectorAll('#grid input').forEach(box => box.checked = check);
+        renderActions();
+      }
+
+      function move(direction) {
+        offset = Math.max(0, offset + direction * limit);
+        load();
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        limit = fitPage();
+        load();
+      });
+
+      let resizeTimeout;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+          const fitted = fitPage();
+          if (fitted !== limit) {
+            limit = fitted;
+            load();
+          }
+        }, 200);
+      });
+    </script>
+  </head>
+  <body class="review-page">
+    <div class="review-header">
+      <a href="{{ done_url }}">‹ Back</a>
+      <span id="summary">Loading…</span>
+      <button id="toggle-all" onclick="toggleAll()">Uncheck all</button>
+    </div>
+    <div id="grid" class="review-grid"></div>
+    <div id="error" class="review-error" role="alert"></div>
+    <div class="review-footer">
+      <button id="previous" onclick="move(-1)" disabled>‹ Previous</button>
+      <button id="save" onclick="save()" disabled>Approve</button>
+      <button id="next" onclick="move(1)" disabled>Skip ›</button>
+    </div>
+  </body>
+</html>

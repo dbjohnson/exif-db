@@ -102,6 +102,262 @@ button:hover {
   color: #888;
 }
 
+.favorite-toggle[aria-pressed="true"] {
+  color: #e5566d;
+}
+
+/* stands in for the photos on a day with none to show, dimmed so text stays readable */
+.day-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.4;
+}
+
+.with-background .date-controls,
+.with-background .date-controls input[type="date"],
+.with-background .hidden-link,
+.with-background .review-badge,
+.with-background .review-cta p,
+.with-background .no-images {
+  color: #ddd;
+  text-shadow: 0 1px 3px #000;
+}
+
+.review-badge,
+.hidden-link {
+  color: #888;
+  text-decoration: none;
+}
+
+.review-badge {
+  padding: 2px 8px;
+  border: 1px solid #555;
+  border-radius: 10px;
+  color: #bbb;
+}
+
+.review-badge:hover,
+.hidden-link:hover {
+  color: #ddd;
+  border-color: #888;
+}
+
+.review-cta {
+  margin: 60px 16px;
+  text-align: center;
+  color: #888;
+  font-size: 16px;
+}
+
+.review-cta p {
+  margin: 0 0 20px;
+}
+
+.review-cta a {
+  display: inline-block;
+  padding: 24px 48px;
+  border-radius: 12px;
+  background: #ddd;
+  color: #000;
+  font-size: 26px;
+  font-weight: bold;
+  text-decoration: none;
+  transition: background-color 0.3s;
+}
+
+.review-cta a:hover {
+  background: #fff;
+}
+
+.review-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: #000;
+  color: #ddd;
+}
+
+.review-header,
+.review-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+
+.review-header {
+  font-size: 14px;
+}
+
+.review-header a {
+  color: #888;
+  text-decoration: none;
+}
+
+.review-header a:hover {
+  color: #ddd;
+}
+
+#summary {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  color: #aaa;
+}
+
+.review-header button,
+.review-footer button {
+  border: 1px solid #666;
+}
+
+.review-footer {
+  justify-content: space-between;
+}
+
+.review-footer button:disabled {
+  border-color: #333;
+  color: #555;
+  cursor: default;
+}
+
+.review-footer #save {
+  flex: 1;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 12px;
+  border-color: #ddd;
+  background: #ddd;
+  color: #000;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.review-footer #save:hover {
+  background: #fff;
+}
+
+.review-footer #save:disabled {
+  background: #333;
+  border-color: #333;
+  color: #777;
+}
+
+.review-error {
+  flex: none;
+  color: #e88;
+  font-size: 14px;
+  text-align: center;
+}
+
+.review-grid {
+  --gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 3), 1fr);
+  gap: var(--gap);
+  align-content: start;
+  margin: 0 8px;
+}
+
+.review-item {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #151515;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.review-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: opacity 0.1s;
+}
+
+.review-item input {
+  position: absolute;
+  opacity: 0;
+}
+
+.review-item .check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: #2a7de1;
+  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.review-item input:not(:checked) ~ img {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+.review-item input:not(:checked) ~ .check {
+  background: rgba(0, 0, 0, 0.5);
+  border-color: #888;
+  color: transparent;
+}
+
+.review-item input:focus-visible ~ .check {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.review-item .date,
+.review-item .zoom {
+  position: absolute;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ccc;
+  font-size: 10px;
+}
+
+.review-item .date {
+  left: 3px;
+}
+
+.review-item .zoom {
+  right: 3px;
+  padding: 4px 8px;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.review-item .no-preview {
+  position: absolute;
+  inset: 0;
+  padding: 34px 8px 8px;
+  color: #888;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .manage {
   box-sizing: border-box;
   width: 100%;
@@ -152,6 +408,18 @@ button:hover {
   border-color: #444;
   color: #666;
   cursor: default;
+}
+
+.manage .link-button {
+  padding: 8px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  color: #ddd;
+  text-decoration: none;
+}
+
+.manage .link-button[hidden] {
+  display: none;
 }
 
 .manage .hint {
@@ -223,6 +491,9 @@ button:hover {
 }
 
 @media (max-width: 768px) {
+  .review-footer button {
+    min-height: 44px;
+  }
   .badge, button {
     padding: 5px 10px;
     font-size: 14px;

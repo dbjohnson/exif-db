@@ -29,6 +29,13 @@
           ? `${current ? current.mode + ' scan' : 'scan'} running${current ? ' since ' + formatTime(current.started) : ''}`
           : 'idle';
         document.getElementById('indexed').textContent = status.indexed_photos.toLocaleString();
+        document.getElementById('approved').textContent = status.reviews.approved.toLocaleString();
+        const toReview = document.getElementById('to-review');
+        toReview.textContent = `${status.reviews.unreviewed.toLocaleString()} to review`;
+        toReview.hidden = !status.reviews.unreviewed;
+        const hidden = document.getElementById('hidden');
+        hidden.textContent = `${status.reviews.rejected.toLocaleString()} hidden`;
+        hidden.hidden = !status.reviews.rejected;
         document.getElementById('result').textContent = formatResult(status.last_result);
         document.getElementById('next').textContent = status.next_scan ? formatTime(status.next_scan) : 'not scheduled';
 
@@ -107,14 +114,22 @@
       <dl>
         <dt>Status</dt>
         <dd id="state">Loading…</dd>
-        <dt>Photos shown</dt>
+        <dt>Photos indexed</dt>
         <dd id="indexed"></dd>
+        <dt>Photos approved</dt>
+        <dd id="approved"></dd>
         <dt>Last scan</dt>
         <dd id="result"></dd>
         <dt>Next scan</dt>
         <dd id="next"></dd>
       </dl>
       <progress id="progress" hidden></progress>
+
+      <h2>Review</h2>
+      <div class="actions">
+        <a id="to-review" class="link-button" href="/review" hidden></a>
+        <a id="hidden" class="link-button" href="/review?status=rejected" hidden></a>
+      </div>
 
       <h2>Run</h2>
       <div class="actions">

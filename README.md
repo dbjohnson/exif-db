@@ -24,3 +24,11 @@ Start webservice / API
 ```bash
 docker compose up -d
 ```
+
+## Reviewing photos
+
+Only approved photos appear in the gallery and kiosk.  New photos start unreviewed: a date with some shows a link to review them, and `/manage` links to everything awaiting review.  Photos left unchecked in the review grid are hidden, not deleted, and can be restored from the same links.
+
+Decisions are stored in `reviews.csv` in the storage volume, and survive a full rebuild.  Review thumbnails are cached in `thumbs/` in the storage volume, which is safe to delete.
+
+Approved photos can be favorited from the gallery or kiosk (stored in `favorites.csv`).  A date with no approved photos uses a random favorite as its background, or any approved photo if there are no favorites.

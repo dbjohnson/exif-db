@@ -3,30 +3,44 @@ import fcntl
 import os
 import datetime
 import glob
+import time
 
 import duckdb
 
 
 LIBRARY_ROOT = '/photo'
 EXIF_CSV = '/storage/exif.csv'
+# append-only logs of "<photo_id>,<value>,<time>"; the latest row for a photo wins
+REVIEWS_CSV = '/storage/reviews.csv'
+FAVORITES_CSV = '/storage/favorites.csv'
+APPROVED = 'approved'
+REJECTED = 'rejected'
+UNREVIEWED = 'unreviewed'
+FAVORITE = 'favorite'
+NOT_FAVORITE = 'not_favorite'
 db = duckdb.connect(database=':memory:', read_only=False)
+_log_sizes = {}
 
 
 def load_csv(force_reload=False):
     # Load the CSV data into a DuckDB table, and keep only one row for each photo.
     # Copies / alternate formats of a photo share a base name and capture time;
-    # base names alone are reused by cameras and phones
+    # base names alone are reused by cameras and phones.  Reviews are keyed on this
+    # identity rather than a path, since which copy is kept can change between loads
     if force_reload or update_available():
         db.execute(
             """
             CREATE OR REPLACE TABLE exif AS
-            SELECT *, ?::TIMESTAMP last_modified
+            SELECT
+                *,
+                ?::TIMESTAMP last_modified,
+                LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', '')) || '|' || DateTimeOriginal AS photo_id
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
             AND DateTimeOriginal IS NOT NULL
             -- prefer JPEGs, then PNGs, then HEICs, then everything else
             QUALIFY ROW_NUMBER() OVER (
-               PARTITION BY LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', '')), DateTimeOriginal
+               PARTITION BY photo_id
                ORDER BY CASE FileType
                     WHEN 'JPEG' THEN 1
                     WHEN 'PNG'  THEN 2
@@ -69,7 +83,7 @@ def tags():
     return [
         col
         for col in db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
-        if col != 'last_modified'
+        if col not in ('last_modified', 'photo_id')
     ]
 
 
@@ -106,11 +120,137 @@ def prune_deleted():
     load_csv()
 
 
-def select_by_date(datestring):
+def _load_log(table, path):
+    # logs are shared between workers and only ever grow, so a log's size says whether
+    # another worker has written to it since this one last read it
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    if size == _log_sizes.get(table):
+        return
+    if size:
+        db.execute(
+            f"""
+            CREATE OR REPLACE TABLE {table} AS
+            SELECT photo_id, value
+            FROM read_csv(
+                ?,
+                header=false,
+                delim=',',
+                quote='"',
+                escape='"',
+                columns={{'photo_id': 'VARCHAR', 'value': 'VARCHAR', 'decided_ns': 'BIGINT'}},
+                ignore_errors=true
+            )
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY photo_id ORDER BY decided_ns DESC) = 1;
+            """,
+            [path]
+        )
+    else:
+        db.execute(f"CREATE OR REPLACE TABLE {table} (photo_id VARCHAR, value VARCHAR)")
+    _log_sizes[table] = size
+
+
+def _append_log(path, rows):
+    with open(path, 'a', newline='', encoding='utf-8') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        # taken under the lock, so timestamps follow the order rows were written
+        now = time.time_ns()
+        writer = csv.writer(fh, lineterminator='\n')
+        writer.writerows((photo_id, value, now) for photo_id, value in rows)
+
+
+def record_reviews(approved=(), rejected=()):
+    _append_log(
+        REVIEWS_CSV,
+        [
+            *((photo_id, APPROVED) for photo_id in approved),
+            *((photo_id, REJECTED) for photo_id in rejected)
+        ]
+    )
+
+
+def set_favorite(photo_id, favorite):
+    _append_log(FAVORITES_CSV, [(photo_id, FAVORITE if favorite else NOT_FAVORITE)])
+
+
+def _with_status():
     load_csv()
+    _load_log('reviews', REVIEWS_CSV)
+    _load_log('favorites', FAVORITES_CSV)
+    return f"""
+        (
+            SELECT
+                exif.*,
+                COALESCE(reviews.value, '{UNREVIEWED}') AS review_status,
+                COALESCE(favorites.value = '{FAVORITE}', false) AS favorite
+            FROM exif
+            LEFT JOIN reviews USING (photo_id)
+            LEFT JOIN favorites USING (photo_id)
+        )
+    """
+
+
+def background_photo():
+    """
+    A photo to stand in on a page with nothing to show: a random favorite, or failing
+    that any approved photo.  A favorite that has since been hidden doesn't qualify
+    """
+    row = db.execute(
+        f"""
+        SELECT SourceFile FROM {_with_status()}
+        WHERE review_status = ?
+        ORDER BY favorite DESC, random()
+        LIMIT 1
+        """,
+        [APPROVED]
+    ).fetchone()
+    return row[0] if row else None
+
+
+def select_photos(datestring='', status=APPROVED):
     return db.execute(
         f"""
-        SELECT * FROM exif
-        WHERE DateTimeOriginal LIKE '{datestring}%'
+        SELECT * FROM {_with_status()}
+        WHERE DateTimeOriginal LIKE ? AND review_status = ?
         """,
+        [f"{datestring}%", status]
     ).df()
+
+
+def review_counts(datestring=''):
+    rows = db.execute(
+        f"""
+        SELECT review_status, COUNT(*) FROM {_with_status()}
+        WHERE DateTimeOriginal LIKE ?
+        GROUP BY review_status
+        """,
+        [f"{datestring}%"]
+    ).fetchall()
+    return {APPROVED: 0, REJECTED: 0, UNREVIEWED: 0, **dict(rows)}
+
+
+def review_page(datestring, status, offset, limit):
+    table = _with_status()
+    filters = [f"{datestring}%", status]
+    total = db.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE DateTimeOriginal LIKE ? AND review_status = ?",
+        filters
+    ).fetchone()[0]
+    # reviewing shrinks the queue, which can leave the offset past its end
+    offset = min(offset, max(total - limit, 0))
+    rows = db.execute(
+        f"""
+        SELECT photo_id, SourceFile, DateTimeOriginal FROM {table}
+        WHERE DateTimeOriginal LIKE ? AND review_status = ?
+        ORDER BY DateTimeOriginal DESC, photo_id
+        LIMIT ? OFFSET ?
+        """,
+        [*filters, limit, offset]
+    ).fetchall()
+    return {
+        'total': total,
+        'offset': offset,
+        'items': [
+            {'id': photo_id, 'path': path, 'date': taken.split(' ')[0].replace(':', '/')}
+            for photo_id, path, taken in rows
+        ]
+    }

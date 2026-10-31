@@ -11,6 +11,10 @@
       let currentIndex = 0;
       let timeoutId = undefined;
       let images = {{ images | tojson }};
+      // the image on screen, which lags currentIndex while the next one loads
+      let shown = undefined;
+
+      const imageUrl = path => `/api/image${path.split('/').map(encodeURIComponent).join('/')}`;
 
       function deleteImage(button) {
         // protect against race condition if image refreshes while waiting
@@ -19,7 +23,7 @@
         const path = images[deleteIndex].SourceFile;
         if (confirm('Are you sure you want to delete this image?')) {
           fetch(
-            `/api/image${path}`, {
+            imageUrl(path), {
             method: 'DELETE'
           })
           .then(response=>{
@@ -44,12 +48,48 @@
         }
       }
 
+      function renderFavorite() {
+        const button = document.getElementById('favorite');
+        button.setAttribute('aria-pressed', shown.favorite);
+        button.querySelector('i').className = `fa ${shown.favorite ? 'fa-heart' : 'fa-heart-o'} fa-2x`;
+      }
+
+      function toggleFavorite() {
+        const image = shown;
+        if (!image) {
+          return;
+        }
+        const favorite = !image.favorite;
+        fetch('/api/favorite', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({photo_id: image.photo_id, favorite})
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          image.favorite = favorite;
+          if (image === shown) {
+            renderFavorite();
+          }
+        })
+        .catch((error) => {
+          console.log(error)
+          alert(error);
+        })
+      }
+
       function refreshImage() {
+        if (!images.length) {
+          window.location.reload();
+          return;
+        }
         currentIndex += 1;
         currentIndex = currentIndex % images.length;
         let image = images[currentIndex];
         const tempImg = new Image();
-        tempImg.src = `/api/image${image.SourceFile}`;
+        tempImg.src = imageUrl(image.SourceFile);
         // When it loads, swap it in
         tempImg.onload = () => {
           // fade transition
@@ -60,6 +100,8 @@
             im.src = tempImg.src;
             im.classList.remove("hidden");
             document.getElementById("date").textContent = image.date;
+            shown = image;
+            renderFavorite();
           }, 200)
         };
 
@@ -72,10 +114,24 @@
       }
 
       // Load the image once on page load
-      refreshImage();
+      if (images.length) {
+        refreshImage();
+      } else {
+        // pick up photos approved from elsewhere
+        setTimeout(() => window.location.reload(), {{ refresh_secs * 1000 }});
+      }
     </script>
   </head>
   <body style="background-color:#000">
+    {% if not images %}
+    {% if background %}
+    <img class="day-background" src="/api/image{{ background | urlencode }}" alt="" />
+    {% endif %}
+    <div class="no-images">
+      <p>No approved photos around today</p>
+      <a href="{{ review_url }}">Review today's photos</a>
+    </div>
+    {% else %}
     <div class="image-container">
       <img
         id="img"
@@ -84,6 +140,15 @@
       <div class="badge">
         <span id="date"></span>
         <span></span>
+        <button
+          id="favorite"
+          class="favorite-toggle"
+          aria-pressed="false"
+          onclick="toggleFavorite()"
+          title="Favorite"
+        >
+          <i class="fa fa-heart-o fa-2x" aria-hidden="true"></i>
+        </button>
         <button
           onclick="deleteImage(this)"
           title="Permanent delete"
@@ -98,5 +163,6 @@
         </button>        
       </div>
     </div>
+    {% endif %}
   </body>
 </html>

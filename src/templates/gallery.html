@@ -10,7 +10,7 @@
       function downloadImage(href) {
           var downloadLink = document.createElement('a');
           downloadLink.href = href;
-          downloadLink.download = href.split('/').pop();
+          downloadLink.download = decodeURIComponent(href.split('/').pop());
           document.body.appendChild(downloadLink);
           downloadLink.click();
           document.body.removeChild(downloadLink);
@@ -41,6 +41,44 @@
         }
       }
 
+      function hideImage(button) {
+        fetch('/api/review', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({rejected: [button.dataset.photoId]})
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          button.closest('.image-container').remove();
+        })
+        .catch((error) => {
+          console.log(error)
+          alert(error);
+        })
+      }
+
+      function toggleFavorite(button) {
+        const favorite = button.getAttribute('aria-pressed') !== 'true';
+        fetch('/api/favorite', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({photo_id: button.dataset.photoId, favorite})
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          button.setAttribute('aria-pressed', favorite);
+          button.querySelector('i').className = favorite ? 'fa fa-heart' : 'fa fa-heart-o';
+        })
+        .catch((error) => {
+          console.log(error)
+          alert(error);
+        })
+      }
+
       function goToDate() {
         const [year, month, day] = document.getElementById('date-picker').value.split('-').map(Number);
         // ignore partly typed years
@@ -68,7 +106,10 @@
       }
     </script>
   </head>
-  <body style="background-color:#000">
+  <body style="background-color:#000"{% if background %} class="with-background"{% endif %}>
+    {% if background %}
+    <img class="day-background" src="/api/image{{ background | urlencode }}" alt="" />
+    {% endif %}
     <div
       style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
     >
@@ -109,27 +150,58 @@
         />
         <span>include all years</span>
       </label>
+      {% if picked_date and counts.approved and counts.unreviewed %}
+      <a class="review-badge" href="{{ review_url }}">{{ counts.unreviewed }} to review</a>
+      {% endif %}
+      {% if picked_date and counts.rejected %}
+      <a class="hidden-link" href="{{ hidden_url }}">{{ counts.rejected }} hidden</a>
+      {% endif %}
     </div>
-    {% if not images %}
-    <div class="no-images">No photos from this date</div>
+    {% if not counts.approved %}
+      {% if counts.unreviewed %}
+      <div class="review-cta">
+        <p>No approved photos {% if picked_date %}from this date{% else %}yet{% endif %}</p>
+        <a href="{{ review_url }}">Review {{ counts.unreviewed }} photo{{ '' if counts.unreviewed == 1 else 's' }}</a>
+      </div>
+      {% elif counts.rejected %}
+      <div class="no-images">No approved photos {% if picked_date %}from this date{% else %}yet{% endif %}</div>
+      {% else %}
+      <div class="no-images">No photos {% if picked_date %}from this date{% else %}yet{% endif %}</div>
+      {% endif %}
     {% endif %}
     {% for im in images %}
     <div class="image-container">
       <img
-        src="/api/image{{ im['SourceFile'] }}"
+        src="/api/image{{ im['SourceFile'] | urlencode }}"
         alt="{{ im['SourceFile'] }}"
       />
       <div class="badge">
         <span>{{ im['date'] }}</span>
         <span>{{ im['title'] }}</span>
         <button
-          onclick="downloadImage('/api/image{{ im['SourceFile'] }}')"
+          onclick="downloadImage('/api/image{{ im['SourceFile'] | urlencode }}')"
           title="Download original"
         >
           <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
         </button>
         <button
-          onclick="deleteImage('/api/image{{ im['SourceFile'] }}', this)"
+          class="favorite-toggle"
+          data-photo-id="{{ im['photo_id'] }}"
+          aria-pressed="{{ 'true' if im['favorite'] else 'false' }}"
+          onclick="toggleFavorite(this)"
+          title="Favorite"
+        >
+          <i class="fa {{ 'fa-heart' if im['favorite'] else 'fa-heart-o' }}" aria-hidden="true"></i>
+        </button>
+        <button
+          data-photo-id="{{ im['photo_id'] }}"
+          onclick="hideImage(this)"
+          title="Hide (remove approval)"
+        >
+          <i class="fa fa-eye-slash" aria-hidden="true"></i>
+        </button>
+        <button
+          onclick="deleteImage('/api/image{{ im['SourceFile'] | urlencode }}', this)"
           title="Permanent delete"
         >
           <i class="fa fa-trash-o" aria-hidden="true"></i>
