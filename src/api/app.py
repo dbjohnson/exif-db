@@ -26,6 +26,8 @@ scans.start_scheduler()
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
 ReviewStatus = Literal['unreviewed', 'rejected', 'reviewed']
 logger = logging.getLogger('uvicorn.error')
+# lets a browser reuse a photo instead of having the NAS read and convert it again
+IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
 
 
 def most_recent_date(month, day):
@@ -165,16 +167,16 @@ async def _image(request: Request, path: str):
         buffered = BytesIO()
         im.save(buffered, format="JPEG")
         img_bytes = buffered.getvalue()
-        return Response(content=img_bytes)
+        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
     elif extension in thumbs.RAW_EXTENSIONS:
         # extract thumnails for raw
         with rawpy.imread(path) as raw:
             img_bytes = raw.extract_thumb().data
-        return Response(content=img_bytes)
+        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
     else:
         with open(path, 'rb') as fh:
             img_bytes = fh.read()
-        return Response(content=img_bytes)
+        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
 
 
 # not async: decoding is slow, and would otherwise hold up every other request

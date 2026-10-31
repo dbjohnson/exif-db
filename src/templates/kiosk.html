@@ -13,6 +13,13 @@
       let images = {{ images | tojson }};
       // the image on screen, which lags currentIndex while the next one loads
       let shown = undefined;
+      let paused = false;
+      let latestLoad = 0;
+      let failedLoads = 0;
+      // how many upcoming photos to keep ready, so that skipping to them is immediate
+      const PRELOAD_COUNT = 3;
+      // image -> {element, ready, settled}, for photos fetched before they're shown
+      const preloads = new Map();
 
       const imageUrl = path => `/api/image${path.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -111,6 +118,78 @@
         })
       }
 
+      function scheduleNext() {
+        // cancel existing timeout in case the user pressed fast forward
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+        // reload after defined interval
+        if (!paused) {
+          timeoutId = setTimeout(refreshImage, {{ refresh_secs * 1000 }});
+        }
+      }
+
+      function togglePause() {
+        paused = !paused;
+        const button = document.getElementById('pause');
+        button.title = paused ? 'Resume slideshow' : 'Pause slideshow';
+        button.querySelector('i').className = `fa ${paused ? 'fa-play' : 'fa-pause'} fa-2x`;
+        // a slow image already on its way would replace the one being paused on
+        const index = images.indexOf(shown);
+        if (paused && index >= 0) {
+          latestLoad += 1;
+          currentIndex = index;
+          keepPreloaded();
+        }
+        scheduleNext();
+      }
+
+      function preload(image) {
+        let entry = preloads.get(image);
+        if (!entry) {
+          // only fetched, not decoded: decoded photos would use the graphics memory that
+          // the Pi running the frame is already short of
+          const element = new Image();
+          entry = {element, settled: false, failed: false};
+          entry.ready = new Promise((resolve, reject) => {
+            element.onload = resolve;
+            element.onerror = reject;
+          });
+          element.src = imageUrl(image.SourceFile);
+          preloads.set(image, entry);
+          entry.ready.then(() => {
+            entry.settled = true;
+            keepPreloaded();
+          }, () => {
+            entry.settled = true;
+            entry.failed = true;
+            keepPreloaded();
+          });
+        }
+        return entry;
+      }
+
+      function keepPreloaded() {
+        const upcoming = [];
+        for (let i = 1; i <= Math.min(PRELOAD_COUNT, images.length - 1); i++) {
+          upcoming.push(images[(currentIndex + i) % images.length]);
+        }
+        preloads.forEach((entry, image) => {
+          if (image !== images[currentIndex] && !upcoming.includes(image)) {
+            preloads.delete(image);
+            entry.element.src = '';
+          }
+        });
+        // one at a time, since the NAS holds up other requests while it converts a photo
+        if ([...preloads.values()].every(entry => entry.settled)) {
+          const next = upcoming.find(image => !preloads.has(image));
+          if (next) {
+            preload(next);
+          }
+        }
+      }
+
       function refreshImage() {
         if (!images.length) {
           window.location.reload();
@@ -119,29 +198,48 @@
         currentIndex += 1;
         currentIndex = currentIndex % images.length;
         let image = images[currentIndex];
-        const tempImg = new Image();
-        tempImg.src = imageUrl(image.SourceFile);
-        // When it loads, swap it in
-        tempImg.onload = () => {
+        const thisLoad = ++latestLoad;
+        const url = imageUrl(image.SourceFile);
+        // an earlier failure may just have been the NAS being unreachable
+        if (preloads.get(image)?.failed) {
+          preloads.delete(image);
+        }
+        // When it's ready, swap it in
+        preload(image).ready.then(() => {
+          if (thisLoad !== latestLoad) {
+            return;
+          }
+          failedLoads = 0;
           // fade transition
           let im = document.getElementById("img");
           im.classList.add("hidden");
           // fade back in after transition time
           setTimeout(() => {
-            im.src = tempImg.src;
+            if (thisLoad !== latestLoad) {
+              im.classList.remove("hidden");
+              return;
+            }
+            im.src = url;
             im.classList.remove("hidden");
             document.getElementById("date").textContent = image.date;
             shown = image;
             renderFavorite();
           }, 200)
-        };
+        }, () => {
+          // try it again next time around
+          preloads.delete(image);
+          if (thisLoad !== latestLoad) {
+            return;
+          }
+          // move past a missing photo, but don't spin if the NAS is unreachable
+          failedLoads += 1;
+          if (failedLoads < images.length) {
+            refreshImage();
+          }
+        });
+        keepPreloaded();
 
-        // cancel existing timeout in case the user pressed fast forward
-        if (timeoutId !== undefined) {
-          clearTimeout(timeoutId);
-        }
-        // reload after defined interval
-        timeoutId = setTimeout(refreshImage, {{ refresh_secs * 1000 }});
+        scheduleNext();
       }
 
       // Load the image once on page load
@@ -191,6 +289,13 @@
           title="Permanent delete"
         >
           <i class="fa fa-trash-o fa-2x" aria-hidden="true"></i>
+        </button>
+        <button
+          id="pause"
+          onclick="togglePause()"
+          title="Pause slideshow"
+        >
+          <i class="fa fa-pause fa-2x" aria-hidden="true"></i>
         </button>
         <button
           onclick="refreshImage()"
