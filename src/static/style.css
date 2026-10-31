@@ -23,6 +23,175 @@ button:hover {
   background-color: rgba(50, 50, 50, 0.9);
 }
 
+.date-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin: 0 10px 10px;
+  color: #888;
+  font-size: 12px;
+}
+
+.date-controls input[type="date"] {
+  background: transparent;
+  color: #888;
+  border: none;
+  border-bottom: 1px solid #333;
+  padding: 2px 0;
+  font: inherit;
+  color-scheme: dark;
+}
+
+.date-controls input[type="date"]:hover,
+.date-controls input[type="date"]:focus {
+  color: #ddd;
+  border-bottom-color: #888;
+  outline: none;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 22px;
+  height: 12px;
+  margin: 0;
+  border-radius: 6px;
+  background: #333;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.toggle input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #888;
+  transition: transform 0.2s, background-color 0.2s;
+}
+
+.toggle input:checked {
+  background: #666;
+}
+
+.toggle input:checked::after {
+  transform: translateX(10px);
+  background: #ddd;
+}
+
+.toggle input:focus-visible {
+  outline: 1px solid #ddd;
+  outline-offset: 2px;
+}
+
+.no-images {
+  margin: 40px 10px;
+  color: #888;
+}
+
+.manage {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 640px;
+  padding: 0 16px 32px;
+  color: #ddd;
+  font-size: 14px;
+}
+
+.manage h1 {
+  font-size: 18px;
+  font-weight: normal;
+}
+
+.manage h2 {
+  margin: 28px 0 8px;
+  color: #888;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.manage dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.manage dt {
+  color: #888;
+}
+
+.manage dd {
+  margin: 0;
+}
+
+.manage .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.manage button {
+  border: 2px solid #ddd;
+}
+
+.manage button:disabled {
+  border-color: #444;
+  color: #666;
+  cursor: default;
+}
+
+.manage .hint {
+  margin: 8px 0 0;
+  color: #888;
+  font-size: 12px;
+}
+
+.manage .error {
+  color: #e88;
+}
+
+.manage progress {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.manage progress[hidden] {
+  display: none;
+}
+
+.manage select {
+  background: #000;
+  color: #ddd;
+  border: 1px solid #666;
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.manage pre {
+  margin: 0;
+  padding: 8px;
+  overflow-x: auto;
+  background: #111;
+  color: #aaa;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
 .image-container {
   position: relative;
   display: inline-block;

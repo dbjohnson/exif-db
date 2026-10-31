@@ -1,0 +1,144 @@
+<html>
+  <head>
+    <title>Exif DB</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+      function formatTime(secs) {
+        return secs ? new Date(secs * 1000).toLocaleString() : 'never';
+      }
+
+      function formatResult(result) {
+        if (!result) {
+          return 'none recorded';
+        }
+        const outcome = {0: 'succeeded', 143: 'cancelled'}[result.exit_code] || `failed (exit code ${result.exit_code})`;
+        const minutes = Math.round((result.finished - result.started) / 60);
+        return `${result.mode} scan ${outcome}, ${formatTime(result.finished)} (${minutes} min)`;
+      }
+
+      function showError(message) {
+        document.getElementById('error').textContent = message;
+      }
+
+      function render(status) {
+        const current = status.current;
+        document.getElementById('state').textContent = status.running
+          ? `${current ? current.mode + ' scan' : 'scan'} running${current ? ' since ' + formatTime(current.started) : ''}`
+          : 'idle';
+        document.getElementById('indexed').textContent = status.indexed_photos.toLocaleString();
+        document.getElementById('result').textContent = formatResult(status.last_result);
+        document.getElementById('next').textContent = status.next_scan ? formatTime(status.next_scan) : 'not scheduled';
+
+        const bar = document.getElementById('progress');
+        bar.hidden = !status.progress;
+        if (status.progress) {
+          bar.max = status.progress.total;
+          bar.value = status.progress.done;
+          document.getElementById('state').textContent +=
+            ` (${status.progress.done.toLocaleString()} of ${status.progress.total.toLocaleString()} files)`;
+        }
+
+        document.getElementById('scan').disabled = status.running;
+        document.getElementById('rebuild').disabled = status.running;
+        document.getElementById('cancel').disabled = !status.running;
+        const schedule = document.getElementById('schedule');
+        if (document.activeElement !== schedule) {
+          schedule.value = String(status.schedule_hours);
+        }
+        document.getElementById('log').textContent = status.log.join('\n') || 'No log yet';
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch('/api/scan');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          render(await response.json());
+        } catch (error) {
+          showError(`Couldn't load status: ${error.message}`);
+        }
+      }
+
+      async function send(url, method) {
+        showError('');
+        const response = await fetch(url, {method});
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          showError(typeof body.detail === 'string' ? body.detail : 'Request failed. Status: ' + response.status);
+        }
+        refresh();
+      }
+
+      function startRebuild() {
+        if (confirm('Rescan the whole library? Deleting images is disabled until it finishes. The current index stays in use until then.')) {
+          send('/api/scan?full=true', 'POST');
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        refresh();
+        setInterval(refresh, 2000);
+      });
+    </script>
+  </head>
+  <body style="background-color:#000">
+    <div
+      style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
+    >
+      <button
+        onclick="window.location.href='/random'"
+        style="border:2px solid #ddd;"
+      >
+        Random photos
+      </button>
+      <button
+        onclick="window.location.href='/onthisday'"
+        style="border:2px solid #ddd;"
+      >
+        Photos from this date
+      </button>
+    </div>
+    <div class="manage">
+      <h1>Manage scans</h1>
+      <dl>
+        <dt>Status</dt>
+        <dd id="state">Loading…</dd>
+        <dt>Photos shown</dt>
+        <dd id="indexed"></dd>
+        <dt>Last scan</dt>
+        <dd id="result"></dd>
+        <dt>Next scan</dt>
+        <dd id="next"></dd>
+      </dl>
+      <progress id="progress" hidden></progress>
+
+      <h2>Run</h2>
+      <div class="actions">
+        <button id="scan" onclick="send('/api/scan', 'POST')" disabled>Scan for new files</button>
+        <button id="rebuild" onclick="startRebuild()" disabled>Full rebuild</button>
+        <button id="cancel" onclick="send('/api/scan', 'DELETE')" disabled>Cancel scan</button>
+      </div>
+      <p class="hint">A full rebuild rereads every file, restoring anything missing from the index and dropping files that no longer exist. Cancelling leaves the index as it was.</p>
+      <div id="error" class="error" role="alert"></div>
+
+      <h2>Schedule</h2>
+      <label>
+        Scan for new files
+        <select id="schedule" onchange="send('/api/scan/schedule?hours=' + this.value, 'PUT')">
+          <option value="0">never</option>
+          <option value="1">every hour</option>
+          <option value="6">every 6 hours</option>
+          <option value="24">every day</option>
+          <option value="168">every week</option>
+        </select>
+      </label>
+
+      <h2>Scan log</h2>
+      <pre id="log"></pre>
+    </div>
+  </body>
+</html>

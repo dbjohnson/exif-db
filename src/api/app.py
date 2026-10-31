@@ -8,19 +8,34 @@ from functools import lru_cache
 import rawpy
 import pyheif
 from PIL import Image
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from api import exif
+from api import exif, scans
 
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
 templates = Jinja2Templates(directory="templates")
 exif.load_csv()
+scans.start_scheduler()
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
+
+
+def most_recent_date(month, day):
+    # the latest past date with this month and day; Feb 29 doesn't exist every year
+    today = datetime.date.today()
+    year = today.year
+    while True:
+        try:
+            date = datetime.date(month=month, day=day, year=year)
+            if date <= today:
+                return date
+        except ValueError:
+            pass
+        year -= 1
 
 
 @app.get("/api/ping")
@@ -34,8 +49,44 @@ async def _reload():
     return f"Last modified: {exif.last_modified()}"
 
 
+@app.get("/api/scan")
+async def _scan_status():
+    return {**scans.status(), 'indexed_photos': exif.count()}
+
+
+@app.post("/api/scan")
+async def _start_scan(full: bool = False):
+    if not scans.start(full):
+        raise HTTPException(status_code=409, detail="A scan is already running")
+    return "started"
+
+
+@app.delete("/api/scan")
+async def _cancel_scan():
+    if not scans.cancel():
+        raise HTTPException(status_code=409, detail="No scan that can be cancelled from here")
+    return "cancelling"
+
+
+@app.put("/api/scan/schedule")
+async def _set_scan_schedule(hours: int):
+    if hours < 0:
+        raise HTTPException(status_code=422, detail="hours can't be negative")
+    scans.set_schedule_hours(hours)
+    return scans.next_scan()
+
+
+@app.get("/manage")
+async def _manage(request: Request):
+    return templates.TemplateResponse(request=request, name="manage.html")
+
+
 @app.delete("/api/image{path:path}")
 async def _delete_image(path: str, background_tasks: BackgroundTasks):
+    # a scan in progress could add back the row for a file deleted now
+    if scans.running():
+        raise HTTPException(status_code=409, detail="Can't delete images while a scan is running")
+
     def delete():
         # assume any files differing only by extension should also be deleted
         files = glob.glob(f"{glob.escape(os.path.splitext(path)[0])}.*")
@@ -111,13 +162,24 @@ async def _dump():
 
 
 @app.get("/onthisday")
-async def _onthisday(request: Request, month: int = -1, day: int = -1, n: int = DEFAULT_NUM_IMAGES):
-    if min(month, day) > 0:
-        today = datetime.date.today()
-        date = datetime.date(month=month, day=day, year=today.year)
-    else:
+async def _onthisday(
+    request: Request,
+    month: int = -1,
+    day: int = -1,
+    year: int = None,
+    all_years: bool = True,
+    n: int = DEFAULT_NUM_IMAGES
+):
+    if min(month, day) <= 0:
         date = datetime.date.today()
-    pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
+    elif year:
+        date = datetime.date(month=month, day=day, year=year)
+    else:
+        date = most_recent_date(month, day)
+    if all_years:
+        pics = exif.select_by_date(f"%{date.month:02d}:{date.day:02d} ")
+    else:
+        pics = exif.select_by_date(f"{date.year:04d}:{date.month:02d}:{date.day:02d} ")
     if len(pics) > n:
         pics = pics.sample(n=n)
 
@@ -125,6 +187,8 @@ async def _onthisday(request: Request, month: int = -1, day: int = -1, n: int = 
         request=request,
         name="gallery.html",
         context={
+            "picked_date": date.isoformat(),
+            "all_years": all_years,
             "images": pics.assign(
                 date=pics['DateTimeOriginal'].map(
                     lambda d: d.split(' ')[0].replace(':', '/')
@@ -147,6 +211,7 @@ async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
         request=request,
         name="gallery.html",
         context={
+            "all_years": True,
             "images": pics.assign(
                 date=pics['DateTimeOriginal'].map(
                     lambda d: d.split(' ')[0].replace(':', '/')

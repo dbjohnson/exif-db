@@ -23,6 +23,9 @@
             method: 'DELETE'
           })
           .then(response=>{
+            if (response.status === 409) {
+              throw new Error("Can't delete images while a scan is running");
+            }
             if (!response.ok) {
               throw new Error('Network response was not ok. Status: ' + response.status);
             }

@@ -22,6 +22,9 @@
             method: 'DELETE'
           })
           .then(response=>{
+            if (response.status === 409) {
+              throw new Error("Can't delete images while a scan is running");
+            }
             if (!response.ok) {
               throw new Error('Network response was not ok. Status: ' + response.status);
             }
@@ -36,6 +39,32 @@
             alert(error);
           })
         }
+      }
+
+      function goToDate() {
+        const [year, month, day] = document.getElementById('date-picker').value.split('-').map(Number);
+        // ignore partly typed years
+        if (!year || year < 1000) {
+          return;
+        }
+        const params = new URLSearchParams({
+          year,
+          month,
+          day,
+          all_years: document.getElementById('all-years').checked
+        });
+        const n = new URLSearchParams(window.location.search).get('n');
+        if (n) {
+          params.set('n', n);
+        }
+        window.location.href = '/onthisday?' + params;
+      }
+
+      // wait for a pause, so typing a date doesn't navigate after every digit
+      let datePickerTimeout;
+      function datePicked() {
+        clearTimeout(datePickerTimeout);
+        datePickerTimeout = setTimeout(goToDate, 700);
       }
     </script>
   </head>
@@ -55,7 +84,35 @@
       >
         Photos from this date
       </button>
+      <button
+        onclick="window.location.href='/manage'"
+        style="border:2px solid #ddd;"
+      >
+        Manage
+      </button>
     </div>
+    <div class="date-controls">
+      <input
+        id="date-picker"
+        type="date"
+        aria-label="Show photos from date"
+        value="{{ picked_date or '' }}"
+        onchange="datePicked()"
+      />
+      <label class="toggle">
+        <input
+          id="all-years"
+          type="checkbox"
+          role="switch"
+          {% if all_years %}checked{% endif %}
+          onchange="goToDate()"
+        />
+        <span>include all years</span>
+      </label>
+    </div>
+    {% if not images %}
+    <div class="no-images">No photos from this date</div>
+    {% endif %}
     {% for im in images %}
     <div class="image-container">
       <img

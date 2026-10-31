@@ -47,10 +47,16 @@ def last_modified():
 
 
 def update_available():
-    return (
-        db.execute("SHOW TABLES").fetchall() == []
-        or last_modified() > db.execute("SELECT MAX(last_modified) FROM exif").fetchone()[0]
-    )
+    if db.execute("SHOW TABLES").fetchall() == []:
+        return True
+    # the table is empty if the index holds no images
+    loaded = db.execute("SELECT MAX(last_modified) FROM exif").fetchone()[0]
+    return loaded is None or last_modified() > loaded
+
+
+def count():
+    load_csv()
+    return db.execute("SELECT COUNT(*) FROM exif").fetchone()[0]
 
 
 def dataframe(query='select * from exif'):
