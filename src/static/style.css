@@ -356,10 +356,141 @@ button:hover {
   text-decoration: none;
 }
 
+.review-item .delete {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ccc;
+  font-size: 14px;
+}
+
+.review-item .delete.confirming {
+  background: #c33;
+  color: #fff;
+  font-weight: bold;
+}
+
+.review-large {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  cursor: pointer;
+}
+
+.review-large[hidden] {
+  display: none;
+}
+
+.review-large img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.review-large span {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ddd;
+}
+
+/* sized for fingers on the frame's 13 inch touchscreen, where 1mm is about 6.6px */
+.kiosk-review .review-header,
+.kiosk-review .review-footer {
+  gap: 16px;
+  padding: 10px 12px;
+  font-size: 22px;
+}
+
+.kiosk-review .review-header a {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  padding: 0 28px;
+  border: 1px solid #666;
+  border-radius: 6px;
+  color: #ddd;
+}
+
+.kiosk-review .review-header button,
+.kiosk-review .review-footer button {
+  min-height: 72px;
+  padding: 0 32px;
+  font-size: 22px;
+}
+
+.kiosk-review .review-footer #save {
+  padding: 0 32px;
+  font-size: 28px;
+}
+
+.kiosk-review .review-error {
+  font-size: 22px;
+}
+
+.kiosk-review .review-item .check {
+  top: 6px;
+  right: 6px;
+  width: 56px;
+  height: 56px;
+  border-width: 3px;
+  font-size: 32px;
+  line-height: 50px;
+}
+
+.kiosk-review .review-item .delete,
+.kiosk-review .review-item .zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 56px;
+  box-sizing: border-box;
+  font-size: 28px;
+}
+
+.kiosk-review .review-item .delete {
+  top: 6px;
+  left: 6px;
+}
+
+.kiosk-review .review-item .delete.confirming {
+  padding: 0 14px;
+  font-size: 22px;
+}
+
+.kiosk-review .review-item .zoom {
+  right: 6px;
+  bottom: 6px;
+}
+
+.kiosk-review .review-item .date {
+  left: 6px;
+  bottom: 6px;
+  font-size: 14px;
+}
+
+.kiosk-review .review-large span {
+  padding: 16px 28px;
+  font-size: 22px;
+}
+
 .review-item .no-preview {
   position: absolute;
   inset: 0;
-  padding: 34px 8px 8px;
+  padding: 70px 8px 8px;
   color: #888;
   font-size: 11px;
   overflow-wrap: anywhere;

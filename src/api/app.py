@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import quote, urlencode
 
 import rawpy
-from fastapi import Depends, FastAPI, Query, Request, BackgroundTasks, HTTPException
+from fastapi import Depends, FastAPI, Query, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,7 @@ logger = logging.getLogger('uvicorn.error')
 # lets a browser reuse a photo instead of having the NAS read and convert it again
 IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
 Rotation = Literal[0, 90, 180, 270]
+DELETED_DIR = '/storage/deleted'
 
 
 def most_recent_date(month, day):
@@ -81,10 +82,13 @@ def date_filter(date, all_years):
     return f"{date.year:04d}:{date.month:02d}:{date.day:02d} "
 
 
-def review_url(date, all_years, status='unreviewed'):
+def review_url(date, all_years, status='unreviewed', kiosk=None):
     params = {'status': status}
     if date:
         params.update(date=date.isoformat(), all_years=str(all_years).lower())
+    # the kiosk's own query string, so that reviewing can return to the same slideshow
+    if kiosk is not None:
+        params['kiosk'] = kiosk
     return f"/review?{urlencode(params)}"
 
 
@@ -161,7 +165,7 @@ async def _manage(request: Request):
 
 
 @app.delete("/api/image{path:path}")
-async def _delete_image(path: str, background_tasks: BackgroundTasks):
+async def _delete_image(path: str):
     # a scan in progress could add back the row for a file deleted now
     if scans.running():
         raise HTTPException(status_code=409, detail="Can't delete images while a scan is running")
@@ -173,11 +177,12 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
         # move files to deleted directory (user can then permanently delete),
         # keeping their paths since file names aren't unique across the library
         for f in files:
-            destination = os.path.join('/storage/deleted', f.lstrip('/'))
+            destination = os.path.join(DELETED_DIR, f.lstrip('/'))
             os.makedirs(os.path.dirname(destination), exist_ok=True)
             shutil.move(f, destination)
 
-    background_tasks.add_task(delete)
+    # finished before responding, so that a page reloading straight after won't still see it
+    await run_in_threadpool(delete)
 
 # not concerned about cross worker caching, etc.
 @lru_cache(maxsize=1000)
@@ -312,7 +317,8 @@ async def _review(
     request: Request,
     date: datetime.date = None,
     all_years: bool = True,
-    status: ReviewStatus = 'unreviewed'
+    status: ReviewStatus = 'unreviewed',
+    kiosk: str = None
 ):
     if date is None:
         scope = "All dates"
@@ -325,6 +331,8 @@ async def _review(
             'day': date.day,
             'all_years': str(all_years).lower()
         })
+    if kiosk is not None:
+        done_url = f"/kiosk?{kiosk}" if kiosk else "/kiosk"
     return templates.TemplateResponse(
         request=request,
         name="review.html",
@@ -332,6 +340,7 @@ async def _review(
             "scope": scope,
             "status": status,
             "done_url": done_url,
+            "kiosk": kiosk is not None,
             "query": {
                 'status': status,
                 'all_years': all_years,
@@ -370,7 +379,7 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
         name="kiosk.html",
         context={
             "refresh_secs": refresh_secs,
-            "review_url": review_url(date, True),
+            "review_url": review_url(date, True, kiosk=request.url.query),
             "background": None if pics else background_url(),
             "images": pics
         }
