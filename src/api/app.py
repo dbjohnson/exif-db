@@ -93,12 +93,22 @@ def review_url(date, all_years, status='unreviewed', kiosk=None):
     return f"/review?{urlencode(params)}"
 
 
+def sample_across_years(pics, n):
+    """
+    A random n photos, taking turns between years, so that a date isn't dominated by
+    whichever years happen to have the most photos
+    """
+    shuffled = pics.sample(frac=1)
+    turn = shuffled.groupby(shuffled['DateTimeOriginal'].str[:4]).cumcount()
+    return shuffled.assign(turn=turn).sort_values('turn', kind='stable').head(n).drop(columns='turn')
+
+
 def gallery(request, date, all_years, n):
     datestring = date_filter(date, all_years)
     counts = exif.review_counts(datestring)
     pics = exif.select_photos(datestring)
     if len(pics) > n:
-        pics = pics.sample(n=n)
+        pics = sample_across_years(pics, n) if date else pics.sample(n=n)
 
     return templates.TemplateResponse(
         request=request,

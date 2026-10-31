@@ -27,6 +27,10 @@
       let latestLoad = 0;
       // photo id -> checked, for photos the user has changed; kept when moving between pages
       const changes = new Map();
+      // photos on their way to being deleted, which the server may still be listing
+      const deleting = new Set();
+      let deleteError = '';
+      let moveAfterDeletes = 0;
 
       // unreviewed photos start out approved
       const startsChecked = item => item.status !== 'rejected';
@@ -171,21 +175,56 @@
           setTimeout(() => resetDeleteButton(button), DELETE_CONFIRM_MS);
           return;
         }
-        button.disabled = true;
         showError('');
+        // gone straight away, so that reviewing carries on while the NAS moves the file.  Its
+        // slot stays empty, so that the other tiles don't move under a finger about to tap
+        const tile = button.closest('.review-item');
+        const change = changes.get(item.id);
+        changes.delete(item.id);
+        deleting.add(item.id);
+        items = items.filter(other => other !== item);
+        total -= 1;
+        tile.style.visibility = 'hidden';
+        renderActions();
         try {
-          const response = await fetch(`/api/image${encodePath(item.path)}`, {method: 'DELETE'});
+          // keepalive so that it still completes if the page is left straight after
+          const response = await fetch(`/api/image${encodePath(item.path)}`, {method: 'DELETE', keepalive: true});
           if (response.status === 409) {
             throw new Error("photos can't be deleted while a scan is running");
           }
           if (!response.ok) {
             throw new Error('Status: ' + response.status);
           }
-          changes.delete(item.id);
-          await load();
         } catch (error) {
+          if (change !== undefined) {
+            changes.set(item.id, change);
+          }
+          items.push(item);
+          total += 1;
+          tile.querySelector('input').checked = isChecked(item);
           resetDeleteButton(button);
-          showError(`Couldn't delete: ${error.message}`);
+          tile.style.visibility = '';
+          renderActions();
+          deleteError = `Couldn't delete ${item.path.split('/').pop()}: ${error.message}`;
+        }
+        deleting.delete(item.id);
+        if (!deleting.size) {
+          deletesSettled();
+        }
+      }
+
+      async function deletesSettled() {
+        const error = deleteError;
+        deleteError = '';
+        if (moveAfterDeletes) {
+          const direction = moveAfterDeletes;
+          moveAfterDeletes = 0;
+          await move(direction);
+        } else if (!items.length) {
+          await load();
+        }
+        if (error) {
+          showError(error);
         }
       }
 
@@ -216,8 +255,13 @@
           if (thisLoad !== latestLoad) {
             return;
           }
+          page.items = page.items.filter(item => !deleting.has(item.id));
+          page.total = Math.max(0, page.total - deleting.size);
           if (!page.total) {
-            window.location.href = DONE_URL;
+            // otherwise this runs again once the deletes have finished
+            if (!deleting.size) {
+              window.location.href = DONE_URL;
+            }
             return;
           }
           ({total, offset, items} = page);
@@ -267,8 +311,14 @@
       }
 
       function move(direction) {
-        offset = Math.max(0, offset + direction * limit);
-        load();
+        // positions in the list only settle once deleted photos have left it
+        if (deleting.size) {
+          moveAfterDeletes = direction;
+          return;
+        }
+        // a page may be short after deleting, and what followed it has moved up
+        offset = Math.max(0, offset + (direction > 0 ? items.length : -limit));
+        return load();
       }
 
       window.addEventListener('beforeunload', event => {
