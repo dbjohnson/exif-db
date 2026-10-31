@@ -375,6 +375,30 @@ button:hover {
   font-weight: bold;
 }
 
+.review-item .more {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border: 1px solid #aaa;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 13px;
+}
+
+.review-item .note {
+  position: absolute;
+  left: 3px;
+  bottom: 22px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ccc;
+  font-size: 10px;
+}
+
 .review-large {
   position: fixed;
   inset: 0;
@@ -482,6 +506,32 @@ button:hover {
   font-size: 14px;
 }
 
+.kiosk-review .review-item .more {
+  bottom: 6px;
+  min-width: 72px;
+  height: 56px;
+  border-radius: 28px;
+  font-size: 24px;
+}
+
+.kiosk-review .review-item .note {
+  left: 6px;
+  bottom: 30px;
+  font-size: 14px;
+}
+
+.kiosk-review .toast {
+  bottom: 108px;
+  padding: 14px 24px;
+  font-size: 22px;
+}
+
+.kiosk-review .toast button {
+  min-height: 64px;
+  padding: 0 28px;
+  font-size: 22px;
+}
+
 .kiosk-review .review-large span {
   padding: 16px 28px;
   font-size: 22px;
@@ -494,6 +544,28 @@ button:hover {
   color: #888;
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 72px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 90vw;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.95);
+  color: #ddd;
+  font-size: 14px;
+}
+
+.toast button {
+  flex: none;
+  border: 1px solid #888;
 }
 
 .manage {
@@ -560,6 +632,11 @@ button:hover {
   display: none;
 }
 
+.manage .trash-summary {
+  align-self: center;
+  margin-right: 8px;
+}
+
 .manage .hint {
   margin: 8px 0 0;
   color: #888;
@@ -619,14 +696,19 @@ button:hover {
   position: relative;
   display: inline-block;
   margin-bottom: 5px;
-  background-color: red;
+}
+
+/* holds a place for a photo, so that only those near the screen get fetched */
+.image-container:not(.loaded) {
+  width: 90vw;
+  height: 60vh;
+  background-color: #111;
 }
 
 .image-container img {
   display: block;
   max-width: 90vw;
   max-height: 90vh;
-  background-color: blue;
 }
 
 .badge {

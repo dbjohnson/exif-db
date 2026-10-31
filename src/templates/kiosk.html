@@ -7,9 +7,11 @@
     <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet" href="/static/kiosk.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
     <script>
-      let currentIndex = 0;
+      // none yet: the first refreshImage moves on to the first photo
+      let currentIndex = -1;
       let timeoutId = undefined;
       let images = {{ images | tojson }};
       // the image on screen, which lags currentIndex while the next one loads
@@ -18,44 +20,101 @@
       let latestLoad = 0;
       let failedLoads = 0;
       const TODAY = {{ today | tojson }};
+      const BUILD = {{ build | tojson }};
+      const MIN_PICS = {{ min_pics | tojson }};
+      let photosVersion = {{ photos_version | tojson }};
       // how many upcoming photos to keep ready, so that skipping to them is immediate
       const PRELOAD_COUNT = 3;
-      const TO_REVIEW_REFRESH_MS = 60000;
-      // image -> {element, ready, settled}, for photos fetched before they're shown
+      const STATUS_REFRESH_MS = 60000;
+      const CONTROLS_SHOWN_MS = 8000;
+      const DELETE_CONFIRM_MS = 4000;
+      // an unresponsive server shouldn't leave a request waiting indefinitely
+      const REQUEST_TIMEOUT_MS = 20000;
+      // photos to move past at once when they fail to load, before waiting for the next turn:
+      // enough for a few missing files, without requesting every photo if the NAS is unreachable
+      const MAX_SKIPS = 3;
+      // image -> {element, ready, failed}, for photos fetched before they're shown
       const preloads = new Map();
 
       const imageUrl = (path, rotation) =>
         `/api/image${path.split('/').map(encodeURIComponent).join('/')}${rotation ? `?rotate=${rotation}` : ''}`;
 
-      function deleteImage(button) {
-        // protect against race condition if image refreshes while waiting
-        // for user confirmation
-        const deleteIndex = currentIndex;
-        const path = images[deleteIndex].SourceFile;
-        if (confirm('Are you sure you want to delete this image?')) {
-          fetch(
-            imageUrl(path), {
-            method: 'DELETE'
-          })
-          .then(response=>{
-            if (response.status === 409) {
-              throw new Error("Can't delete images while a scan is running");
-            }
-            if (!response.ok) {
-              throw new Error('Network response was not ok. Status: ' + response.status);
-            }
-            return response.json()
-          })
-          .then(data => {
-             // remove image from list
-             images.splice(deleteIndex, 1);
-             // get a new one
-             refreshImage();
-          })
-          .catch((error) => {
-            console.log(error)
-            alert(error);
-          })
+      // leaves the slideshow on the photo before it, ready to move on to whatever follows it
+      function removeFromShow(image) {
+        const index = images.indexOf(image);
+        if (index < 0) {
+          return;
+        }
+        images.splice(index, 1);
+        // keep the images after it from being skipped
+        if (index <= currentIndex) {
+          currentIndex -= 1;
+        }
+        refreshImage();
+      }
+
+      // puts a photo back next in line, then moves on to it
+      function returnToShow(image) {
+        if (!images.some(other => other.photo_id === image.photo_id)) {
+          images.splice(currentIndex + 1, 0, image);
+        }
+        currentIndex = images.findIndex(other => other.photo_id === image.photo_id) - 1;
+        refreshImage();
+      }
+
+      // the photo a first press of delete was for; a second press deletes it, while it's still up
+      let deleteArmedFor = undefined;
+      let deleteArmTimeout = undefined;
+
+      function disarmDelete() {
+        clearTimeout(deleteArmTimeout);
+        deleteArmedFor = undefined;
+        const button = document.getElementById('delete');
+        button.classList.remove('confirming');
+        button.innerHTML = '<i class="fa fa-trash-o fa-2x" aria-hidden="true"></i>';
+      }
+
+      async function deleteImage() {
+        const image = shown;
+        if (!image) {
+          return;
+        }
+        if (deleteArmedFor !== image) {
+          disarmDelete();
+          deleteArmedFor = image;
+          const button = document.getElementById('delete');
+          button.classList.add('confirming');
+          button.textContent = 'Delete?';
+          deleteArmTimeout = setTimeout(disarmDelete, DELETE_CONFIRM_MS);
+          // a full interval to decide before the slideshow moves on
+          scheduleNext();
+          return;
+        }
+        disarmDelete();
+        try {
+          const response = await fetch(imageUrl(image.SourceFile), {method: 'DELETE'});
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          const {files} = await response.json();
+          removeFromShow(image);
+          showToast('Photo deleted', () => undo(
+            () => postJson('/api/restore', {files}),
+            image
+          ));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't delete: ${error.message}`);
+        }
+      }
+
+      async function undo(request, image) {
+        try {
+          await request();
+          returnToShow(image);
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't undo: ${error.message}`);
         }
       }
 
@@ -97,41 +156,28 @@
           console.log(error)
           image.rotation = (image.rotation + 270) % 360;
           showRotation(image);
-          alert(error);
+          showToast(`Couldn't rotate: ${error.message}`);
         });
         // a full interval to see the result before the slideshow moves on
         scheduleNext();
       }
 
-      function hideImage() {
+      async function hideImage() {
         const image = shown;
         if (!image) {
           return;
         }
-        fetch('/api/review', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rejected: [image.photo_id]})
-        })
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok. Status: ' + response.status);
-          }
-          const index = images.indexOf(image);
-          if (index < 0) {
-            return;
-          }
-          images.splice(index, 1);
-          // keep the images after it from being skipped
-          if (index <= currentIndex) {
-            currentIndex -= 1;
-          }
-          refreshImage();
-        })
-        .catch((error) => {
-          console.log(error)
-          alert(error);
-        })
+        try {
+          await postJson('/api/review', {rejected: [image.photo_id]});
+          removeFromShow(image);
+          showToast('Photo hidden', () => undo(
+            () => postJson('/api/review', {approved: [image.photo_id]}),
+            image
+          ));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't hide: ${error.message}`);
+        }
       }
 
       function renderFavorite() {
@@ -161,32 +207,111 @@
           }
         })
         .catch((error) => {
-          console.log(error)
-          alert(error);
+          console.log(error);
+          showToast(`Couldn't save: ${error.message}`);
         })
       }
 
-      // the page stays open for days, through scans and past midnight
-      async function refreshToReview() {
-        try {
-          const response = await fetch('/api/review/today');
-          if (!response.ok) {
-            throw new Error('Status: ' + response.status);
+      // brings a running slideshow up to date with changes made from anywhere else, keeping
+      // its place.  Anything new is shown next
+      function mergePhotos(latest) {
+        const byId = new Map(latest.map(image => [image.photo_id, image]));
+        const known = new Set(images.map(image => image.photo_id));
+        const position = images.slice(0, currentIndex + 1).filter(image => byId.has(image.photo_id)).length - 1;
+        const kept = images.filter(image => byId.has(image.photo_id));
+        kept.forEach(image => {
+          const update = byId.get(image.photo_id);
+          const rotated = update.rotation !== image.rotation;
+          Object.assign(image, update);
+          if (rotated) {
+            // anything already fetched for it is now the wrong way round
+            preloads.delete(image);
+            if (image === shown) {
+              showRotation(image);
+            }
           }
-          const today = await response.json();
-          if (today.date !== TODAY) {
-            // a new day has its own photos; left until later if someone has paused on one
+        });
+        kept.splice(position + 1, 0, ...latest.filter(image => !known.has(image.photo_id)));
+        images = kept;
+        currentIndex = position;
+        if (shown) {
+          renderFavorite();
+        }
+        keepPreloaded();
+      }
+
+      async function fetchOk(url) {
+        const response = await fetch(url, {signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)});
+        if (!response.ok) {
+          throw new Error('Status: ' + response.status);
+        }
+        return response;
+      }
+
+      let reloading = false;
+
+      // only leaves this page once the server has shown it can provide the next one, since
+      // the photos here can carry on in the meantime.  Whatever asked for this asks again later
+      async function reloadPage() {
+        if (reloading) {
+          return;
+        }
+        reloading = true;
+        try {
+          await fetchOk(window.location.href);
+          window.location.reload();
+        } catch (error) {
+          console.log(error);
+          reloading = false;
+        }
+      }
+
+      // the page stays open for days, through scans and past midnight
+      async function refreshStatus() {
+        try {
+          const status = await (await fetchOk('/api/review/today')).json();
+          if (status.date !== TODAY || status.build !== BUILD) {
+            // a new day has its own photos, and a new version its own page; left until later if
+            // someone has paused on a photo
             if (!paused) {
-              window.location.reload();
+              reloadPage();
             }
             return;
           }
           const badge = document.getElementById('to-review');
-          badge.textContent = `${today.unreviewed.toLocaleString()} to review`;
-          badge.hidden = !today.unreviewed;
+          if (badge) {
+            badge.textContent = `${status.unreviewed.toLocaleString()} to review`;
+            badge.hidden = !status.unreviewed;
+          }
+          if (status.photos !== photosVersion) {
+            if (!images.length) {
+              reloadPage();
+              return;
+            }
+            const photos = await fetchOk(`/api/kiosk/photos?min_pics=${MIN_PICS}`);
+            mergePhotos(await photos.json());
+            photosVersion = status.photos;
+          }
         } catch (error) {
           console.log(error);
         }
+      }
+
+      // out of the way of the photo until the screen is touched
+      let controlsTimeout = undefined;
+
+      function showControls() {
+        document.querySelector('.badge')?.classList.remove('idle');
+        clearTimeout(controlsTimeout);
+        controlsTimeout = setTimeout(hideControls, CONTROLS_SHOWN_MS);
+      }
+
+      function hideControls() {
+        // whoever paused needs to be able to see how to carry on
+        if (paused) {
+          return;
+        }
+        document.querySelector('.badge')?.classList.add('idle');
       }
 
       function scheduleNext() {
@@ -214,6 +339,7 @@
           keepPreloaded();
         }
         scheduleNext();
+        showControls();
       }
 
       function preload(image) {
@@ -222,20 +348,15 @@
           // only fetched, not decoded: decoded photos would use the graphics memory that
           // the Pi running the frame is already short of
           const element = new Image();
-          entry = {element, settled: false, failed: false};
+          entry = {element, failed: false};
           entry.ready = new Promise((resolve, reject) => {
             element.onload = resolve;
             element.onerror = reject;
           });
           element.src = imageUrl(image.SourceFile, image.rotation);
           preloads.set(image, entry);
-          entry.ready.then(() => {
-            entry.settled = true;
-            keepPreloaded();
-          }, () => {
-            entry.settled = true;
+          entry.ready.catch(() => {
             entry.failed = true;
-            keepPreloaded();
           });
         }
         return entry;
@@ -252,18 +373,13 @@
             entry.element.src = '';
           }
         });
-        // one at a time, since the NAS holds up other requests while it converts a photo
-        if ([...preloads.values()].every(entry => entry.settled)) {
-          const next = upcoming.find(image => !preloads.has(image));
-          if (next) {
-            preload(next);
-          }
-        }
+        upcoming.forEach(preload);
       }
 
       function refreshImage() {
         if (!images.length) {
-          window.location.reload();
+          reloadPage();
+          scheduleNext();
           return;
         }
         currentIndex += 1;
@@ -294,6 +410,7 @@
             im.classList.remove("hidden");
             document.getElementById("date").textContent = image.date;
             shown = image;
+            disarmDelete();
             renderFavorite();
           }, 200)
         }, () => {
@@ -302,9 +419,10 @@
           if (thisLoad !== latestLoad) {
             return;
           }
-          // move past a missing photo, but don't spin if the NAS is unreachable
+          // move past a missing photo, but don't spin if the NAS is unreachable.  The photo on
+          // screen stays up, and the regular turns keep trying until one loads
           failedLoads += 1;
-          if (failedLoads < images.length) {
+          if (failedLoads < MAX_SKIPS) {
             refreshImage();
           }
         });
@@ -313,23 +431,23 @@
         scheduleNext();
       }
 
+      // for when loading a page fails anyway, like the frame starting up before the NAS
+      navigator.serviceWorker?.register('/kiosk-sw.js').catch(console.log);
+
       // Load the image once on page load
       if (images.length) {
         refreshImage();
-        setInterval(refreshToReview, TO_REVIEW_REFRESH_MS);
-      } else {
-        // pick up photos approved from elsewhere
-        setTimeout(() => window.location.reload(), {{ refresh_secs * 1000 }});
       }
+      // also picks up photos approved from elsewhere when there are none to show
+      setInterval(refreshStatus, STATUS_REFRESH_MS);
+      window.addEventListener('DOMContentLoaded', showControls);
+      window.addEventListener('pointerdown', showControls);
     </script>
   </head>
   <body style="background-color:#000">
     {% if not images %}
-    {% if background %}
-    <img class="day-background" src="{{ background }}" alt="" />
-    {% endif %}
     <div class="no-images">
-      <p>No approved photos around today</p>
+      <p>No approved photos yet</p>
       <a href="{{ review_url }}">Review today's photos</a>
     </div>
     {% else %}
@@ -341,7 +459,7 @@
       <div class="badge">
         <span id="date"></span>
         <a id="to-review" class="to-review" href="{{ review_url }}"{% if not to_review %} hidden{% endif %}>{{ '{:,}'.format(to_review) }} to review</a>
-        <span></span>
+        <span class="controls">
         <button
           id="favorite"
           class="favorite-toggle"
@@ -364,8 +482,9 @@
           <i class="fa fa-eye-slash fa-2x" aria-hidden="true"></i>
         </button>
         <button
-          onclick="deleteImage(this)"
-          title="Permanent delete"
+          id="delete"
+          onclick="deleteImage()"
+          title="Delete"
         >
           <i class="fa fa-trash-o fa-2x" aria-hidden="true"></i>
         </button>
@@ -381,7 +500,8 @@
           title="Next image"
         >
           <i class="fa fa-fast-forward fa-2x" aria-hidden="true"></i>
-        </button>        
+        </button>
+        </span>
       </div>
     </div>
     {% endif %}

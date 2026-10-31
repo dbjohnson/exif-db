@@ -6,7 +6,8 @@
     <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
     <script>
       function downloadImage(href) {
           var downloadLink = document.createElement('a');
@@ -17,28 +18,32 @@
           document.body.removeChild(downloadLink);
       }
 
-      function deleteImage(href, button) {
-        if (confirm('Are you sure you want to delete this image?')) {
-          fetch(href, {
-            method: 'DELETE'
-          })
-          .then(response=>{
-            if (response.status === 409) {
-              throw new Error("Can't delete images while a scan is running");
-            }
-            if (!response.ok) {
-              throw new Error('Network response was not ok. Status: ' + response.status);
-            }
-            return response.json()
-          })
-          .then(data => {
-            console.log('Success:', data);
-            button.closest('.image-container').remove();
-          })
-          .catch((error) => {
-            console.log(error)
-            alert(error);
-          })
+      async function deleteImage(href, button) {
+        if (!confirm('Are you sure you want to delete this image?')) {
+          return;
+        }
+        const container = button.closest('.image-container');
+        try {
+          const response = await fetch(href, {method: 'DELETE'});
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          const {files} = await response.json();
+          container.style.display = 'none';
+          showToast('Photo deleted', () => undo(() => postJson('/api/restore', {files}), container));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't delete: ${error.message}`);
+        }
+      }
+
+      async function undo(request, container) {
+        try {
+          await request();
+          container.style.display = '';
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't undo: ${error.message}`);
         }
       }
 
@@ -79,22 +84,17 @@
         });
       }
 
-      function hideImage(button) {
-        fetch('/api/review', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rejected: [button.dataset.photoId]})
-        })
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok. Status: ' + response.status);
-          }
-          button.closest('.image-container').remove();
-        })
-        .catch((error) => {
-          console.log(error)
-          alert(error);
-        })
+      async function hideImage(button) {
+        const container = button.closest('.image-container');
+        const photo = button.dataset.photoId;
+        try {
+          await postJson('/api/review', {rejected: [photo]});
+          container.style.display = 'none';
+          showToast('Photo hidden', () => undo(() => postJson('/api/review', {approved: [photo]}), container));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't hide: ${error.message}`);
+        }
       }
 
       function toggleFavorite(button) {
@@ -236,6 +236,9 @@
     <div class="image-container">
       <img
         src="/api/image{{ im['SourceFile'] | urlencode }}{% if im['rotation'] %}?rotate={{ im['rotation'] }}{% endif %}"
+        loading="lazy"
+        decoding="async"
+        onload="this.parentElement.classList.add('loaded')"
         data-original="/api/image{{ im['SourceFile'] | urlencode }}"
         alt="{{ im['SourceFile'] }}"
       />
@@ -243,7 +246,7 @@
         <span>{{ im['date'] }}</span>
         <span>{{ im['title'] }}</span>
         <button
-          onclick="downloadImage('/api/image{{ im['SourceFile'] | urlencode }}')"
+          onclick="downloadImage('/api/original{{ im['SourceFile'] | urlencode }}')"
           title="Download original"
         >
           <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
@@ -274,7 +277,7 @@
         </button>
         <button
           onclick="deleteImage('/api/image{{ im['SourceFile'] | urlencode }}', this)"
-          title="Permanent delete"
+          title="Delete"
         >
           <i class="fa fa-trash-o" aria-hidden="true"></i>
         </button>

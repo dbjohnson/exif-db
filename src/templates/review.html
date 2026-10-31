@@ -7,7 +7,8 @@
     <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
     <script>
       const QUERY = {{ query | tojson }};
       const DONE_URL = {{ done_url | tojson }};
@@ -22,7 +23,10 @@
 
       let offset = 0;
       let limit = 0;
+      // tiles in the list, each of which can be a burst of photos
       let total = 0;
+      let photos = 0;
+      // the tiles on this page, followed by any burst photos they've been opened up to show
       let items = [];
       let latestLoad = 0;
       // photo id -> checked, for photos the user has changed; kept when moving between pages
@@ -31,9 +35,15 @@
       const deleting = new Set();
       let deleteError = '';
       let moveAfterDeletes = 0;
+      let reloadAfterDeletes = false;
 
-      // unreviewed photos start out approved
-      const startsChecked = item => item.status !== 'rejected';
+      // unreviewed photos start out approved, except for ones unlikely to be wanted: the rest
+      // of a burst, and anything that didn't come from a camera, like screenshots
+      const startsChecked = item => QUEUE
+        ? !item.inBurst && !item.no_camera
+        : item.status !== 'rejected';
+      const allPhotos = () => items.flatMap(item => [item, ...item.burst]);
+      const tilesOnPage = () => items.filter(item => !item.inBurst).length;
       const isChecked = item => changes.has(item.id) ? changes.get(item.id) : startsChecked(item);
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const photoUrl = (api, item) =>
@@ -57,8 +67,9 @@
       }
 
       function renderActions() {
-        const checked = items.filter(isChecked).length;
-        const unchecked = items.length - checked;
+        const decided = allPhotos();
+        const checked = decided.filter(isChecked).length;
+        const unchecked = decided.length - checked;
         const save = document.getElementById('save');
         if (QUEUE) {
           const parts = [];
@@ -73,11 +84,13 @@
             : 'No changes';
           save.disabled = !changes.size;
         }
-        document.getElementById('toggle-all').textContent = checked ? 'Uncheck all' : 'Check all';
+        document.getElementById('toggle-all').textContent = items.some(isChecked) ? 'Uncheck all' : 'Check all';
         document.getElementById('previous').disabled = offset === 0;
-        document.getElementById('next').disabled = offset + items.length >= total;
+        const tiles = tilesOnPage();
+        document.getElementById('next').disabled = offset + tiles >= total;
         document.getElementById('summary').textContent = items.length
-          ? `${QUEUE ? '' : 'Editing '}{{ scope }} · ${offset + 1}–${offset + items.length} of ${total.toLocaleString()}`
+          ? `${QUEUE ? '' : 'Editing '}{{ scope }} · ${offset + 1}–${offset + tiles} of ${total.toLocaleString()}` +
+            (photos > total ? ` (${photos.toLocaleString()} photos)` : '')
           : '{{ scope }}';
       }
 
@@ -127,7 +140,7 @@
         zoom.href = photoUrl('image', item);
         zoom.target = '_blank';
         zoom.rel = 'noopener';
-        zoom.title = 'Open full size';
+        zoom.title = 'Open larger';
         zoom.textContent = '⤢';
         // a new tab can't be closed again on the kiosk
         zoom.onclick = event => {
@@ -146,7 +159,39 @@
         resetDeleteButton(remove);
 
         label.append(box, image, check, date, zoom, remove);
+        if (item.burst.length) {
+          const more = document.createElement('button');
+          more.type = 'button';
+          more.className = 'more';
+          more.title = 'Show the rest of this burst';
+          more.textContent = `+${item.burst.length}`;
+          more.onclick = event => {
+            event.preventDefault();
+            openBurst(item, label);
+          };
+          label.append(more);
+        }
+        if (item.no_camera && QUEUE) {
+          const note = document.createElement('span');
+          note.className = 'note';
+          note.textContent = 'no camera data';
+          label.append(note);
+        }
         return label;
+      }
+
+      function openBurst(item, tile) {
+        const others = item.burst;
+        item.burst = [];
+        items.splice(items.indexOf(item) + 1, 0, ...others);
+        tile.replaceWith(renderItem(item), ...others.map(renderItem));
+        renderActions();
+      }
+
+      // the next photo of a burst takes the place of the one being removed from it
+      function promoteFromBurst(item) {
+        const [next, ...rest] = item.burst;
+        return Object.assign(next, {inBurst: item.inBurst, burst: rest});
       }
 
       function showLarge(url) {
@@ -182,34 +227,53 @@
         const change = changes.get(item.id);
         changes.delete(item.id);
         deleting.add(item.id);
-        items = items.filter(other => other !== item);
-        total -= 1;
-        tile.style.visibility = 'hidden';
+        photos -= 1;
+        if (item.burst.length) {
+          const next = promoteFromBurst(item);
+          items[items.indexOf(item)] = next;
+          tile.replaceWith(renderItem(next));
+        } else {
+          items = items.filter(other => other !== item);
+          if (!item.inBurst) {
+            total -= 1;
+          }
+          tile.style.visibility = 'hidden';
+        }
         renderActions();
         try {
           // keepalive so that it still completes if the page is left straight after
           const response = await fetch(`/api/image${encodePath(item.path)}`, {method: 'DELETE', keepalive: true});
-          if (response.status === 409) {
-            throw new Error("photos can't be deleted while a scan is running");
-          }
           if (!response.ok) {
             throw new Error('Status: ' + response.status);
           }
+          const {files} = await response.json();
+          showToast(`Deleted ${item.path.split('/').pop()}`, () => undoDelete(files));
         } catch (error) {
           if (change !== undefined) {
             changes.set(item.id, change);
           }
-          items.push(item);
-          total += 1;
-          tile.querySelector('input').checked = isChecked(item);
-          resetDeleteButton(button);
-          tile.style.visibility = '';
-          renderActions();
+          reloadAfterDeletes = true;
           deleteError = `Couldn't delete ${item.path.split('/').pop()}: ${error.message}`;
         }
         deleting.delete(item.id);
         if (!deleting.size) {
           deletesSettled();
+        }
+      }
+
+      async function undoDelete(files) {
+        try {
+          const response = await fetch('/api/restore', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({files})
+          });
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          await load();
+        } catch (error) {
+          showError(`Couldn't undo: ${error.message}`);
         }
       }
 
@@ -220,9 +284,10 @@
           const direction = moveAfterDeletes;
           moveAfterDeletes = 0;
           await move(direction);
-        } else if (!items.length) {
+        } else if (!items.length || reloadAfterDeletes) {
           await load();
         }
+        reloadAfterDeletes = false;
         if (error) {
           showError(error);
         }
@@ -232,15 +297,25 @@
       // page's ahead of time, once the current page is finished with the connection
       async function prepareNextPage(load, images) {
         await Promise.allSettled(images.map(image => image.decode()));
-        if (load !== latestLoad || offset + items.length >= total) {
+        if (load !== latestLoad || offset + tilesOnPage() >= total) {
           return;
         }
-        const response = await fetch(pageUrl(offset + items.length, limit));
+        const response = await fetch(pageUrl(offset + tilesOnPage(), limit));
         if (response.ok && load === latestLoad) {
           for (const item of (await response.json()).items) {
             new Image().src = photoUrl('thumb', item);
           }
         }
+      }
+
+      // a page can still list photos that are on their way to being deleted
+      function takeOutDeleting(item) {
+        item.burst.forEach(other => other.inBurst = true);
+        item.burst = item.burst.filter(other => !deleting.has(other.id));
+        if (!deleting.has(item.id)) {
+          return item;
+        }
+        return item.burst.length ? promoteFromBurst(item) : null;
       }
 
       async function load() {
@@ -255,8 +330,9 @@
           if (thisLoad !== latestLoad) {
             return;
           }
-          page.items = page.items.filter(item => !deleting.has(item.id));
-          page.total = Math.max(0, page.total - deleting.size);
+          const listed = page.items.length;
+          page.items = page.items.map(takeOutDeleting).filter(Boolean);
+          page.total = Math.max(0, page.total - (listed - page.items.length));
           if (!page.total) {
             // otherwise this runs again once the deletes have finished
             if (!deleting.size) {
@@ -264,7 +340,7 @@
             }
             return;
           }
-          ({total, offset, items} = page);
+          ({total, photos, offset, items} = page);
           const grid = document.getElementById('grid');
           grid.replaceChildren(...items.map(renderItem));
           grid.scrollTop = 0;
@@ -279,7 +355,7 @@
         const button = document.getElementById('save');
         button.disabled = true;
         showError('');
-        const decided = QUEUE ? items.map(item => [item.id, isChecked(item)]) : [...changes];
+        const decided = QUEUE ? allPhotos().map(item => [item.id, isChecked(item)]) : [...changes];
         const ids = checked => decided.filter(entry => entry[1] === checked).map(entry => entry[0]);
         try {
           const response = await fetch('/api/review', {
@@ -317,7 +393,7 @@
           return;
         }
         // a page may be short after deleting, and what followed it has moved up
-        offset = Math.max(0, offset + (direction > 0 ? items.length : -limit));
+        offset = Math.max(0, offset + (direction > 0 ? tilesOnPage() : -limit));
         return load();
       }
 

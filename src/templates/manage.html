@@ -106,14 +106,64 @@
         send(`/api/scan/schedule?hours=${hours}${time}`, 'PUT');
       }
 
+      function formatSize(bytes) {
+        if (bytes < 1e6) {
+          return `${Math.round(bytes / 1e3)} KB`;
+        }
+        return bytes < 1e9 ? `${(bytes / 1e6).toFixed(1)} MB` : `${(bytes / 1e9).toFixed(1)} GB`;
+      }
+
+      let trashSummary = {files: 0, bytes: 0};
+
+      function renderTrash(summary) {
+        trashSummary = summary;
+        document.getElementById('trash').textContent = summary.files
+          ? `${summary.files.toLocaleString()} file${summary.files === 1 ? '' : 's'}, ${formatSize(summary.bytes)}`
+          : 'Empty';
+        document.getElementById('empty-trash').disabled = !summary.files;
+      }
+
+      async function refreshTrash() {
+        try {
+          const response = await fetch('/api/trash');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          renderTrash(await response.json());
+        } catch (error) {
+          showError(`Couldn't load the trash: ${error.message}`);
+        }
+      }
+
+      async function emptyTrash() {
+        const {files, bytes} = trashSummary;
+        if (!confirm(`Permanently delete ${files.toLocaleString()} file${files === 1 ? '' : 's'} (${formatSize(bytes)})? This can't be undone.`)) {
+          return;
+        }
+        showError('');
+        const button = document.getElementById('empty-trash');
+        button.disabled = true;
+        try {
+          const response = await fetch('/api/trash', {method: 'DELETE'});
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          renderTrash(await response.json());
+        } catch (error) {
+          showError(`Couldn't empty the trash: ${error.message}`);
+          refreshTrash();
+        }
+      }
+
       function startRebuild() {
-        if (confirm('Rescan the whole library? Deleting images is disabled until it finishes. The current index stays in use until then.')) {
+        if (confirm('Rescan the whole library? The current index stays in use until it finishes.')) {
           send('/api/scan?full=true', 'POST');
         }
       }
 
       window.addEventListener('DOMContentLoaded', () => {
         refresh();
+        refreshTrash();
         setInterval(refresh, 2000);
       });
     </script>
@@ -157,6 +207,13 @@
         <a id="hidden" class="link-button" href="/review?status=rejected" hidden></a>
         <button id="reset" onclick="resetApprovals()" disabled>Reset all approvals</button>
       </div>
+
+      <h2>Trash</h2>
+      <div class="actions">
+        <span id="trash" class="trash-summary">Loading…</span>
+        <button id="empty-trash" onclick="emptyTrash()" disabled>Empty trash</button>
+      </div>
+      <p class="hint">Deleted files are kept here, in the deleted folder of the storage volume, until the trash is emptied.</p>
 
       <h2>Run</h2>
       <div class="actions">

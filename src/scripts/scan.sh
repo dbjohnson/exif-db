@@ -40,9 +40,11 @@ touch "${LAST_SCAN}.tmp"
 # once it has finished - so check for output rather than checking the exit status
 if [ "${MODE}" == "incremental" ]; then
     # exif.csv's modified time is only a fallback for libraries not yet scanned with
-    # a last_scan file; it can't be relied on since deleting images also updates it
+    # a last_scan file
     [ -f "${LAST_SCAN}" ] && NEWER="${LAST_SCAN}" || NEWER="${EXIF_CSV}"
-    find /photo -not -path '*/[@.]*' -type f -newer "${NEWER}" > tmp.txt || exit 1
+    # by when files arrived rather than their modified times: phone backups keep a photo's
+    # original modified time, so most of what they add looks older than the last scan
+    find /photo -not -path '*/[@.]*' -type f -cnewer "${NEWER}" > tmp.txt || exit 1
     if [ -s tmp.txt ]; then
         exiftool -f -@ "${TAGS_FILE}" -@ tmp.txt -fast -progress -n -api "missingtagvalue^=" -csv > "${OUTPUT}"
         [ -s "${OUTPUT}" ] || exit 1

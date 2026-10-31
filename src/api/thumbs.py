@@ -16,6 +16,9 @@ CLOCKWISE = {
     180: Image.Transpose.ROTATE_180,
     270: Image.Transpose.ROTATE_90
 }
+# Synology's indexer keeps upright copies of each photo in @eaDir, which cost nothing to serve
+SYNOLOGY_DISPLAY = 'XL'
+SYNOLOGY_THUMB = 'B'
 # a page of thumbnails is requested all at once, and full size decodes are slow and
 # memory hungry on a NAS
 _decoding = threading.BoundedSemaphore(2)
@@ -33,10 +36,13 @@ def read_heic(path):
     )
 
 
+def max_image_size():
+    return int(os.getenv('MAX_IMAGE_SIZE', 2000))
+
+
 def limit_size(im):
-    # resize to max 2000px
     width, height = im.size
-    ratio = int(os.getenv('MAX_IMAGE_SIZE', 2000)) / max(im.size)
+    ratio = max_image_size() / max(im.size)
     if ratio < 1:
         return im.resize((int(width * ratio), int(height * ratio)))
     return im
@@ -70,6 +76,19 @@ def _rotate(im, rotation):
     return im.transpose(CLOCKWISE[rotation]) if rotation else im
 
 
+def _synology_copy(path, name):
+    """
+    The path to a copy Synology made of a photo, unless there isn't one yet or the photo
+    has changed since it was made
+    """
+    folder, filename = os.path.split(path)
+    copy = os.path.join(folder, '@eaDir', filename, f"SYNOPHOTO_THUMB_{name}.jpg")
+    try:
+        return copy if os.stat(copy).st_mtime_ns >= os.stat(path).st_mtime_ns else None
+    except OSError:
+        return None
+
+
 def _cached(path, variant, quality, make):
     """
     Returns the path to a cached JPEG made from an image, creating it if needed
@@ -93,20 +112,29 @@ def _cached(path, variant, quality, make):
 
 
 def thumbnail(path, rotation=0):
+    copy = _synology_copy(path, SYNOLOGY_THUMB)
+    if copy and not rotation:
+        return copy
+
     def make():
-        im = _decode(path, THUMB_SIZE)
+        im = Image.open(copy) if copy else _decode(path, THUMB_SIZE)
         im.thumbnail((THUMB_SIZE, THUMB_SIZE))
         return _rotate(im, rotation)
 
     return _cached(path, f":{rotation}" if rotation else '', 80, make)
 
 
-def rotated(path, rotation):
+def display(path, rotation=0):
     """
-    A copy for display at the same size as the unrotated photo: originals are never changed
+    A copy for showing on screen, never the original: browsers can't show every format
+    the library holds, and full size photos use up the frame's memory
     """
-    def make():
-        im = _decode(path)
-        return _rotate(limit_size(im) if _is_heic(path) else im, rotation)
+    copy = _synology_copy(path, SYNOLOGY_DISPLAY)
+    if copy and not rotation:
+        return copy
 
-    return _cached(path, f":full:{rotation}", 90, make)
+    def make():
+        im = Image.open(copy) if copy else limit_size(_decode(path, max_image_size()))
+        return _rotate(im, rotation)
+
+    return _cached(path, f":display:{rotation}", 85, make)

@@ -1,28 +1,25 @@
 import os
-import shutil
 import datetime
-import glob
+import hashlib
 import logging
-from io import BytesIO
-from functools import lru_cache
 from typing import Literal
 from urllib.parse import quote, urlencode
 
-import rawpy
 from fastapi import Depends, FastAPI, Query, Request, HTTPException
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, Response, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from api import exif, scans, thumbs
+from api import exif, scans, thumbs, trash
 
 
 app = FastAPI()
-STATIC_DIR = "/src/app/static"
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(APP_DIR, "static")
+TEMPLATES_DIR = os.path.join(APP_DIR, "templates")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 exif.load_csv()
 scans.start_scheduler()
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
@@ -31,7 +28,22 @@ logger = logging.getLogger('uvicorn.error')
 # lets a browser reuse a photo instead of having the NAS read and convert it again
 IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
 Rotation = Literal[0, 90, 180, 270]
-DELETED_DIR = '/storage/deleted'
+# how many photos from other dates fill in a frame with too few from around today
+KIOSK_STAND_INS = 200
+
+
+def page_build():
+    # the same in every worker and across restarts, so that a page only reloads for a real change
+    digest = hashlib.sha1()
+    for directory in (STATIC_DIR, TEMPLATES_DIR):
+        for folder, folders, names in sorted(os.walk(directory)):
+            for name in sorted(names):
+                with open(os.path.join(folder, name), 'rb') as fh:
+                    digest.update(fh.read())
+    return digest.hexdigest()
+
+
+PAGE_BUILD = page_build()
 
 
 def most_recent_date(month, day):
@@ -62,9 +74,15 @@ def background_url():
     return f"/api/image{quote(path)}" + (f"?rotate={rotation}" if rotation else "")
 
 
-def cached_image(make, path, rotation):
-    if not os.path.normpath(path).startswith(f"{exif.LIBRARY_ROOT}/"):
+def library_path(path):
+    normalized = os.path.normpath(path)
+    if not normalized.startswith(f"{exif.LIBRARY_ROOT}/"):
         raise HTTPException(status_code=404)
+    return normalized
+
+
+def cached_image(make, path, rotation):
+    path = library_path(path)
     try:
         cached = make(path, rotation)
     except Exception as e:
@@ -178,49 +196,50 @@ async def _manage(request: Request):
     return templates.TemplateResponse(request=request, name="manage.html")
 
 
+class RestoreRequest(BaseModel):
+    files: list[str]
+
+
 @app.delete("/api/image{path:path}")
-async def _delete_image(path: str):
-    # a scan in progress could add back the row for a file deleted now
-    if scans.running():
-        raise HTTPException(status_code=409, detail="Can't delete images while a scan is running")
+def _delete_image(path: str):
+    path = library_path(path)
+    files = trash.discard(path)
+    exif.record_deleted({path, *files})
+    return {'files': files}
 
-    def delete():
-        # assume any files differing only by extension should also be deleted
-        files = glob.glob(f"{glob.escape(os.path.splitext(path)[0])}.*")
-        exif.delete_images({path, *files})
-        # move files to deleted directory (user can then permanently delete),
-        # keeping their paths since file names aren't unique across the library
-        for f in files:
-            destination = os.path.join(DELETED_DIR, f.lstrip('/'))
-            os.makedirs(os.path.dirname(destination), exist_ok=True)
-            shutil.move(f, destination)
 
-    # finished before responding, so that a page reloading straight after won't still see it
-    await run_in_threadpool(delete)
+@app.post("/api/restore")
+def _restore_images(request: RestoreRequest):
+    restored = trash.restore([library_path(f) for f in request.files])
+    if not restored:
+        raise HTTPException(status_code=404, detail="Nothing to restore")
+    exif.record_restored(restored)
+    return {'files': restored}
 
-# not concerned about cross worker caching, etc.
-@lru_cache(maxsize=1000)
+
+@app.get("/api/trash")
+def _trash():
+    return trash.summary()
+
+
+@app.delete("/api/trash")
+def _empty_trash():
+    trash.empty()
+    return trash.summary()
+
+
+# not async: decoding is slow, and would otherwise hold up every other request
 @app.get("/api/image{path:path}")
-async def _image(request: Request, path: str, rotate: int = Depends(rotation_param)):
-    if rotate:
-        return await run_in_threadpool(cached_image, thumbs.rotated, path, rotate)
-    extension = path.split('.')[-1].upper()
-    if extension == 'HEIC':
-        # HEIC images need to be converted to JPEG or browsers won't display them
-        im = thumbs.limit_size(thumbs.read_heic(path))
-        buffered = BytesIO()
-        im.save(buffered, format="JPEG")
-        img_bytes = buffered.getvalue()
-        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
-    elif extension in thumbs.RAW_EXTENSIONS:
-        # extract thumnails for raw
-        with rawpy.imread(path) as raw:
-            img_bytes = raw.extract_thumb().data
-        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
-    else:
-        with open(path, 'rb') as fh:
-            img_bytes = fh.read()
-        return Response(content=img_bytes, headers=IMAGE_CACHE_HEADERS)
+def _image(path: str, rotate: int = Depends(rotation_param)):
+    return cached_image(thumbs.display, path, rotate)
+
+
+@app.get("/api/original{path:path}")
+def _original(path: str):
+    path = library_path(path)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, filename=os.path.basename(path))
 
 
 # not async: decoding is slow, and would otherwise hold up every other request
@@ -236,9 +255,13 @@ async def _tags():
 
 @app.get("/api/exif")
 async def _exif(source_file: str):
-    return exif.db.execute(
-        f"SELECT * FROM exif WHERE SourceFile = '{source_file}'"
-    ).fetchdf().fillna('').to_dict(orient='records')[0]
+    rows = exif.db.execute(
+        "SELECT * FROM exif WHERE SourceFile = ?",
+        [source_file]
+    ).fetchdf().fillna('').to_dict(orient='records')
+    if not rows:
+        raise HTTPException(status_code=404)
+    return rows[0]
 
 
 @app.get("/api/dump")
@@ -320,7 +343,9 @@ async def _review_today():
     date = datetime.date.today()
     return {
         'date': date.isoformat(),
-        'unreviewed': exif.review_counts(date_filter(date, True))[exif.UNREVIEWED]
+        'unreviewed': exif.review_counts(date_filter(date, True))[exif.UNREVIEWED],
+        'photos': exif.photos_version(),
+        'build': PAGE_BUILD
     }
 
 
@@ -373,8 +398,17 @@ async def _review(
     )
 
 
-@app.get("/kiosk")
-async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
+def slides(df):
+    return df.assign(
+        date=df['DateTimeOriginal'].map(
+            lambda d: d.split(' ')[0].replace(':', '/')
+        )
+    )[[
+        'SourceFile', 'date', 'photo_id', 'favorite', 'rotation'
+    ]].to_dict(orient='records')
+
+
+def kiosk_photos(min_pics):
     date = datetime.date.today()
     pics = []
     offs = 0
@@ -385,28 +419,38 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
             dt = date + datetime.timedelta(days=offs * sign)
             df = exif.select_photos(f"%{dt.month:02d}:{dt.day:02d} ")
             if len(df):
-                df = df.assign(
-                    date=df['DateTimeOriginal'].map(
-                        lambda d: d.split(' ')[0].replace(':', '/')
-                    )
-                )[[
-                    'SourceFile', 'date', 'photo_id', 'favorite', 'rotation'
-                ]]
-                pics.extend(
-                    df.to_dict(orient='records')
-                )
+                pics.extend(slides(sample_across_years(df, len(df))))
         offs += 1
+    # a frame should always have something to show
+    if len(pics) < min_pics:
+        pics.extend(slides(exif.stand_in_photos(
+            [pic['photo_id'] for pic in pics],
+            KIOSK_STAND_INS,
+            date.isoformat()
+        )))
+    return pics
 
+
+@app.get("/api/kiosk/photos")
+async def _kiosk_photos(min_pics: int = 20):
+    return kiosk_photos(min_pics)
+
+
+@app.get("/kiosk")
+async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
+    date = datetime.date.today()
     return templates.TemplateResponse(
         request=request,
         name="kiosk.html",
         context={
             "refresh_secs": refresh_secs,
+            "min_pics": min_pics,
             "review_url": review_url(date, True, kiosk=request.url.query),
             "today": date.isoformat(),
             "to_review": exif.review_counts(date_filter(date, True))[exif.UNREVIEWED],
-            "background": None if pics else background_url(),
-            "images": pics
+            "photos_version": exif.photos_version(),
+            "build": PAGE_BUILD,
+            "images": kiosk_photos(min_pics)
         }
     )
 
@@ -422,6 +466,16 @@ async def _index(request: Request, response_class=HTMLResponse):
 @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
 async def _apple_touch_icon():
     return FileResponse(f"{STATIC_DIR}/apple-touch-icon.png")
+
+
+# served from the root because that decides which pages it can cover: all those the frame can reach
+@app.get("/kiosk-sw.js", include_in_schema=False)
+async def _kiosk_service_worker():
+    return FileResponse(
+        f"{STATIC_DIR}/kiosk-sw.js",
+        media_type='text/javascript',
+        headers={'Cache-Control': 'no-cache'}
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
