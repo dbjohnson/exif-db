@@ -8,5 +8,5 @@ if [ -f ${EXIF_CSV} ]; then
         exiftool -f -@ "${TAGS_FILE}" -@ tmp.txt -fast -n -api "missingtagvalue^=" -csv \
         | tail -n +2 >> "${EXIF_CSV}" && rm tmp.txt
 else
-    exiftool -f -@ "${TAGS_FILE}" -csv -i @eaDir -fast -progress -n -r /photo > "${EXIF_CSV}"
+    exiftool -f -@ "${TAGS_FILE}" -csv -i @eaDir -fast -progress -n -api "missingtagvalue^=" -r /photo > "${EXIF_CSV}"
 fi

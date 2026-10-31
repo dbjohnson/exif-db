@@ -37,13 +37,15 @@ async def _reload():
 @app.delete("/api/image{path:path}")
 async def _delete_image(path: str, background_tasks: BackgroundTasks):
     def delete():
-        exif.delete_image(path)
-        # move file to deleted directory (user can then permanently delete)
-        deleted_dir = '/storage/deleted'
-        os.makedirs(deleted_dir, exist_ok=True)
         # assume any files differing only by extension should also be deleted
-        for f in glob.glob(f"{os.path.splitext(path)[0]}.*"):
-            shutil.move(f, os.path.join(deleted_dir, os.path.basename(f)))
+        files = glob.glob(f"{glob.escape(os.path.splitext(path)[0])}.*")
+        exif.delete_images({path, *files})
+        # move files to deleted directory (user can then permanently delete),
+        # keeping their paths since file names aren't unique across the library
+        for f in files:
+            destination = os.path.join('/storage/deleted', f.lstrip('/'))
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            shutil.move(f, destination)
 
     background_tasks.add_task(delete)
 
