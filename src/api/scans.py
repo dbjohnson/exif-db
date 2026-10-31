@@ -1,3 +1,4 @@
+import datetime
 import fcntl
 import json
 import os
@@ -19,6 +20,8 @@ RESULT = '/storage/scan_result.json'
 LAST_SCAN = '/storage/last_scan'
 SCHEDULE = '/storage/scan_schedule.json'
 SCHEDULER_POLL_SECS = 60
+DAILY_HOURS = 24
+DEFAULT_DAILY_TIME = '03:00'
 
 
 def running():
@@ -79,6 +82,7 @@ def status():
         'progress': _progress(log) if is_running else None,
         'last_result': _read_json(RESULT),
         'schedule_hours': schedule_hours(),
+        'schedule_time': schedule_time(),
         'next_scan': next_scan(),
         'log': log
     }
@@ -123,9 +127,27 @@ def schedule_hours():
     return (_read_json(SCHEDULE) or {}).get('hours', 0)
 
 
-def set_schedule_hours(hours):
+def schedule_time():
+    return (_read_json(SCHEDULE) or {}).get('at', DEFAULT_DAILY_TIME)
+
+
+def set_schedule(hours, at=None):
+    schedule = {'hours': hours, 'at': at or schedule_time()}
     with open(SCHEDULE, 'w') as fh:
-        json.dump({'hours': hours}, fh)
+        json.dump(schedule, fh)
+
+
+def _next_daily(after, at):
+    """
+    The first time after the given timestamp that the clock shows "HH:MM", local time
+    """
+    hour, minute = map(int, at.split(':'))
+    day = datetime.datetime.fromtimestamp(after).date()
+    while True:
+        candidate = datetime.datetime.combine(day, datetime.time(hour, minute)).timestamp()
+        if candidate > after:
+            return candidate
+        day += datetime.timedelta(days=1)
 
 
 def next_scan():
@@ -135,7 +157,13 @@ def next_scan():
     # count from attempts as well as successes, so a failing scan doesn't retry every poll
     started = (_read_json(RESULT) or {}).get('started', 0)
     last_success = os.path.getmtime(LAST_SCAN) if os.path.exists(LAST_SCAN) else 0
-    return max(started, last_success) + hours * 3600
+    last = max(started, last_success)
+    if hours == DAILY_HOURS:
+        # also count from when the schedule was set, so that choosing a time that has already
+        # passed today waits for tomorrow.  A time missed while the NAS was off still runs
+        # once it's back, since the last scan is then older than that time
+        return _next_daily(max(last, os.path.getmtime(SCHEDULE)), schedule_time())
+    return last + hours * 3600
 
 
 def _run_scheduler():

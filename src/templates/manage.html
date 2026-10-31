@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet" href="/static/style.css">
     <script>
       function formatTime(secs) {
@@ -57,6 +58,12 @@
         if (document.activeElement !== schedule) {
           schedule.value = String(status.schedule_hours);
         }
+        const scheduleTime = document.getElementById('schedule-time');
+        if (document.activeElement !== scheduleTime) {
+          scheduleTime.value = status.schedule_time;
+        }
+        // set from the choice being made, so it doesn't flicker while that saves
+        scheduleTime.closest('label').hidden = schedule.value !== '24';
         document.getElementById('log').textContent = status.log.join('\n') || 'No log yet';
       }
 
@@ -88,6 +95,15 @@
         if (confirm(`Reset all ${reviewedPhotos.toLocaleString()} reviewed photos to unreviewed? Nothing will show in the gallery or kiosk until photos are reviewed again. Favorites are kept.`)) {
           send('/api/review', 'DELETE');
         }
+      }
+
+      function saveSchedule() {
+        const hours = document.getElementById('schedule').value;
+        const at = document.getElementById('schedule-time').value;
+        // a time that's been cleared keeps the one already saved
+        const time = at ? '&at=' + encodeURIComponent(at) : '';
+        document.getElementById('schedule-time').closest('label').hidden = hours !== '24';
+        send(`/api/scan/schedule?hours=${hours}${time}`, 'PUT');
       }
 
       function startRebuild() {
@@ -154,13 +170,17 @@
       <h2>Schedule</h2>
       <label>
         Scan for new files
-        <select id="schedule" onchange="send('/api/scan/schedule?hours=' + this.value, 'PUT')">
+        <select id="schedule" onchange="saveSchedule()">
           <option value="0">never</option>
           <option value="1">every hour</option>
           <option value="6">every 6 hours</option>
           <option value="24">every day</option>
           <option value="168">every week</option>
         </select>
+      </label>
+      <label class="schedule-time" hidden>
+        at
+        <input id="schedule-time" type="time" onchange="saveSchedule()" />
       </label>
 
       <h2>Scan log</h2>

@@ -588,6 +588,23 @@ button:hover {
   padding: 6px;
 }
 
+.manage input[type="time"] {
+  background: #000;
+  color: #ddd;
+  border: 1px solid #666;
+  border-radius: 6px;
+  padding: 6px;
+  color-scheme: dark;
+}
+
+.manage .schedule-time {
+  margin-left: 8px;
+}
+
+.manage .schedule-time[hidden] {
+  display: none;
+}
+
 .manage pre {
   margin: 0;
   padding: 8px;

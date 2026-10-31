@@ -20,7 +20,8 @@ from api import exif, scans, thumbs
 
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="/src/app/static"), name="static")
+STATIC_DIR = "/src/app/static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory="templates")
 exif.load_csv()
 scans.start_scheduler()
@@ -152,10 +153,13 @@ async def _cancel_scan():
 
 
 @app.put("/api/scan/schedule")
-async def _set_scan_schedule(hours: int):
+async def _set_scan_schedule(
+    hours: int,
+    at: str = Query(default=None, pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
+):
     if hours < 0:
         raise HTTPException(status_code=422, detail="hours can't be negative")
-    scans.set_schedule_hours(hours)
+    scans.set_schedule(hours, at)
     return scans.next_scan()
 
 
@@ -388,4 +392,17 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
 
 @app.get("/")
 async def _index(request: Request, response_class=HTMLResponse):
-    return RedirectResponse(url=request.url_for('_random'))
+    # relative, since behind the proxy this app sees http and an absolute url would say so
+    return RedirectResponse(url='/random')
+
+
+# browsers and iOS also look for these at the root, without being told where they are
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+async def _apple_touch_icon():
+    return FileResponse(f"{STATIC_DIR}/apple-touch-icon.png")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def _favicon():
+    return FileResponse(f"{STATIC_DIR}/favicon.ico")

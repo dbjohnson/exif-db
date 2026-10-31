@@ -18,7 +18,7 @@ To rebuild the index from scratch, add `--full`.  The current index stays in use
 docker compose run --rm -d exif-db bash /src/app/scripts/scan.sh --full
 ```
 
-Scans can also be started, cancelled and scheduled from the webservice at `/manage`.  Images can't be deleted while a scan is running
+Scans can also be started, cancelled and scheduled from the webservice at `/manage`, including the time of day for daily scans (in the container's `TZ`).  Images can't be deleted while a scan is running
 
 Start webservice / API
 ```bash
