@@ -79,6 +79,23 @@
         })
       }
 
+      function resetApprovals(button) {
+        if (!confirm(button.dataset.message)) {
+          return;
+        }
+        fetch(button.dataset.url, {method: 'DELETE'})
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          window.location.reload();
+        })
+        .catch((error) => {
+          console.log(error)
+          alert(error);
+        })
+      }
+
       function goToDate() {
         const [year, month, day] = document.getElementById('date-picker').value.split('-').map(Number);
         // ignore partly typed years
@@ -153,8 +170,16 @@
       {% if picked_date and counts.approved and counts.unreviewed %}
       <a class="review-badge" href="{{ review_url }}">{{ counts.unreviewed }} to review</a>
       {% endif %}
-      {% if picked_date and counts.rejected %}
-      <a class="hidden-link" href="{{ hidden_url }}">{{ counts.rejected }} hidden</a>
+      {% if picked_date and (counts.approved or counts.rejected) %}
+      <a class="edit-link" href="{{ edit_url }}">edit approvals{% if counts.rejected %} ({{ counts.rejected }} hidden){% endif %}</a>
+      <button
+        class="edit-link reset-link"
+        data-url="/api/review?date={{ picked_date }}&all_years={{ 'true' if all_years else 'false' }}"
+        data-message="Reset {{ counts.approved + counts.rejected }} reviewed photo{{ '' if counts.approved + counts.rejected == 1 else 's' }} from this date{{ ', across all years,' if all_years }} to unreviewed? They won't show until reviewed again. Favorites are kept."
+        onclick="resetApprovals(this)"
+      >
+        reset approvals
+      </button>
       {% endif %}
     </div>
     {% if not counts.approved %}

@@ -24,7 +24,7 @@ templates = Jinja2Templates(directory="templates")
 exif.load_csv()
 scans.start_scheduler()
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
-ReviewStatus = Literal['unreviewed', 'rejected']
+ReviewStatus = Literal['unreviewed', 'rejected', 'reviewed']
 logger = logging.getLogger('uvicorn.error')
 
 
@@ -74,7 +74,7 @@ def gallery(request, date, all_years, n):
             "counts": counts,
             "background": None if counts[exif.APPROVED] else exif.background_photo(),
             "review_url": review_url(date, all_years),
-            "hidden_url": review_url(date, all_years, status='rejected'),
+            "edit_url": review_url(date, all_years, status='reviewed'),
             "images": pics.assign(
                 date=pics['DateTimeOriginal'].map(
                     lambda d: d.split(' ')[0].replace(':', '/')
@@ -276,6 +276,11 @@ async def _record_reviews(decisions: ReviewDecisions):
     return "saved"
 
 
+@app.delete("/api/review")
+async def _reset_reviews(date: datetime.date = None, all_years: bool = True):
+    return {'reset': exif.reset_reviews(date_filter(date, all_years))}
+
+
 @app.get("/review")
 async def _review(
     request: Request,
@@ -285,7 +290,7 @@ async def _review(
 ):
     if date is None:
         scope = "All dates"
-        done_url = "/random"
+        done_url = "/random" if status == 'unreviewed' else "/manage"
     else:
         scope = f"{date:%B} {date.day}" + ("" if all_years else f", {date.year}")
         done_url = "/onthisday?" + urlencode({

@@ -16,6 +16,7 @@ FAVORITES_CSV = '/storage/favorites.csv'
 APPROVED = 'approved'
 REJECTED = 'rejected'
 UNREVIEWED = 'unreviewed'
+REVIEWED = 'reviewed'
 FAVORITE = 'favorite'
 NOT_FAVORITE = 'not_favorite'
 db = duckdb.connect(database=':memory:', read_only=False)
@@ -168,6 +169,25 @@ def record_reviews(approved=(), rejected=()):
     )
 
 
+def reset_reviews(datestring=''):
+    """
+    Return reviewed photos to unreviewed, and report how many.  Resetting the whole
+    library includes photos no longer in the index, so they don't return with an old
+    decision if their files do
+    """
+    _with_status()
+    rows = db.execute(
+        """
+        SELECT photo_id
+        FROM reviews LEFT JOIN exif USING (photo_id)
+        WHERE value <> ? AND (? OR DateTimeOriginal LIKE ?)
+        """,
+        [UNREVIEWED, not datestring, f"{datestring}%"]
+    ).fetchall()
+    _append_log(REVIEWS_CSV, [(photo_id, UNREVIEWED) for photo_id, in rows])
+    return len(rows)
+
+
 def set_favorite(photo_id, favorite):
     _append_log(FAVORITES_CSV, [(photo_id, FAVORITE if favorite else NOT_FAVORITE)])
 
@@ -230,17 +250,18 @@ def review_counts(datestring=''):
 
 def review_page(datestring, status, offset, limit):
     table = _with_status()
-    filters = [f"{datestring}%", status]
+    statuses = [APPROVED, REJECTED] if status == REVIEWED else [status]
+    filters = [f"{datestring}%", statuses]
     total = db.execute(
-        f"SELECT COUNT(*) FROM {table} WHERE DateTimeOriginal LIKE ? AND review_status = ?",
+        f"SELECT COUNT(*) FROM {table} WHERE DateTimeOriginal LIKE ? AND list_contains(?, review_status)",
         filters
     ).fetchone()[0]
     # reviewing shrinks the queue, which can leave the offset past its end
     offset = min(offset, max(total - limit, 0))
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal FROM {table}
-        WHERE DateTimeOriginal LIKE ? AND review_status = ?
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status FROM {table}
+        WHERE DateTimeOriginal LIKE ? AND list_contains(?, review_status)
         ORDER BY DateTimeOriginal DESC, photo_id
         LIMIT ? OFFSET ?
         """,
@@ -250,7 +271,12 @@ def review_page(datestring, status, offset, limit):
         'total': total,
         'offset': offset,
         'items': [
-            {'id': photo_id, 'path': path, 'date': taken.split(' ')[0].replace(':', '/')}
-            for photo_id, path, taken in rows
+            {
+                'id': photo_id,
+                'path': path,
+                'date': taken.split(' ')[0].replace(':', '/'),
+                'status': review_status
+            }
+            for photo_id, path, taken, review_status in rows
         ]
     }

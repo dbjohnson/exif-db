@@ -36,6 +36,8 @@
         const hidden = document.getElementById('hidden');
         hidden.textContent = `${status.reviews.rejected.toLocaleString()} hidden`;
         hidden.hidden = !status.reviews.rejected;
+        reviewedPhotos = status.reviews.approved + status.reviews.rejected;
+        document.getElementById('reset').disabled = !reviewedPhotos;
         document.getElementById('result').textContent = formatResult(status.last_result);
         document.getElementById('next').textContent = status.next_scan ? formatTime(status.next_scan) : 'not scheduled';
 
@@ -78,6 +80,14 @@
           showError(typeof body.detail === 'string' ? body.detail : 'Request failed. Status: ' + response.status);
         }
         refresh();
+      }
+
+      let reviewedPhotos = 0;
+
+      function resetApprovals() {
+        if (confirm(`Reset all ${reviewedPhotos.toLocaleString()} reviewed photos to unreviewed? Nothing will show in the gallery or kiosk until photos are reviewed again. Favorites are kept.`)) {
+          send('/api/review', 'DELETE');
+        }
       }
 
       function startRebuild() {
@@ -129,6 +139,7 @@
       <div class="actions">
         <a id="to-review" class="link-button" href="/review" hidden></a>
         <a id="hidden" class="link-button" href="/review?status=rejected" hidden></a>
+        <button id="reset" onclick="resetApprovals()" disabled>Reset all approvals</button>
       </div>
 
       <h2>Run</h2>

@@ -119,7 +119,7 @@ button:hover {
 
 .with-background .date-controls,
 .with-background .date-controls input[type="date"],
-.with-background .hidden-link,
+.with-background .edit-link,
 .with-background .review-badge,
 .with-background .review-cta p,
 .with-background .no-images {
@@ -128,7 +128,7 @@ button:hover {
 }
 
 .review-badge,
-.hidden-link {
+.edit-link {
   color: #888;
   text-decoration: none;
 }
@@ -141,9 +141,16 @@ button:hover {
 }
 
 .review-badge:hover,
-.hidden-link:hover {
+.edit-link:hover {
   color: #ddd;
   border-color: #888;
+}
+
+.reset-link,
+.reset-link:hover {
+  padding: 0;
+  background: none;
+  font: inherit;
 }
 
 .review-cta {

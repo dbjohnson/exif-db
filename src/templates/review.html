@@ -9,8 +9,8 @@
     <script>
       const QUERY = {{ query | tojson }};
       const DONE_URL = {{ done_url | tojson }};
-      // the normal queue starts with everything approved; hidden photos start unchanged
-      const RESTORING = QUERY.status === 'rejected';
+      // the queue decides every photo on a page; editing only saves what was changed
+      const QUEUE = QUERY.status === 'unreviewed';
       const GAP = 6;
       // aim for about this many photos on screen, within sensible thumbnail sizes
       const TARGET_PHOTOS = 24;
@@ -22,10 +22,12 @@
       let total = 0;
       let items = [];
       let latestLoad = 0;
-      // photos the user has changed from the default, kept when moving between pages
-      const flipped = new Set();
+      // photo id -> checked, for photos the user has changed; kept when moving between pages
+      const changes = new Map();
 
-      const isChecked = id => flipped.has(id) === RESTORING;
+      // unreviewed photos start out approved
+      const startsChecked = item => item.status !== 'rejected';
+      const isChecked = item => changes.has(item.id) ? changes.get(item.id) : startsChecked(item);
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const pageUrl = (start, count) => '/api/review?' + new URLSearchParams({...QUERY, offset: start, limit: count});
 
@@ -46,32 +48,35 @@
       }
 
       function renderActions() {
-        const checked = items.filter(item => isChecked(item.id)).length;
+        const checked = items.filter(isChecked).length;
         const unchecked = items.length - checked;
         const save = document.getElementById('save');
-        const parts = [];
-        if (RESTORING) {
-          parts.push(`Restore ${checked}`);
-        } else {
+        if (QUEUE) {
+          const parts = [];
           if (checked) parts.push(`Approve ${checked}`);
           if (unchecked) parts.push(`hide ${unchecked}`);
+          const label = parts.join(', ');
+          save.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+          save.disabled = !items.length;
+        } else {
+          save.textContent = changes.size
+            ? `Save ${changes.size} change${changes.size === 1 ? '' : 's'}`
+            : 'No changes';
+          save.disabled = !changes.size;
         }
-        const label = parts.join(', ');
-        save.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-        save.disabled = !items.length || (RESTORING && !checked);
         document.getElementById('toggle-all').textContent = checked ? 'Uncheck all' : 'Check all';
         document.getElementById('previous').disabled = offset === 0;
         document.getElementById('next').disabled = offset + items.length >= total;
         document.getElementById('summary').textContent = items.length
-          ? `{{ scope }} · ${offset + 1}–${offset + items.length} of ${total.toLocaleString()}`
+          ? `${QUEUE ? '' : 'Editing '}{{ scope }} · ${offset + 1}–${offset + items.length} of ${total.toLocaleString()}`
           : '{{ scope }}';
       }
 
-      function setChecked(id, checked) {
-        if (checked === RESTORING) {
-          flipped.add(id);
+      function setChecked(item, checked) {
+        if (checked === startsChecked(item)) {
+          changes.delete(item.id);
         } else {
-          flipped.delete(id);
+          changes.set(item.id, checked);
         }
       }
 
@@ -81,10 +86,10 @@
 
         const box = document.createElement('input');
         box.type = 'checkbox';
-        box.checked = isChecked(item.id);
+        box.checked = isChecked(item);
         box.setAttribute('aria-label', item.path);
         box.onchange = () => {
-          setChecked(item.id, box.checked);
+          setChecked(item, box.checked);
           renderActions();
         };
 
@@ -165,23 +170,24 @@
         const button = document.getElementById('save');
         button.disabled = true;
         showError('');
-        const checked = items.filter(item => isChecked(item.id)).map(item => item.id);
-        const unchecked = items.filter(item => !isChecked(item.id)).map(item => item.id);
+        const decided = QUEUE ? items.map(item => [item.id, isChecked(item)]) : [...changes];
+        const ids = checked => decided.filter(entry => entry[1] === checked).map(entry => entry[0]);
         try {
           const response = await fetch('/api/review', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({approved: checked, rejected: RESTORING ? [] : unchecked})
+            body: JSON.stringify({approved: ids(true), rejected: ids(false)})
           });
           if (!response.ok) {
             throw new Error('Status: ' + response.status);
           }
-          checked.forEach(id => flipped.delete(id));
-          if (!RESTORING) {
-            unchecked.forEach(id => flipped.delete(id));
+          decided.forEach(entry => changes.delete(entry[0]));
+          if (QUEUE) {
+            // saved photos leave the queue, so the next ones move up to this offset
+            await load();
+          } else {
+            window.location.href = DONE_URL;
           }
-          // saved photos leave the queue, so the next ones move up to this offset
-          await load();
         } catch (error) {
           showError(`Couldn't save: ${error.message}`);
           button.disabled = false;
@@ -189,8 +195,8 @@
       }
 
       function toggleAll() {
-        const check = !items.some(item => isChecked(item.id));
-        items.forEach(item => setChecked(item.id, check));
+        const check = !items.some(isChecked);
+        items.forEach(item => setChecked(item, check));
         document.querySelectorAll('#grid input').forEach(box => box.checked = check);
         renderActions();
       }
@@ -199,6 +205,12 @@
         offset = Math.max(0, offset + direction * limit);
         load();
       }
+
+      window.addEventListener('beforeunload', event => {
+        if (changes.size) {
+          event.preventDefault();
+        }
+      });
 
       window.addEventListener('DOMContentLoaded', () => {
         limit = fitPage();
@@ -229,7 +241,7 @@
     <div class="review-footer">
       <button id="previous" onclick="move(-1)" disabled>‹ Previous</button>
       <button id="save" onclick="save()" disabled>Approve</button>
-      <button id="next" onclick="move(1)" disabled>Skip ›</button>
+      <button id="next" onclick="move(1)" disabled>{{ 'Skip' if status == 'unreviewed' else 'Next' }} ›</button>
     </div>
   </body>
 </html>

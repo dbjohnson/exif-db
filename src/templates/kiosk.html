@@ -48,6 +48,37 @@
         }
       }
 
+      function hideImage() {
+        const image = shown;
+        if (!image) {
+          return;
+        }
+        fetch('/api/review', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({rejected: [image.photo_id]})
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+          const index = images.indexOf(image);
+          if (index < 0) {
+            return;
+          }
+          images.splice(index, 1);
+          // keep the images after it from being skipped
+          if (index <= currentIndex) {
+            currentIndex -= 1;
+          }
+          refreshImage();
+        })
+        .catch((error) => {
+          console.log(error)
+          alert(error);
+        })
+      }
+
       function renderFavorite() {
         const button = document.getElementById('favorite');
         button.setAttribute('aria-pressed', shown.favorite);
@@ -148,6 +179,12 @@
           title="Favorite"
         >
           <i class="fa fa-heart-o fa-2x" aria-hidden="true"></i>
+        </button>
+        <button
+          onclick="hideImage()"
+          title="Hide (remove approval)"
+        >
+          <i class="fa fa-eye-slash fa-2x" aria-hidden="true"></i>
         </button>
         <button
           onclick="deleteImage(this)"
