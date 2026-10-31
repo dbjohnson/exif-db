@@ -6,10 +6,11 @@ import logging
 from io import BytesIO
 from functools import lru_cache
 from typing import Literal
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import rawpy
-from fastapi import FastAPI, Query, Request, BackgroundTasks, HTTPException
+from fastapi import Depends, FastAPI, Query, Request, BackgroundTasks, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +29,7 @@ ReviewStatus = Literal['unreviewed', 'rejected', 'reviewed']
 logger = logging.getLogger('uvicorn.error')
 # lets a browser reuse a photo instead of having the NAS read and convert it again
 IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
+Rotation = Literal[0, 90, 180, 270]
 
 
 def most_recent_date(month, day):
@@ -42,6 +44,32 @@ def most_recent_date(month, day):
         except ValueError:
             pass
         year -= 1
+
+
+def rotation_param(rotate: int = 0):
+    if rotate not in (0, 90, 180, 270):
+        raise HTTPException(status_code=422, detail="rotate must be 0, 90, 180 or 270")
+    return rotate
+
+
+def background_url():
+    photo = exif.background_photo()
+    if photo is None:
+        return None
+    path, rotation = photo
+    return f"/api/image{quote(path)}" + (f"?rotate={rotation}" if rotation else "")
+
+
+def cached_image(make, path, rotation):
+    if not os.path.normpath(path).startswith(f"{exif.LIBRARY_ROOT}/"):
+        raise HTTPException(status_code=404)
+    try:
+        cached = make(path, rotation)
+    except Exception as e:
+        # decoders each raise their own errors; pages show a placeholder or move on instead
+        logger.warning(f"Can't make an image from {path}: {e}")
+        raise HTTPException(status_code=404, detail="Image not available")
+    return FileResponse(cached, media_type='image/jpeg', headers=IMAGE_CACHE_HEADERS)
 
 
 def date_filter(date, all_years):
@@ -74,7 +102,7 @@ def gallery(request, date, all_years, n):
             "picked_date": date.isoformat() if date else None,
             "all_years": all_years,
             "counts": counts,
-            "background": None if counts[exif.APPROVED] else exif.background_photo(),
+            "background": None if counts[exif.APPROVED] else background_url(),
             "review_url": review_url(date, all_years),
             "edit_url": review_url(date, all_years, status='reviewed'),
             "images": pics.assign(
@@ -154,16 +182,13 @@ async def _delete_image(path: str, background_tasks: BackgroundTasks):
 # not concerned about cross worker caching, etc.
 @lru_cache(maxsize=1000)
 @app.get("/api/image{path:path}")
-async def _image(request: Request, path: str):
+async def _image(request: Request, path: str, rotate: int = Depends(rotation_param)):
+    if rotate:
+        return await run_in_threadpool(cached_image, thumbs.rotated, path, rotate)
     extension = path.split('.')[-1].upper()
     if extension == 'HEIC':
         # HEIC images need to be converted to JPEG or browsers won't display them
-        im = thumbs.read_heic(path)
-        # resize to max 2000px
-        width, height = im.size
-        ratio = int(os.getenv('MAX_IMAGE_SIZE', 2000)) / max(im.size)
-        if ratio < 1:
-            im = im.resize((int(width * ratio), int(height * ratio)))
+        im = thumbs.limit_size(thumbs.read_heic(path))
         buffered = BytesIO()
         im.save(buffered, format="JPEG")
         img_bytes = buffered.getvalue()
@@ -181,20 +206,8 @@ async def _image(request: Request, path: str):
 
 # not async: decoding is slow, and would otherwise hold up every other request
 @app.get("/api/thumb{path:path}")
-def _thumb(path: str):
-    if not os.path.normpath(path).startswith(f"{exif.LIBRARY_ROOT}/"):
-        raise HTTPException(status_code=404)
-    try:
-        thumbnail = thumbs.thumbnail(path)
-    except Exception as e:
-        # decoders each raise their own errors; the review grid shows a placeholder instead
-        logger.warning(f"No thumbnail for {path}: {e}")
-        raise HTTPException(status_code=404, detail="No thumbnail available")
-    return FileResponse(
-        thumbnail,
-        media_type='image/jpeg',
-        headers={'Cache-Control': 'private, max-age=86400'}
-    )
+def _thumb(path: str, rotate: int = Depends(rotation_param)):
+    return cached_image(thumbs.thumbnail, path, rotate)
 
 
 @app.get("/api/tags")
@@ -253,6 +266,17 @@ class ReviewDecisions(BaseModel):
 class FavoriteChange(BaseModel):
     photo_id: str
     favorite: bool
+
+
+class RotationChange(BaseModel):
+    photo_id: str
+    rotation: Rotation
+
+
+@app.post("/api/rotate")
+async def _set_rotation(change: RotationChange):
+    exif.set_rotation(change.photo_id, change.rotation)
+    return "saved"
 
 
 @app.post("/api/favorite")
@@ -334,7 +358,7 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
                         lambda d: d.split(' ')[0].replace(':', '/')
                     )
                 )[[
-                    'SourceFile', 'date', 'photo_id', 'favorite'
+                    'SourceFile', 'date', 'photo_id', 'favorite', 'rotation'
                 ]]
                 pics.extend(
                     df.to_dict(orient='records')
@@ -347,7 +371,7 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
         context={
             "refresh_secs": refresh_secs,
             "review_url": review_url(date, True),
-            "background": None if pics else exif.background_photo(),
+            "background": None if pics else background_url(),
             "images": pics
         }
     )

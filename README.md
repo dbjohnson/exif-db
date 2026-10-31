@@ -32,3 +32,5 @@ Only approved photos appear in the gallery and kiosk.  New photos start unreview
 Decisions are stored in `reviews.csv` in the storage volume, and survive a full rebuild.  Review thumbnails are cached in `thumbs/` in the storage volume, which is safe to delete.
 
 Approved photos can be favorited from the gallery or kiosk (stored in `favorites.csv`).  A date with no approved photos uses a random favorite as its background, or any approved photo if there are no favorites.
+
+Photos can be rotated from the gallery or kiosk (stored in `rotations.csv`).  Originals are never changed: a rotated copy is cached in `thumbs/` for display, and downloads still give the original file.

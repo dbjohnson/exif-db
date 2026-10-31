@@ -41,6 +41,43 @@
         }
       }
 
+      // keeps a run of quick presses saving in order
+      let savingRotation = Promise.resolve();
+
+      function showRotation(button) {
+        const img = button.closest('.image-container').querySelector('img');
+        const rotation = Number(button.dataset.rotation);
+        const url = img.dataset.original + (rotation ? `?rotate=${rotation}` : '');
+        // keep the current one up until the rotated copy has been made
+        const element = new Image();
+        element.onload = () => {
+          if (Number(button.dataset.rotation) === rotation) {
+            img.src = url;
+          }
+        };
+        element.src = url;
+      }
+
+      function rotateImage(button) {
+        const rotation = (Number(button.dataset.rotation) + 90) % 360;
+        button.dataset.rotation = rotation;
+        showRotation(button);
+        savingRotation = savingRotation.then(() => fetch('/api/rotate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({photo_id: button.dataset.photoId, rotation})
+        })).then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+        }).catch((error) => {
+          console.log(error)
+          button.dataset.rotation = (Number(button.dataset.rotation) + 270) % 360;
+          showRotation(button);
+          alert(error);
+        });
+      }
+
       function hideImage(button) {
         fetch('/api/review', {
           method: 'POST',
@@ -125,7 +162,7 @@
   </head>
   <body style="background-color:#000"{% if background %} class="with-background"{% endif %}>
     {% if background %}
-    <img class="day-background" src="/api/image{{ background | urlencode }}" alt="" />
+    <img class="day-background" src="{{ background }}" alt="" />
     {% endif %}
     <div
       style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
@@ -197,7 +234,8 @@
     {% for im in images %}
     <div class="image-container">
       <img
-        src="/api/image{{ im['SourceFile'] | urlencode }}"
+        src="/api/image{{ im['SourceFile'] | urlencode }}{% if im['rotation'] %}?rotate={{ im['rotation'] }}{% endif %}"
+        data-original="/api/image{{ im['SourceFile'] | urlencode }}"
         alt="{{ im['SourceFile'] }}"
       />
       <div class="badge">
@@ -217,6 +255,14 @@
           title="Favorite"
         >
           <i class="fa {{ 'fa-heart' if im['favorite'] else 'fa-heart-o' }}" aria-hidden="true"></i>
+        </button>
+        <button
+          data-photo-id="{{ im['photo_id'] }}"
+          data-rotation="{{ im['rotation'] }}"
+          onclick="rotateImage(this)"
+          title="Rotate 90° clockwise"
+        >
+          <i class="fa fa-rotate-right" aria-hidden="true"></i>
         </button>
         <button
           data-photo-id="{{ im['photo_id'] }}"

@@ -21,7 +21,8 @@
       // image -> {element, ready, settled}, for photos fetched before they're shown
       const preloads = new Map();
 
-      const imageUrl = path => `/api/image${path.split('/').map(encodeURIComponent).join('/')}`;
+      const imageUrl = (path, rotation) =>
+        `/api/image${path.split('/').map(encodeURIComponent).join('/')}${rotation ? `?rotate=${rotation}` : ''}`;
 
       function deleteImage(button) {
         // protect against race condition if image refreshes while waiting
@@ -53,6 +54,50 @@
             alert(error);
           })
         }
+      }
+
+      // keeps a run of quick presses saving in order
+      let savingRotation = Promise.resolve();
+
+      function showRotation(image) {
+        const rotation = image.rotation;
+        const url = imageUrl(image.SourceFile, rotation);
+        // keep the current one up until the rotated copy has been made
+        const element = new Image();
+        element.onload = () => {
+          if (image === shown && image.rotation === rotation) {
+            document.getElementById('img').src = url;
+          }
+        };
+        element.src = url;
+      }
+
+      function rotateImage() {
+        const image = shown;
+        if (!image) {
+          return;
+        }
+        const rotation = (image.rotation + 90) % 360;
+        image.rotation = rotation;
+        // anything already fetched for it is now the wrong way round
+        preloads.delete(image);
+        showRotation(image);
+        savingRotation = savingRotation.then(() => fetch('/api/rotate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({photo_id: image.photo_id, rotation})
+        })).then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok. Status: ' + response.status);
+          }
+        }).catch((error) => {
+          console.log(error)
+          image.rotation = (image.rotation + 270) % 360;
+          showRotation(image);
+          alert(error);
+        });
+        // a full interval to see the result before the slideshow moves on
+        scheduleNext();
       }
 
       function hideImage() {
@@ -156,7 +201,7 @@
             element.onload = resolve;
             element.onerror = reject;
           });
-          element.src = imageUrl(image.SourceFile);
+          element.src = imageUrl(image.SourceFile, image.rotation);
           preloads.set(image, entry);
           entry.ready.then(() => {
             entry.settled = true;
@@ -199,7 +244,7 @@
         currentIndex = currentIndex % images.length;
         let image = images[currentIndex];
         const thisLoad = ++latestLoad;
-        const url = imageUrl(image.SourceFile);
+        const url = imageUrl(image.SourceFile, image.rotation);
         // an earlier failure may just have been the NAS being unreachable
         if (preloads.get(image)?.failed) {
           preloads.delete(image);
@@ -254,7 +299,7 @@
   <body style="background-color:#000">
     {% if not images %}
     {% if background %}
-    <img class="day-background" src="/api/image{{ background | urlencode }}" alt="" />
+    <img class="day-background" src="{{ background }}" alt="" />
     {% endif %}
     <div class="no-images">
       <p>No approved photos around today</p>
@@ -277,6 +322,12 @@
           title="Favorite"
         >
           <i class="fa fa-heart-o fa-2x" aria-hidden="true"></i>
+        </button>
+        <button
+          onclick="rotateImage()"
+          title="Rotate 90° clockwise"
+        >
+          <i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i>
         </button>
         <button
           onclick="hideImage()"

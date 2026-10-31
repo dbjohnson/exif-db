@@ -13,6 +13,7 @@ EXIF_CSV = '/storage/exif.csv'
 # append-only logs of "<photo_id>,<value>,<time>"; the latest row for a photo wins
 REVIEWS_CSV = '/storage/reviews.csv'
 FAVORITES_CSV = '/storage/favorites.csv'
+ROTATIONS_CSV = '/storage/rotations.csv'
 APPROVED = 'approved'
 REJECTED = 'rejected'
 UNREVIEWED = 'unreviewed'
@@ -192,19 +193,26 @@ def set_favorite(photo_id, favorite):
     _append_log(FAVORITES_CSV, [(photo_id, FAVORITE if favorite else NOT_FAVORITE)])
 
 
+def set_rotation(photo_id, rotation):
+    _append_log(ROTATIONS_CSV, [(photo_id, rotation)])
+
+
 def _with_status():
     load_csv()
     _load_log('reviews', REVIEWS_CSV)
     _load_log('favorites', FAVORITES_CSV)
+    _load_log('rotations', ROTATIONS_CSV)
     return f"""
         (
             SELECT
                 exif.*,
                 COALESCE(reviews.value, '{UNREVIEWED}') AS review_status,
-                COALESCE(favorites.value = '{FAVORITE}', false) AS favorite
+                COALESCE(favorites.value = '{FAVORITE}', false) AS favorite,
+                COALESCE(TRY_CAST(rotations.value AS INTEGER), 0) AS rotation
             FROM exif
             LEFT JOIN reviews USING (photo_id)
             LEFT JOIN favorites USING (photo_id)
+            LEFT JOIN rotations USING (photo_id)
         )
     """
 
@@ -216,14 +224,14 @@ def background_photo():
     """
     row = db.execute(
         f"""
-        SELECT SourceFile FROM {_with_status()}
+        SELECT SourceFile, rotation FROM {_with_status()}
         WHERE review_status = ?
         ORDER BY favorite DESC, random()
         LIMIT 1
         """,
         [APPROVED]
     ).fetchone()
-    return row[0] if row else None
+    return row
 
 
 def select_photos(datestring='', status=APPROVED):
@@ -260,7 +268,7 @@ def review_page(datestring, status, offset, limit):
     offset = min(offset, max(total - limit, 0))
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal, review_status FROM {table}
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, rotation FROM {table}
         WHERE DateTimeOriginal LIKE ? AND list_contains(?, review_status)
         ORDER BY DateTimeOriginal DESC, photo_id
         LIMIT ? OFFSET ?
@@ -275,8 +283,9 @@ def review_page(datestring, status, offset, limit):
                 'id': photo_id,
                 'path': path,
                 'date': taken.split(' ')[0].replace(':', '/'),
-                'status': review_status
+                'status': review_status,
+                'rotation': rotation
             }
-            for photo_id, path, taken, review_status in rows
+            for photo_id, path, taken, review_status, rotation in rows
         ]
     }
