@@ -305,6 +305,15 @@ async def _review_page(
     return exif.review_page(date_filter(date, all_years), status, offset, limit)
 
 
+@app.get("/api/review/today")
+async def _review_today():
+    date = datetime.date.today()
+    return {
+        'date': date.isoformat(),
+        'unreviewed': exif.review_counts(date_filter(date, True))[exif.UNREVIEWED]
+    }
+
+
 @app.post("/api/review")
 async def _record_reviews(decisions: ReviewDecisions):
     exif.record_reviews(decisions.approved, decisions.rejected)
@@ -384,6 +393,8 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
         context={
             "refresh_secs": refresh_secs,
             "review_url": review_url(date, True, kiosk=request.url.query),
+            "today": date.isoformat(),
+            "to_review": exif.review_counts(date_filter(date, True))[exif.UNREVIEWED],
             "background": None if pics else background_url(),
             "images": pics
         }

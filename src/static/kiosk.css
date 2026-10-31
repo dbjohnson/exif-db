@@ -53,6 +53,19 @@ button {
   color: #888;
 }
 
+.to-review {
+  display: inline-block;
+  padding: 8px 14px;
+  border: 1px solid #666;
+  border-radius: 20px;
+  color: #bbb;
+  text-decoration: none;
+}
+
+.to-review[hidden] {
+  display: none;
+}
+
 .favorite-toggle[aria-pressed="true"] {
   color: #e5566d;
 }

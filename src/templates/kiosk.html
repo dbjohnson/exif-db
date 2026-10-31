@@ -17,8 +17,10 @@
       let paused = false;
       let latestLoad = 0;
       let failedLoads = 0;
+      const TODAY = {{ today | tojson }};
       // how many upcoming photos to keep ready, so that skipping to them is immediate
       const PRELOAD_COUNT = 3;
+      const TO_REVIEW_REFRESH_MS = 60000;
       // image -> {element, ready, settled}, for photos fetched before they're shown
       const preloads = new Map();
 
@@ -164,6 +166,29 @@
         })
       }
 
+      // the page stays open for days, through scans and past midnight
+      async function refreshToReview() {
+        try {
+          const response = await fetch('/api/review/today');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          const today = await response.json();
+          if (today.date !== TODAY) {
+            // a new day has its own photos; left until later if someone has paused on one
+            if (!paused) {
+              window.location.reload();
+            }
+            return;
+          }
+          const badge = document.getElementById('to-review');
+          badge.textContent = `${today.unreviewed.toLocaleString()} to review`;
+          badge.hidden = !today.unreviewed;
+        } catch (error) {
+          console.log(error);
+        }
+      }
+
       function scheduleNext() {
         // cancel existing timeout in case the user pressed fast forward
         if (timeoutId !== undefined) {
@@ -291,6 +316,7 @@
       // Load the image once on page load
       if (images.length) {
         refreshImage();
+        setInterval(refreshToReview, TO_REVIEW_REFRESH_MS);
       } else {
         // pick up photos approved from elsewhere
         setTimeout(() => window.location.reload(), {{ refresh_secs * 1000 }});
@@ -314,6 +340,7 @@
       />
       <div class="badge">
         <span id="date"></span>
+        <a id="to-review" class="to-review" href="{{ review_url }}"{% if not to_review %} hidden{% endif %}>{{ '{:,}'.format(to_review) }} to review</a>
         <span></span>
         <button
           id="favorite"
