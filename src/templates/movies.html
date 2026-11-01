@@ -910,20 +910,18 @@
         const stage = byId('stage');
         player.addEventListener('pointerdown', () => { wasIdle = player.classList.contains('idle'); wake(); }, true);
         player.addEventListener('pointermove', wake);
+        // stopped here rather than checking what was clicked, as a button can replace its own
+        // contents while handling the click, which leaves the target outside of the page
+        for (const type of ['click', 'dblclick']) {
+          document.querySelector('.movie-controls').addEventListener(type, event => event.stopPropagation());
+        }
         stage.addEventListener('click', event => {
-          if (event.target.closest('.movie-controls')) {
-            return;
-          }
           // the first tap on a touch screen is for bringing back the controls
           if (!wasIdle || event.pointerType === 'mouse') {
             togglePlay();
           }
         });
-        stage.addEventListener('dblclick', event => {
-          if (!event.target.closest('.movie-controls')) {
-            toggleFullscreen();
-          }
-        });
+        stage.addEventListener('dblclick', toggleFullscreen);
 
         const scrubber = byId('scrubber');
         scrubber.addEventListener('pointerdown', event => {
