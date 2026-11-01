@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
     <script src="/static/faces.js"></script>
+    <script src="/static/info.js"></script>
     {% if person %}<script src="/static/people.js"></script>{% endif %}
     <script>
       const PHOTOS = {{ photos | tojson }};
@@ -86,9 +87,50 @@
         check.textContent = '✓';
 
         tile.classList.toggle('approved', photo.status === 'approved');
-        tile.append(image, heart, check);
+        tile.append(image, heart, check, renderTileActions(photo));
         photo.tile = tile;
+        renderTileFavorite(photo);
         return tile;
+      }
+
+      // only shown on hovering, for a mouse.  Inside the tile's link, so each has to stop it opening
+      function tileAction(icon, label, action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        const symbol = document.createElement('i');
+        symbol.className = `fa ${icon}`;
+        symbol.setAttribute('aria-hidden', 'true');
+        button.append(symbol);
+        button.onclick = event => {
+          event.preventDefault();
+          event.stopPropagation();
+          action(button);
+        };
+        return button;
+      }
+
+      function renderTileActions(photo) {
+        const actions = document.createElement('span');
+        actions.className = 'tile-actions';
+        const favorite = tileAction('fa-heart-o', 'Favorite', () => toggleFavorite(photo));
+        favorite.classList.add('favorite-toggle');
+        actions.append(
+          favorite,
+          tileAction('fa-rotate-right', 'Rotate 90° clockwise', () => rotatePhoto(photo)),
+          tileAction('fa-eye-slash', 'Hide', () => hidePhoto(photo)),
+          tileAction('fa-trash-o', 'Delete', button => deletePhoto(photo, button)),
+          tileAction('fa-info-circle', 'Info', () => showInfo(photo.path))
+        );
+        return actions;
+      }
+
+      function renderTileFavorite(photo) {
+        photo.tile.querySelector('.tile-favorite').hidden = !photo.favorite;
+        const button = photo.tile.querySelector('.tile-actions .favorite-toggle');
+        button.setAttribute('aria-pressed', Boolean(photo.favorite));
+        button.querySelector('i').className = `fa ${photo.favorite ? 'fa-heart' : 'fa-heart-o'}`;
       }
 
       function renderGroup(group) {
@@ -258,7 +300,7 @@
       function setFavorites(photos, favorite) {
         for (const photo of photos) {
           photo.favorite = favorite;
-          photo.tile.querySelector('.tile-favorite').hidden = !favorite;
+          renderTileFavorite(photo);
         }
         if (current) {
           renderViewerDetails();
@@ -452,6 +494,10 @@
       function showPhoto(photo) {
         // a first press was for the photo showing then, which may not be this one
         disarmButton(document.getElementById('viewer-delete'));
+        // following along from photo to photo, if it's open
+        if (document.getElementById('info-card')) {
+          showInfo(photo.path);
+        }
         current = photo;
         lastPicked = photo;
         chosenFace = null;
@@ -700,13 +746,12 @@
       }
 
       // a favorite that isn't approved wouldn't appear anywhere favorites are used
-      function toggleFavorite() {
-        const photo = current;
+      function toggleFavorite(photo = current) {
         const favorite = !photo.favorite;
         run(async () => {
           await postJson('/api/favorite', {photo_id: photo.id, favorite});
           photo.favorite = favorite;
-          photo.tile.querySelector('.tile-favorite').hidden = !favorite;
+          renderTileFavorite(photo);
           if (photo === current) {
             renderViewerDetails();
           }
@@ -728,8 +773,7 @@
         }
       }
 
-      function rotateCurrent() {
-        const photo = current;
+      function rotatePhoto(photo = current) {
         const rotation = (photo.rotation + 90) % 360;
         setRotation(photo, rotation);
         savingRotation = savingRotation
@@ -758,8 +802,7 @@
         }
       }
 
-      function hideCurrent() {
-        const photo = current;
+      function hidePhoto(photo = current) {
         removeWithUndo(
           [photo],
           'Photo hidden',
@@ -769,8 +812,7 @@
         );
       }
 
-      function deleteCurrent(button) {
-        const photo = current;
+      function deletePhoto(photo, button) {
         if (!pressedTwice(button)) {
           return;
         }
@@ -809,7 +851,9 @@
           }
           return;
         }
-        if (event.key === 'ArrowLeft') {
+        if (event.key === 'i') {
+          showInfo(current.path);
+        } else if (event.key === 'ArrowLeft') {
           step(-1);
         } else if (event.key === 'ArrowRight') {
           step(1);
@@ -858,10 +902,10 @@
       </span>
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
-    {% if person_years and person_years | length > 1 %}
+    {% if years_rail and years_rail | length > 1 %}
     <nav class="year-rail" aria-label="Years">
-      {% for entry in person_years %}
-      <a href="{{ entry.url }}"{% if entry.year == person_year %} aria-current="page"{% endif %} title="{{ '{:,}'.format(entry.photos) }} photos">{{ entry.year }}</a>
+      {% for entry in years_rail %}
+      <a href="{{ entry.url }}"{% if entry.year == shown_year %} aria-current="page"{% endif %} title="{{ '{:,}'.format(entry.photos) }} photos">{{ entry.year }}</a>
       {% endfor %}
     </nav>
     {% endif %}
@@ -872,6 +916,19 @@
     </datalist>
     {% if not dated %}
     <p class="library-hint">These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.</p>
+    {% endif %}
+    {% if movies %}
+    <section class="library-days place-movies">
+      <h2 class="movie-clips-heading">{{ "{:,}".format(movies | length) }} movie{{ '' if movies | length == 1 else 's' }}</h2>
+      <div class="movie-grid">
+        {% for movie in movies %}
+        <a class="movie-tile" href="{{ movie.url }}" aria-label="{{ movie.title or movie.path.split('/')[-1] }}">
+          <img src="/api/poster{{ movie.path | urlencode }}" loading="lazy" decoding="async" alt="" onerror="this.remove()" />
+          {% if movie.title %}<span class="movie-tile-label">{{ movie.title }}</span>{% endif %}
+        </a>
+        {% endfor %}
+      </div>
+    </section>
     {% endif %}
     <div id="days" class="library-days"></div>
     <div id="select-bar" class="select-bar" hidden>
@@ -921,17 +978,20 @@
           <button id="viewer-faces" onclick="toggleFaces()" title="Show who's where" aria-label="Show faces" aria-pressed="false">
             <i class="fa fa-user-o" aria-hidden="true"></i>
           </button>
-          <button onclick="rotateCurrent()" title="Rotate 90° clockwise" aria-label="Rotate">
+          <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
             <i class="fa fa-rotate-right" aria-hidden="true"></i>
           </button>
           <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
             <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
           </a>
-          <button onclick="hideCurrent()" title="Hide" aria-label="Hide">
+          <button onclick="hidePhoto()" title="Hide" aria-label="Hide">
             <i class="fa fa-eye-slash" aria-hidden="true"></i>
           </button>
-          <button id="viewer-delete" onclick="deleteCurrent(this)" title="Delete" aria-label="Delete">
+          <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
             <i class="fa fa-trash-o" aria-hidden="true"></i>
+          </button>
+          <button onclick="showInfo(current.path)" title="Info" aria-label="Info">
+            <i class="fa fa-info-circle" aria-hidden="true"></i>
           </button>
         </span>
       </div>

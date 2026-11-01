@@ -412,6 +412,22 @@ def library_photos(month, with_faces=False):
     return _library_rows(f"({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? {_library_filter(with_faces)}", [month])
 
 
+def photos_with_paths(paths):
+    return _library_rows("SourceFile IN (SELECT UNNEST(?::VARCHAR[]))", [list(paths)])
+
+
+def shown_paths():
+    table = _with_status()
+    return [row[0] for row in db.execute(f"SELECT SourceFile FROM {table} WHERE review_status <> ?", [REJECTED]).fetchall()]
+
+
+def photo_details(path):
+    table = _with_status()
+    cursor = db.execute(f"SELECT * FROM {table} WHERE SourceFile = ?", [path])
+    row = cursor.fetchone()
+    return dict(zip((column[0] for column in cursor.description), row)) if row else None
+
+
 def photos_with_ids(photo_ids):
     return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids])
 

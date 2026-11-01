@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from api import duplicates, exif, faces, movies, people, scans, thumbs, trash
+from api import duplicates, exif, faces, info, movies, people, places, scans, thumbs, trash
 
 
 @asynccontextmanager
@@ -751,51 +751,109 @@ async def _person_faces(request: Request, name: str, page: int = 1):
     return people_faces_page(request, name, face_ids, total, f"/people/{quote(name)}", name, page=page)
 
 
-@app.get("/people/{name}")
-async def _person(request: Request, name: str, year: str = None):
-    update_hidden_faces()
-    photos = exif.photos_with_ids(people.person_photo_ids(name))
-    if not photos:
-        return RedirectResponse(url='/people')
-    # one year at a time, as someone can be in tens of thousands of photos
+def photos_by_year_page(request, title, photos, url, year, **context):
+    """
+    A page of photos from anywhere in the library, one year at a time, as a person can be in tens of
+    thousands of them
+    """
     by_year = {}
     for photo in photos:
         by_year.setdefault(photo_year(photo), []).append(photo)
     years = sorted((key for key in by_year if key != UNDATED_YEAR), reverse=True)
     if UNDATED_YEAR in by_year:
         years.append(UNDATED_YEAR)
-    shown_year = year if year in by_year else years[0]
-    photos = by_year[shown_year]
+    shown_year = year if year in by_year else years[0] if years else None
     return templates.TemplateResponse(
         request=request,
         name="library_month.html",
         context={
-            "title": name,
+            "title": title,
             "dated": True,
             "month": None,
             "keeps_redated_photos": True,
             "with_faces": False,
             "faces_checked": 0,
-            "back_url": "/people",
-            "back_label": "People",
-            "faces_url": f"/people/{quote(name)}/faces",
-            "person": name,
-            "person_years": [
-                {'year': key, 'photos': len(by_year[key]), 'url': f"/people/{quote(name)}?year={key}"}
+            "years_rail": [
+                {'year': key, 'photos': len(by_year[key]), 'url': f"{url}{'&' if '?' in url else '?'}year={key}"}
                 for key in years
             ],
-            "person_year": shown_year,
+            "shown_year": shown_year,
             "known_names": people.known_names(),
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
             "photos": [
                 {**library_photo(photo), 'day': month_heading(photo)}
-                for photo in sorted(photos, key=lambda photo: photo['taken'], reverse=True)
+                for photo in sorted(by_year.get(shown_year, []), key=lambda photo: photo['taken'], reverse=True)
             ],
             "newer_url": None,
-            "older_url": None
+            "older_url": None,
+            **context
         }
     )
+
+
+@app.get("/people/{name}")
+async def _person(request: Request, name: str, year: str = None):
+    update_hidden_faces()
+    photos = exif.photos_with_ids(people.person_photo_ids(name))
+    if not photos:
+        return RedirectResponse(url='/people')
+    return photos_by_year_page(
+        request,
+        name,
+        photos,
+        f"/people/{quote(name)}",
+        year,
+        back_url="/people",
+        back_label="People",
+        faces_url=f"/people/{quote(name)}/faces",
+        person=name
+    )
+
+
+@app.get("/places")
+async def _places(request: Request, q: str = ''):
+    return templates.TemplateResponse(
+        request=request,
+        name="places.html",
+        context={"places": places.search(q), "query": q, **places.coverage()}
+    )
+
+
+@app.get("/api/places")
+async def _search_places(q: str = ''):
+    return places.search(q)
+
+
+@app.get("/places/photos")
+async def _place_photos(request: Request, kind: str, key: str, year: str = None):
+    place = places.describe(kind, key)
+    if place is None:
+        return RedirectResponse(url='/places')
+    paths = places.paths_at(kind, key)
+    return photos_by_year_page(
+        request,
+        place['label'],
+        exif.photos_with_paths(paths),
+        f"/places/photos?{urlencode({'kind': kind, 'key': key})}",
+        year,
+        back_url="/places",
+        back_label="Places",
+        # newest first, with their own heading, since a movie has no place among a year's photos
+        movies=[
+            {**clip, 'url': f"/movies?{urlencode({'path': clip['path']})}"}
+            for clip in reversed(movies.clips())
+            if clip['path'] in paths
+        ]
+    )
+
+
+@app.get("/api/info")
+async def _photo_info(path: str):
+    details = info.photo_info(path)
+    if details is None:
+        raise HTTPException(status_code=404, detail="That photo isn't in the index")
+    return details
 
 
 UNDATED_YEAR = 'Undated'

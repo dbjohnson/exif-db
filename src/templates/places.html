@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Places</title>
+    {% include '_head.html' %}
+    <script>
+      let searching;
+
+      function renderPlaces(places) {
+        const list = document.getElementById('places');
+        document.getElementById('no-places').hidden = places.length > 0;
+        list.replaceChildren(...places.map(place => {
+          const link = document.createElement('a');
+          link.className = 'place';
+          link.href = `/places/photos?${new URLSearchParams({kind: place.kind, key: place.key})}`;
+          const name = document.createElement('span');
+          name.className = 'place-name';
+          name.textContent = place.label;
+          const detail = document.createElement('span');
+          detail.className = 'place-detail';
+          detail.textContent = [place.kind === 'folder' ? `Folder: ${place.detail}` : place.detail].filter(Boolean).join('');
+          const count = document.createElement('span');
+          count.className = 'place-count';
+          const parts = [];
+          if (place.photos) parts.push(`${place.photos.toLocaleString()} photo${place.photos === 1 ? '' : 's'}`);
+          if (place.movies) parts.push(`${place.movies.toLocaleString()} movie${place.movies === 1 ? '' : 's'}`);
+          count.textContent = parts.join(', ');
+          link.append(name, detail, count);
+          return link;
+        }));
+      }
+
+      async function search(query) {
+        const response = await fetch(`/api/places?${new URLSearchParams({q: query})}`);
+        if (response.ok && document.getElementById('place-search').value === query) {
+          renderPlaces(await response.json());
+        }
+      }
+
+      function typed(input) {
+        clearTimeout(searching);
+        searching = setTimeout(() => search(input.value), 150);
+        history.replaceState(null, '', input.value ? `/places?${new URLSearchParams({q: input.value})}` : '/places');
+      }
+
+      window.addEventListener('DOMContentLoaded', () => renderPlaces({{ places | tojson }}));
+    </script>
+  </head>
+  <body class="library-page">
+    {% include '_nav.html' %}
+    <div class="places-page">
+      <form action="/places" onsubmit="event.preventDefault()">
+        <input id="place-search" type="search" name="q" value="{{ query }}" placeholder="Search for a place or folder" aria-label="Search for a place or folder" oninput="typed(this)" />
+      </form>
+      <p class="library-hint">Goes by the location a photo or movie recorded, which {{ "{:,}".format(located) }} of them did, and by the names of folders, like "2002.03.11 - Escalante".</p>
+      <div id="places" class="place-list"></div>
+      <p id="no-places" class="no-images" hidden>Nothing found</p>
+    </div>
+  </body>
+</html>

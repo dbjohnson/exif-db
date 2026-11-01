@@ -5,6 +5,7 @@
     {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
+    <script src="/static/info.js"></script>
     <script>
       function downloadImage(href) {
           var downloadLink = document.createElement('a');
@@ -256,6 +257,14 @@
           title="Delete"
         >
           <i class="fa fa-trash-o" aria-hidden="true"></i>
+        </button>
+        <button
+          data-path="{{ im['SourceFile'] }}"
+          onclick="showInfo(this.dataset.path)"
+          title="Info"
+          aria-label="Info"
+        >
+          <i class="fa fa-info-circle" aria-hidden="true"></i>
         </button>
       </div>
     </div>

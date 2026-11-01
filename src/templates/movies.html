@@ -590,6 +590,12 @@
       }
 
       function restoredPosition() {
+        // opened on a particular movie, from a place's page
+        const asked = new URLSearchParams(window.location.search).get('path');
+        const askedIndex = asked ? clips.findIndex(clip => clip.path === asked && !gone(clip)) : -1;
+        if (askedIndex >= 0) {
+          return {index: askedIndex, offset: 0};
+        }
         try {
           const saved = JSON.parse(localStorage.getItem(STORED_POSITION));
           const index = clips.findIndex(clip => clip.path === saved?.path && !gone(clip));

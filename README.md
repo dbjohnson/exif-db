@@ -72,6 +72,16 @@ Edit on a person's page renames them, or removes them, which sends their faces b
 
 The viewer's person button draws a box around each face found in a photo, and a person's page starts out showing them.  Pressing a box or a face in the row below it gives that face a different name, takes its name off, skips it, or makes it the person's cover.  A person's Faces page also shows any face in its photo, and selecting one there can make it their cover.  A person's cover is otherwise their largest, clearest face.
 
+## Places
+
+`/places` finds photos and movies by where they were taken: a town, state or country, by what they recorded themselves, and any folder by its name, like `2002.03.11 - Escalante`.  Many phones and old cameras don't record a location, so folder names cover a lot of older photos.
+
+`scripts/index_locations.py` reads locations into `locations.csv` in the storage volume at the end of each scan, only for files it hasn't seen, and works out the nearest town from a list of [GeoNames](https://www.geonames.org/) towns of 1,000 or more people (CC BY 4.0).  Nothing is sent anywhere, unless you press the map link on a photo's info card, which opens OpenStreetMap.
+
+## Info cards
+
+The info button on a photo, or `i` in the viewer, shows who's in it, where it was taken, its camera, exposure and file details, and every tag in the index.  In the library, a mouse also gets favorite, rotate, hide, delete and info buttons on hovering over a thumbnail.
+
 ## Home movies
 
 `/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  The years, months and movies are listed newest first, like the library, while the stream itself always plays forward in time.  Pick a year and month to drop in at the start of that month, or a movie in the month's list, and the scrubber covers the month being played.  It picks up where it left off on that device.
