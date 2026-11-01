@@ -838,12 +838,6 @@ button:disabled {
   align-items: stretch;
 }
 
-.library-filter {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 4px;
-}
-
 .library-page.viewing {
   overflow: hidden;
 }
@@ -871,6 +865,11 @@ button:disabled {
   color: var(--muted);
   font-size: 13px;
   text-decoration: none;
+}
+
+.year-rail a[aria-current="page"] {
+  background: var(--selected);
+  color: var(--text-strong);
 }
 
 @media (hover: hover) {
@@ -2042,6 +2041,15 @@ button:disabled {
   display: none;
   color: var(--highlight);
   font-size: 16px;
+}
+
+.face-more {
+  margin: 8px var(--page-margin) 170px;
+  text-align: center;
+}
+
+.face-grid:has(+ .face-more) {
+  margin-bottom: 8px;
 }
 
 .face-tile.cover .face-cover-mark {

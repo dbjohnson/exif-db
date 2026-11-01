@@ -6,11 +6,6 @@
   </head>
   <body class="library-page">
     {% include '_nav.html' %}
-    {% if faces_checked %}
-    <div class="library-filter">
-      <a class="control" href="{{ other_filter_url }}">{{ 'Show all photos' if with_faces else 'Only photos with faces' }}</a>
-    </div>
-    {% endif %}
     {% if not total %}
     <div class="no-images">No photos {{ 'with faces ' if with_faces }}yet</div>
     {% endif %}

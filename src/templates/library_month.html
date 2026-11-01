@@ -858,6 +858,13 @@
       </span>
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
+    {% if person_years and person_years | length > 1 %}
+    <nav class="year-rail" aria-label="Years">
+      {% for entry in person_years %}
+      <a href="{{ entry.url }}"{% if entry.year == person_year %} aria-current="page"{% endif %} title="{{ '{:,}'.format(entry.photos) }} photos">{{ entry.year }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
     <datalist id="names">
       {% for known in known_names or [] %}
       <option value="{{ known }}"></option>

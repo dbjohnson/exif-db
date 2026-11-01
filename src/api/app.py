@@ -22,6 +22,10 @@ from api import duplicates, exif, faces, movies, people, scans, thumbs, trash
 
 @asynccontextmanager
 async def lifespan(app):
+    try:
+        people.carry_over_old_names()
+    except Exception as e:
+        logger.warning(f"Can't carry over old names: {e}")
     task = asyncio.create_task(check_photos_after_scans())
     yield
     task.cancel()
@@ -141,13 +145,13 @@ def gallery(request, date, all_years, n):
     counts = exif.review_counts(datestring)
     pics = exif.select_photos(datestring)
     if len(pics) > n:
-        pics = sample_across_years(pics, n) if date else pics.sample(n=n)
+        pics = sample_across_years(pics, n)
 
     return templates.TemplateResponse(
         request=request,
         name="gallery.html",
         context={
-            "picked_date": date.isoformat() if date else None,
+            "picked_date": date.isoformat(),
             "all_years": all_years,
             "counts": counts,
             "background": None if counts[exif.APPROVED] else background_url(),
@@ -315,11 +319,6 @@ async def _onthisday(
     return gallery(request, date, all_years, n)
 
 
-@app.get("/random")
-async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
-    return gallery(request, None, True, n)
-
-
 class ReviewDecisions(BaseModel):
     approved: list[str] = []
     rejected: list[str] = []
@@ -412,7 +411,7 @@ async def _review(
 ):
     if date is None:
         scope = "All dates"
-        done_url = "/random" if status == 'unreviewed' else "/manage"
+        done_url = "/library" if status == 'unreviewed' else "/manage"
     else:
         scope = f"{date:%B} {date.day}" + ("" if all_years else f", {date.year}")
         done_url = "/onthisday?" + urlencode({
@@ -585,8 +584,6 @@ async def _library(request: Request, with_faces: bool = False):
         context={
             "total": sum(tile['photos'] for tile in tiles),
             "with_faces": with_faces,
-            "faces_checked": exif.face_counts()['checked'],
-            "other_filter_url": f"/library{library_query(not with_faces)}",
             "years": library_years(tiles),
             "undated": next((tile for tile in tiles if not tile['year']), None)
         }
@@ -637,14 +634,33 @@ async def check_photos_after_scans():
             duplicates.check()
         except Exception as e:
             logger.warning(f"Can't check for duplicates: {e}")
+        try:
+            find_new_people()
+        except Exception as e:
+            logger.warning(f"Can't start finding people: {e}")
 
 
-def face_status():
-    try:
-        with open(os.path.join(people.DIR, 'status.json')) as fh:
-            return json.load(fh)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+_people_checked = {}
+
+
+def find_new_people():
+    """
+    Finds the faces in photos the check for faces has just found some in.  Once the library has
+    been gone through, that is: the first time takes days here, so it's only started on request
+    """
+    if scans.running() or faces.job.running() or people.job.running() or not people.has_scanned():
+        return
+    stamp = exif.faces_stamp()
+    if _people_checked.get('stamp') != stamp:
+        _people_checked['stamp'] = stamp
+        photos = people.to_scan(exif.photos_with_faces())
+        if photos:
+            people.start(photos)
+
+
+def update_hidden_faces():
+    stamp, shown = exif.shown_photos()
+    people.set_hidden_photos(stamp, shown)
 
 
 class FaceNames(BaseModel):
@@ -678,22 +694,28 @@ class PersonCover(BaseModel):
 
 @app.get("/people")
 async def _people(request: Request):
+    update_hidden_faces()
     return templates.TemplateResponse(
         request=request,
         name="people.html",
-        context={**people.overview(), "known_names": people.known_names(), "status": face_status()}
+        context={**people.overview(), "known_names": people.known_names(), "status": people.job.status()}
     )
 
 
-def people_faces_page(request, title, face_ids, photos_url=None, name=None):
+def people_faces_page(request, title, face_ids, total, photos_url=None, name=None, group=None, page=1):
     return templates.TemplateResponse(
         request=request,
         name="people_faces.html",
         context={
             "title": title,
             "faces": people.face_details(face_ids),
+            "total": total,
             "photos_url": photos_url,
             "name": name,
+            "group": group,
+            "page": page,
+            # a group's are only ever the best ones, with the rest coming up as those get named
+            "more": bool(name) and page * people.PAGE_FACES < total,
             "cover": people.chosen_cover(name) if name else None,
             "known_names": people.known_names()
         }
@@ -701,36 +723,49 @@ def people_faces_page(request, title, face_ids, photos_url=None, name=None):
 
 
 @app.get("/people/group/{group_id}")
-async def _people_group(request: Request, group_id: str):
+async def _people_group(request: Request, group_id: int):
+    update_hidden_faces()
     face_ids = people.group_faces(group_id)
     # groups change as faces in them are named
     if not face_ids:
         return RedirectResponse(url='/people')
-    return people_faces_page(request, "Who is this?", face_ids)
+    return people_faces_page(request, "Who is this?", face_ids, people.group_size(group_id), group=group_id)
 
 
 @app.get("/people/group/{group_id}/ids")
-async def _people_group_ids(group_id: str):
-    face_ids = people.group_faces(group_id)
+async def _people_group_ids(group_id: int):
+    update_hidden_faces()
+    face_ids = people.group_face_ids(group_id)
     if not face_ids:
         raise HTTPException(status_code=404, detail="That group has changed")
     return face_ids
 
 
 @app.get("/people/{name}/faces")
-async def _person_faces(request: Request, name: str):
-    face_ids = people.person_faces(name)
-    if not face_ids:
+async def _person_faces(request: Request, name: str, page: int = 1):
+    update_hidden_faces()
+    page = max(page, 1)
+    face_ids, total = people.person_faces(name, page)
+    if not total:
         return RedirectResponse(url='/people')
-    return people_faces_page(request, name, face_ids, f"/people/{quote(name)}", name)
+    return people_faces_page(request, name, face_ids, total, f"/people/{quote(name)}", name, page=page)
 
 
 @app.get("/people/{name}")
-async def _person(request: Request, name: str):
-    photo_ids = people.person_photo_ids(name)
-    photos = exif.photos_with_ids(photo_ids)
+async def _person(request: Request, name: str, year: str = None):
+    update_hidden_faces()
+    photos = exif.photos_with_ids(people.person_photo_ids(name))
     if not photos:
         return RedirectResponse(url='/people')
+    # one year at a time, as someone can be in tens of thousands of photos
+    by_year = {}
+    for photo in photos:
+        by_year.setdefault(photo_year(photo), []).append(photo)
+    years = sorted((key for key in by_year if key != UNDATED_YEAR), reverse=True)
+    if UNDATED_YEAR in by_year:
+        years.append(UNDATED_YEAR)
+    shown_year = year if year in by_year else years[0]
+    photos = by_year[shown_year]
     return templates.TemplateResponse(
         request=request,
         name="library_month.html",
@@ -745,6 +780,11 @@ async def _person(request: Request, name: str):
             "back_label": "People",
             "faces_url": f"/people/{quote(name)}/faces",
             "person": name,
+            "person_years": [
+                {'year': key, 'photos': len(by_year[key]), 'url': f"/people/{quote(name)}?year={key}"}
+                for key in years
+            ],
+            "person_year": shown_year,
             "known_names": people.known_names(),
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
@@ -756,6 +796,14 @@ async def _person(request: Request, name: str):
             "older_url": None
         }
     )
+
+
+UNDATED_YEAR = 'Undated'
+
+
+def photo_year(photo):
+    year = (photo['taken'] or '')[:4]
+    return year if year.isdigit() and int(year) >= exif.LIBRARY_EARLIEST_YEAR else UNDATED_YEAR
 
 
 def month_heading(photo):
@@ -812,6 +860,25 @@ async def _set_person_cover(choice: PersonCover):
 @app.get("/api/photo-faces")
 async def _photo_faces(photo_id: str):
     return people.photo_faces(photo_id)
+
+
+@app.get("/api/people/status")
+async def _people_status():
+    return people.status()
+
+
+@app.post("/api/people/status")
+async def _start_finding_people():
+    if not people.start(people.to_scan(exif.photos_with_faces())):
+        raise HTTPException(status_code=409, detail="Already finding people")
+    return people.status()
+
+
+@app.delete("/api/people/status")
+async def _stop_finding_people():
+    if not people.job.cancel():
+        raise HTTPException(status_code=409, detail="Not finding people")
+    return people.status()
 
 
 @app.post("/api/people/faces/restore")
@@ -1041,7 +1108,7 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
 @app.get("/")
 async def _index(request: Request, response_class=HTMLResponse):
     # relative, since behind the proxy this app sees http and an absolute url would say so
-    return RedirectResponse(url='/random')
+    return RedirectResponse(url='/library')
 
 
 # browsers and iOS also look for these at the root, without being told where they are

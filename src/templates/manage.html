@@ -253,6 +253,42 @@
         }
       }
 
+      function renderPeople(status) {
+        const {progress} = status;
+        const count = number => number.toLocaleString();
+        const state = document.getElementById('people-state');
+        const summary = `${count(status.scanned)} photos looked at, ${count(status.faces)} faces, ${count(status.named)} named`;
+        const grouping = progress && progress.state === 'grouping';
+        state.textContent = status.running && progress
+          ? grouping ? `${summary}. Grouping the new faces` : `${summary}. ${count(progress.done)} of ${count(progress.total)} new photos, ${formatRemaining(progress.remaining_secs)}`
+          : summary;
+        const bar = document.getElementById('people-progress');
+        bar.hidden = !status.running || !progress;
+        if (status.running && progress) {
+          bar.max = progress.total || 1;
+          bar.value = progress.done;
+        }
+        document.getElementById('people-start').disabled = status.running;
+        document.getElementById('people-stop').disabled = !status.running;
+      }
+
+      async function refreshPeople() {
+        try {
+          const response = await fetch('/api/people/status');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          renderPeople(await response.json());
+        } catch (error) {
+          showError(`Couldn't load finding people: ${error.message}`);
+        }
+      }
+
+      async function sendPeople(method) {
+        await send('/api/people/status', method);
+        refreshPeople();
+      }
+
       async function sendDuplicates(method) {
         await send('/api/duplicates', method);
         refreshDuplicates();
@@ -263,7 +299,9 @@
         refreshTrash();
         refreshFaces();
         refreshDuplicates();
+        refreshPeople();
         setInterval(refresh, 2000);
+        setInterval(refreshPeople, 5000);
         setInterval(refreshFaces, 5000);
         setInterval(refreshDuplicates, 5000);
       });
@@ -312,6 +350,16 @@
       <progress id="faces-progress" hidden></progress>
       <p id="faces-note" class="hint"></p>
       <p class="hint">Checks photos that haven't been checked yet, on the NAS, without sending them anywhere. This also starts by itself after each successful scan. Stopping keeps what's been found so far, and the next scan carries on from there. The results add a filter to the library.</p>
+
+      <h2>People</h2>
+      <div class="actions">
+        <a class="link-button" href="/people">People</a>
+        <span id="people-state" class="trash-summary">Loading…</span>
+        <button id="people-start" onclick="sendPeople('POST')" disabled>Find faces</button>
+        <button id="people-stop" onclick="sendPeople('DELETE')" disabled>Stop</button>
+      </div>
+      <progress id="people-progress" hidden></progress>
+      <p class="hint">Works out who's in photos the check above found faces in, on the NAS, without sending them anywhere. This also starts by itself after that check finds new ones.</p>
 
       <h2>Duplicates</h2>
       <div class="actions">

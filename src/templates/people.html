@@ -44,7 +44,7 @@
     {% include '_nav.html' %}
     <div class="people">
       <p class="people-hint">
-        {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status and status.state != 'finished' %}, still in progress: {{ status.state }}{% endif %}.
+        {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status.running %}, still finding more{% endif %}.
       </p>
       <p id="reload-note" class="people-hint" hidden><a href="/people">Reload</a> to see names added here and the groups that changed.</p>
 

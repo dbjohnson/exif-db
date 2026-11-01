@@ -49,19 +49,28 @@ Any month, and Undated, has a Select button for approving, favoriting, rotating,
 
 `/manage` can check the library for photos with faces in them, which adds a filter to `/library`.  It runs on the server, using [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) on each photo's thumbnail, and no photos leave it.  It takes about 2 hours per 60,000 photos on a Celeron J4125.  It only notes that a face is there, not whose it is.
 
-It also starts by itself after each successful scan, for whatever hasn't been checked yet, such as photos the scan just added.  That doesn't send anything to Rekognition.
-
+It also starts by itself after each successful scan, for whatever hasn't been checked yet, such as photos the scan just added.  
 Results are kept in `faces.csv` in the storage volume, so stopping or restarting loses at most a few photos' work and starting again carries on.
 
 ## People
 
-`scripts/index_faces.py` sends display copies of photos with faces to Amazon Rekognition, one year at a time and up to a limit on API calls (about $0.001 each), and keeps what it finds in `rekognition/` in the storage volume.  Running it again carries on without paying twice.  It runs in its own container, the `exif-db-faces` service in [compose.yml](./src/compose.yml), since it's the only part that needs the AWS key: a credentials file outside the storage volume.  Rekognition keeps a numeric description of each face, not the photos.
+`scripts/find_people.py` looks at photos the check above found faces in, and describes each face with [InsightFace's](https://github.com/deepinsight/insightface) `buffalo_l` models, using the same display copy the app shows.  It runs on the server after each check for faces finds new photos, a few seconds per photo on a Celeron J4125, and nothing leaves the server.  The models are for non-commercial use.
 
-`/people` groups the faces it found by which look alike.  Naming a group, or some of the faces in it, adds that person's photos to their own page, and those names are kept in `people.csv` in the storage volume.
+The first time through a library takes days at that speed, so it can be done from a faster computer.  `scripts/scan_people_remote.py` asks the running app for its display copies and writes a `people.db`, which is safe to stop and run again, then `scripts/cluster_people.py` works out which faces look alike:
+
+```bash
+python scripts/fetch_face_models.py models
+python scripts/scan_people_remote.py http://your-server:8668 people.db models
+python scripts/cluster_people.py people.db
+```
+
+Copy `people.db` into the storage volume before starting the app with it.  Faces, names and covers are all kept in that file.  Faces too small or too poor to compare are kept but not offered for naming, as they're mostly blurs and the backs of heads.
+
+`/people` shows groups of faces that look alike, largest first.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
 
 Edit on a person's page renames them, or removes them, which sends their faces back to "Who is this?" and leaves the photos alone.  Using a name someone already has joins the two together.  All of these can be undone straight afterwards.
 
-The viewer's person button draws a box around each face found in a photo, and a person's page starts out showing them.  Pressing a box or a face in the row below it gives that face a different name, takes its name off, skips it, or makes it the person's cover.  A person's Faces page also shows any face in its photo, and selecting one there can make it their cover, which is kept in `people_covers.csv` in the storage volume.  A person's cover is otherwise their largest, sharpest face.
+The viewer's person button draws a box around each face found in a photo, and a person's page starts out showing them.  Pressing a box or a face in the row below it gives that face a different name, takes its name off, skips it, or makes it the person's cover.  A person's Faces page also shows any face in its photo, and selecting one there can make it their cover.  A person's cover is otherwise their largest, clearest face.
 
 ## Home movies
 

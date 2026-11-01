@@ -12,18 +12,26 @@
       const CURRENT_NAME = {{ name | tojson }};
       const FACES = new Map({{ faces | tojson }}.map(face => [face.id, face]));
       let coverFace = {{ (cover or none) | tojson }};
+      // a big group or person shows a page of faces at a time, and has this many in all
+      const TOTAL = {{ total }};
+      const GROUP = {{ (group if group is not none else none) | tojson }};
       const selected = new Set();
       let lastPicked = null;
 
       const tiles = () => [...document.querySelectorAll('.face-tile:not([hidden])')];
+      // faces that have left this page, so that its count stays right
+      let hiddenSoFar = 0;
 
       function render() {
         const count = selected.size;
         const all = tiles().length;
-        document.getElementById('count').textContent = `${all.toLocaleString()} face${all === 1 ? '' : 's'}`;
+        const left = TOTAL - hiddenSoFar;
+        document.getElementById('count').textContent = `${left.toLocaleString()} face${left === 1 ? '' : 's'}`;
         document.getElementById('select-count').textContent = count
           ? `${count.toLocaleString()} selected`
-          : 'None selected: applies to all';
+          : GROUP !== null
+            ? `None selected: applies to all ${left.toLocaleString()}`
+            : left > all ? `None selected: applies to these ${all.toLocaleString()}` : 'None selected: applies to all';
         const coverButton = document.getElementById('use-cover');
         if (coverButton) {
           const only = count === 1 ? [...selected][0].dataset.faceId : null;
@@ -122,25 +130,35 @@
         render();
       }
 
+      // a whole group, which can be more faces than this page shows
+      async function allInGroup() {
+        const response = await fetch(`/people/group/${GROUP}/ids`);
+        if (!response.ok) {
+          throw new Error('Status: ' + response.status);
+        }
+        return response.json();
+      }
+
       async function apply(name) {
         const chosen = selected.size ? [...selected] : tiles();
         if (!chosen.length) {
           return;
         }
         try {
-          const {previous} = await postJson('/api/people/faces', {
-            face_ids: chosen.map(tile => tile.dataset.faceId),
-            name
-          });
+          const wholeGroup = GROUP !== null && !selected.size;
+          const faceIds = wholeGroup ? await allInGroup() : chosen.map(tile => tile.dataset.faceId);
+          const {previous} = await postJson('/api/people/faces', {face_ids: faceIds, name});
+          hiddenSoFar += faceIds.length;
           chosen.forEach(tile => {
             setPicked(tile, false);
             tile.hidden = true;
           });
           render();
-          const said = name.trim() ? `Named ${chosen.length.toLocaleString()} as ${name.trim()}` : `Skipped ${chosen.length.toLocaleString()}`;
+          const said = name.trim() ? `Named ${faceIds.length.toLocaleString()} as ${name.trim()}` : `Skipped ${faceIds.length.toLocaleString()}`;
           showToast(said, async () => {
             try {
               await postJson('/api/people/faces/restore', {previous});
+              hiddenSoFar -= faceIds.length;
               chosen.forEach(tile => tile.hidden = false);
               render();
             } catch (error) {
@@ -190,6 +208,9 @@
       </div>
       {% endfor %}
     </div>
+    {% if more %}
+    <p class="face-more"><a class="control" href="/people/{{ name | urlencode }}/faces?page={{ page + 1 }}">Next {{ "{:,}".format(faces | length) }}</a></p>
+    {% endif %}
     <datalist id="names">
       {% for known in known_names %}
       <option value="{{ known }}"></option>

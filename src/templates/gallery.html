@@ -168,7 +168,7 @@
         id="date-picker"
         type="date"
         aria-label="Show photos from date"
-        value="{{ picked_date or '' }}"
+        value="{{ picked_date }}"
         onchange="datePicked()"
       />
       <label class="toggle">
@@ -181,10 +181,10 @@
         />
         <span>include all years</span>
       </label>
-      {% if picked_date and counts.approved and counts.unreviewed %}
+      {% if counts.approved and counts.unreviewed %}
       <a class="review-badge" href="{{ review_url }}">{{ counts.unreviewed }} to review</a>
       {% endif %}
-      {% if picked_date and (counts.approved or counts.rejected) %}
+      {% if counts.approved or counts.rejected %}
       <a class="edit-link" href="{{ edit_url }}">edit approvals{% if counts.rejected %} ({{ counts.rejected }} hidden){% endif %}</a>
       <button
         class="edit-link reset-link"
@@ -199,13 +199,13 @@
     {% if not counts.approved %}
       {% if counts.unreviewed %}
       <div class="review-cta">
-        <p>No approved photos {% if picked_date %}from this date{% else %}yet{% endif %}</p>
+        <p>No approved photos from this date</p>
         <a href="{{ review_url }}">Review {{ counts.unreviewed }} photo{{ '' if counts.unreviewed == 1 else 's' }}</a>
       </div>
       {% elif counts.rejected %}
-      <div class="no-images">No approved photos {% if picked_date %}from this date{% else %}yet{% endif %}</div>
+      <div class="no-images">No approved photos from this date</div>
       {% else %}
-      <div class="no-images">No photos {% if picked_date %}from this date{% else %}yet{% endif %}</div>
+      <div class="no-images">No photos from this date</div>
       {% endif %}
     {% endif %}
     {% for im in images %}

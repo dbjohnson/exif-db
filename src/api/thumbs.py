@@ -157,8 +157,8 @@ def display(path, rotation=0):
 
 def face(path, rotation, box, face_id):
     """
-    A picture of a face, given where Rekognition found it.  From the same copy of the photo it
-    was sent, since the position is only right for that one
+    A picture of a face, given where it was found.  From the same copy of the photo it
+    was found in, since the position is only right for that one
     """
     def make():
         with Image.open(display(path, rotation)) as im:

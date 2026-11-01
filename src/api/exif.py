@@ -220,6 +220,11 @@ def photos_version():
     return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
 
 
+def _file_stamps(*paths):
+    stats = [os.stat(path) if os.path.exists(path) else None for path in paths]
+    return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
+
+
 def record_reviews(approved=(), rejected=(), unreviewed=()):
     _append_log(
         REVIEWS_CSV,
@@ -479,6 +484,36 @@ def photos_to_check_for_faces():
         """
     ).fetchall()
     return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
+
+
+def photos_with_faces():
+    # those the check found faces in, newest first, as those are the most likely to be looked at
+    table = _with_status()
+    _load_log('faces', FACES_CSV)
+    rows = db.execute(
+        f"""
+        SELECT photo_id, SourceFile, rotation
+        FROM {table} JOIN faces USING (photo_id)
+        WHERE value <> ? AND review_status <> ?
+        ORDER BY DateTimeOriginal DESC
+        """,
+        [NO_FACES, REJECTED]
+    ).fetchall()
+    return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
+
+
+def faces_stamp():
+    # the same until the check for faces has found more
+    return _file_stamps(FACES_CSV)
+
+
+def shown_photos():
+    """
+    What's in the library and not hidden, and something that stays the same until that changes
+    """
+    table = _with_status()
+    stamp = _file_stamps(EXIF_CSV, REVIEWS_CSV, DELETIONS_CSV)
+    return stamp, {row[0] for row in db.execute(f"SELECT photo_id FROM {table} WHERE review_status <> ?", [REJECTED]).fetchall()}
 
 
 def duplicate_photos(photo_ids=None):
