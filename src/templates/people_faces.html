@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{ title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/toast.js"></script>
+    <script>
+      // a page of faces that all get a name, or just the ones picked out
+      const CURRENT_NAME = {{ name | tojson }};
+      const selected = new Set();
+      let lastPicked = null;
+
+      const tiles = () => [...document.querySelectorAll('.face-tile:not([hidden])')];
+
+      function render() {
+        const count = selected.size;
+        const all = tiles().length;
+        document.getElementById('count').textContent = `${all.toLocaleString()} face${all === 1 ? '' : 's'}`;
+        document.getElementById('select-count').textContent = count
+          ? `${count.toLocaleString()} selected`
+          : 'None selected: applies to all';
+      }
+
+      function setPicked(tile, picked) {
+        if (picked) {
+          selected.add(tile);
+        } else {
+          selected.delete(tile);
+        }
+        tile.classList.toggle('selected', picked);
+      }
+
+      function pick(tile, range) {
+        const picked = !selected.has(tile);
+        const list = tiles();
+        const from = range && lastPicked ? list.indexOf(lastPicked) : -1;
+        const to = list.indexOf(tile);
+        const between = from < 0 ? [tile] : list.slice(Math.min(from, to), Math.max(from, to) + 1);
+        between.forEach(other => setPicked(other, picked));
+        lastPicked = tile;
+        render();
+      }
+
+      function toggleAll() {
+        const list = tiles();
+        const picked = !list.every(tile => selected.has(tile));
+        list.forEach(tile => setPicked(tile, picked));
+        render();
+      }
+
+      async function apply(name) {
+        const chosen = selected.size ? [...selected] : tiles();
+        if (!chosen.length) {
+          return;
+        }
+        try {
+          const {previous} = await postJson('/api/people/faces', {
+            face_ids: chosen.map(tile => tile.dataset.faceId),
+            name
+          });
+          chosen.forEach(tile => {
+            setPicked(tile, false);
+            tile.hidden = true;
+          });
+          render();
+          const said = name.trim() ? `Named ${chosen.length.toLocaleString()} as ${name.trim()}` : `Skipped ${chosen.length.toLocaleString()}`;
+          showToast(said, async () => {
+            try {
+              await postJson('/api/people/faces/restore', {previous});
+              chosen.forEach(tile => tile.hidden = false);
+              render();
+            } catch (error) {
+              showToast(`Couldn't undo: ${error.message}`);
+            }
+          });
+        } catch (error) {
+          showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      function applyTyped() {
+        const input = document.getElementById('name');
+        if (input.value.trim()) {
+          apply(input.value);
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', render);
+    </script>
+  </head>
+  <body class="library-page">
+    <div class="library-month-header">
+      <a href="{{ photos_url or '/people' }}">‹ {{ 'Photos' if photos_url else 'People' }}</a>
+      <span id="summary">{{ title }} · <span id="count"></span></span>
+      <span class="month-steps">
+        <button onclick="toggleAll()">Select all</button>
+      </span>
+    </div>
+    <p class="library-hint" style="margin:8px 12px">
+      {% if name %}Select any that aren't {{ name }}, then give them the right name, or skip them.
+      {% else %}If these are all one person, name them. If not, select the ones who are the same person and name those; the rest stay here. Shift-click selects a range.{% endif %}
+    </p>
+    <div class="face-grid">
+      {% for face in faces %}
+      <button class="face-tile" data-face-id="{{ face }}" onclick="pick(this, event.shiftKey)">
+        <img src="/api/face/{{ face }}" loading="lazy" decoding="async" alt="" />
+        <span class="tile-check" aria-hidden="true">✓</span>
+      </button>
+      {% endfor %}
+    </div>
+    <datalist id="names">
+      {% for known in known_names %}
+      <option value="{{ known }}"></option>
+      {% endfor %}
+    </datalist>
+    <div class="select-bar">
+      <span id="select-count"></span>
+      <label>
+        Name
+        <input id="name" type="text" list="names" maxlength="80" onkeydown="if (event.key === 'Enter') applyTyped();" />
+      </label>
+      <button onclick="applyTyped()">Save</button>
+      <button onclick="apply('')" title="Not someone worth naming">Skip</button>
+    </div>
+  </body>
+</html>

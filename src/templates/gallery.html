@@ -19,7 +19,7 @@
       }
 
       async function deleteImage(href, button) {
-        if (!confirm('Are you sure you want to delete this image?')) {
+        if (!pressedTwice(button)) {
           return;
         }
         const container = button.closest('.image-container');

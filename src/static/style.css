@@ -1613,6 +1613,181 @@ button:hover {
   right: 4px;
 }
 
+.people {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 12px 40px;
+}
+
+.people h2 {
+  margin: 20px 0 8px;
+  font-size: 20px;
+  font-weight: normal;
+}
+
+.people h2 span,
+.people-hint {
+  color: #888;
+  font-size: 13px;
+}
+
+.people-hint {
+  margin: 4px 0;
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.person-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #151515;
+  color: #fff;
+  text-decoration: none;
+}
+
+.person-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-top: 1px solid #222;
+}
+
+.person-group[hidden] {
+  display: none;
+}
+
+.person-group-faces {
+  display: flex;
+  flex: 1 1 320px;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+}
+
+.person-group-faces img,
+.face-tile img {
+  display: block;
+  object-fit: cover;
+  background: #151515;
+}
+
+.person-group-faces img {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 4px;
+}
+
+.person-group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.people input[type="text"],
+.select-bar input[type="text"] {
+  width: 130px;
+  padding: 6px;
+  border: 1px solid #666;
+  border-radius: 6px;
+  background: #000;
+  color: #ddd;
+}
+
+.people button {
+  border: 1px solid #666;
+}
+
+.people .suggested-name {
+  border-color: #2a7de1;
+}
+
+.face-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 4px;
+  margin: 8px 12px 110px;
+}
+
+.face-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #151515;
+}
+
+.face-tile[hidden] {
+  display: none;
+}
+
+.face-tile img {
+  width: 100%;
+  height: 100%;
+}
+
+.face-tile .tile-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: transparent;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.face-tile.selected .tile-check {
+  background: #2a7de1;
+  color: #fff;
+}
+
+.face-tile.selected img {
+  opacity: 0.6;
+}
+
+/* shift-clicking would otherwise also highlight everything between the two clicks */
+.library-days,
+.face-grid,
+.review-grid {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button.confirming,
+button.confirming:hover {
+  background: #c33;
+  color: #fff;
+  font-weight: bold;
+}
+
 .image-container {
   position: relative;
   display: inline-block;

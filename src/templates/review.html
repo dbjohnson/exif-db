@@ -36,6 +36,10 @@
       let deleteError = '';
       let moveAfterDeletes = 0;
       let reloadAfterDeletes = false;
+      // where a shift-click's range starts from
+      let lastToggled = null;
+      // whether the click about to change a checkbox had shift held
+      let shiftClick = false;
 
       // unreviewed photos start out approved, except for ones unlikely to be wanted: the rest
       // of a burst, and anything that didn't come from a camera, like screenshots
@@ -111,9 +115,18 @@
         box.checked = isChecked(item);
         box.setAttribute('aria-label', item.path);
         box.onchange = () => {
-          setChecked(item, box.checked);
+          const start = shiftClick && lastToggled ? items.indexOf(lastToggled) : -1;
+          const end = items.indexOf(item);
+          const between = start < 0 ? [item] : items.slice(Math.min(start, end), Math.max(start, end) + 1);
+          for (const other of between) {
+            setChecked(other, box.checked);
+            other.box.checked = box.checked;
+          }
+          shiftClick = false;
+          lastToggled = item;
           renderActions();
         };
+        item.box = box;
 
         const image = document.createElement('img');
         image.alt = '';
@@ -158,6 +171,12 @@
         };
         resetDeleteButton(remove);
 
+        // the label's click comes first; the one it passes on to the checkbox doesn't say either way
+        label.addEventListener('click', event => {
+          if (event.target !== box) {
+            shiftClick = event.shiftKey;
+          }
+        });
         label.append(box, image, check, date, zoom, remove);
         if (item.burst.length) {
           const more = document.createElement('button');
@@ -341,6 +360,7 @@
             return;
           }
           ({total, photos, offset, items} = page);
+          lastToggled = null;
           const grid = document.getElementById('grid');
           grid.replaceChildren(...items.map(renderItem));
           grid.scrollTop = 0;

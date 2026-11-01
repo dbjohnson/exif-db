@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>People</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/toast.js"></script>
+    <script>
+      async function undoNames(previous, row) {
+        try {
+          await postJson('/api/people/faces/restore', {previous});
+          row.hidden = false;
+        } catch (error) {
+          showToast(`Couldn't undo: ${error.message}`);
+        }
+      }
+
+      // the whole group, which is more faces than its row shows.  A blank name skips it
+      async function nameGroup(row, name) {
+        try {
+          const response = await fetch(`/people/group/${encodeURIComponent(row.dataset.group)}/ids`);
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          const {previous} = await postJson('/api/people/faces', {face_ids: await response.json(), name});
+          row.hidden = true;
+          document.getElementById('reload-note').hidden = false;
+          showToast(name ? `Named ${name}` : 'Skipped', () => undoNames(previous, row));
+        } catch (error) {
+          showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      function nameTyped(element) {
+        const row = element.closest('.person-group');
+        const name = row.querySelector('input').value.trim();
+        if (name) {
+          nameGroup(row, name);
+        }
+      }
+    </script>
+  </head>
+  <body class="library-page">
+    <div class="library-nav">
+      <a href="/library">Library</a>
+      <a href="/random">Random photos</a>
+      <a href="/manage">Manage</a>
+    </div>
+    <div class="people">
+      <p class="people-hint">
+        {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status and status.state != 'finished' %}, still in progress: {{ status.state }}{% endif %}.
+      </p>
+      <p id="reload-note" class="people-hint" hidden><a href="/people" style="color:#bbb">Reload</a> to see names added here and the groups that changed.</p>
+
+      {% if people %}
+      <h2>People</h2>
+      <div class="people-grid">
+        {% for person in people %}
+        <a class="person-tile month-tile" href="/people/{{ person.name | urlencode }}">
+          <img src="/api/face/{{ person.cover }}" loading="lazy" decoding="async" alt="" />
+          <span class="month-label">
+            <span>{{ person.name }}</span>
+            <span class="month-count">{{ "{:,}".format(person.photos) }}</span>
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <datalist id="names">
+        {% for name in known_names %}
+        <option value="{{ name }}"></option>
+        {% endfor %}
+      </datalist>
+
+      {% if groups %}
+      <h2>Who is this? <span>faces that look alike; a group can mix people, so open it to name only some</span></h2>
+      {% for group in groups %}
+      <div class="person-group" data-group="{{ group.id }}">
+        <a class="person-group-faces" href="/people/group/{{ group.id }}" title="Open this group">
+          {% for face in group.preview %}
+          <img src="/api/face/{{ face }}" loading="lazy" decoding="async" alt="" />
+          {% endfor %}
+        </a>
+        <span class="person-group-actions">
+          <span>{{ "{:,}".format(group.photos) }} photo{{ '' if group.photos == 1 else 's' }}</span>
+          {% if group.suggested %}
+          <button class="suggested-name" data-name="{{ group.suggested }}" onclick="nameGroup(this.closest('.person-group'), this.dataset.name)">{{ group.suggested }}?</button>
+          {% endif %}
+          <input type="text" list="names" placeholder="Name" aria-label="Name for this group" maxlength="80" onkeydown="if (event.key === 'Enter') nameTyped(this);" />
+          <button onclick="nameTyped(this)">Save</button>
+          <button onclick="nameGroup(this.closest('.person-group'), '')" title="Not someone worth naming">Skip</button>
+        </span>
+      </div>
+      {% endfor %}
+      {% if more_groups %}
+      <p class="people-hint">{{ "{:,}".format(more_groups) }} smaller groups will show here as these get named.</p>
+      {% endif %}
+      {% elif not people %}
+      <div class="no-images">No faces yet</div>
+      {% endif %}
+      {% if single_faces %}
+      <p class="people-hint">{{ "{:,}".format(single_faces) }} faces don't look like any others yet.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>

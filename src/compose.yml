@@ -13,3 +13,16 @@ services:
     working_dir: /src/app
     command: uvicorn api:app --workers 2 --host 0.0.0.0 --port 8000
 
+  # sends photos with faces to Amazon Rekognition, on request:
+  #   docker compose run --rm exif-db-faces python scripts/index_faces.py --year 2025
+  # Has the AWS key, which the web app doesn't, and only the results folder of the storage volume
+  exif-db-faces:
+    image: dbryanjohnson/exif-db:latest
+    profiles: [faces]
+    volumes:
+      - /volume1/docker/appdata/exif-db/rekognition:/storage/rekognition
+      - /volume1/docker/appdata/exif-db-secrets/aws-credentials:/run/secrets/aws-credentials:ro
+    environment:
+      - AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws-credentials
+      - EXIF_DB_URL=http://exif-db:8000
+    working_dir: /src/app

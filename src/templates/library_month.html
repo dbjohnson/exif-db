@@ -14,6 +14,8 @@
       const TITLE = {{ title | tojson }};
       // this page's "YYYY-MM", or null for undated photos
       const MONTH = {{ month | tojson }};
+      // a page not organized by date still shows a photo once its date has changed
+      const KEEPS_REDATED_PHOTOS = {{ (keeps_redated_photos or false) | tojson }};
       const SWIPE_PX = 50;
       // moving files is slow on a NAS, so undoing a big delete mustn't be one long request
       const RESTORE_BATCH = 20;
@@ -45,6 +47,11 @@
           if (selecting) {
             event.preventDefault();
             pick(photo, event.shiftKey);
+          } else if (event.shiftKey) {
+            // from the photo last opened, or just this one if there hasn't been one
+            event.preventDefault();
+            selecting = true;
+            pick(photo, true);
           } else if (!event.metaKey && !event.ctrlKey) {
             event.preventDefault();
             openViewer(photo);
@@ -137,6 +144,8 @@
       }
 
       function renderSelection() {
+        // a first press was for the photos selected then, which may not be these
+        disarmButton(document.getElementById('select-delete'));
         document.body.classList.toggle('selecting', selecting);
         document.getElementById('select-bar').hidden = !selecting;
         document.getElementById('select-toggle').textContent = selecting ? 'Done' : 'Select';
@@ -203,7 +212,7 @@
         return run(async () => {
           const {previous} = await postJson('/api/dates', {photo_ids: photos.map(photo => photo.id), date});
           // they change places within this month, so only the server knows the new layout
-          if (date.slice(0, 7) === MONTH) {
+          if (date.slice(0, 7) === MONTH || KEEPS_REDATED_PHOTOS) {
             window.location.reload();
             return;
           }
@@ -339,9 +348,9 @@
 
       // one at a time, as a single request for many could outlast the proxy's patience.  They're
       // gone from the page straight away, so that browsing carries on meanwhile
-      async function deleteSelected() {
+      async function deleteSelected(button) {
         const photos = [...selected];
-        if (!confirm(`Delete ${plural(photos.length, 'photo')}? They'll stay in the trash until it's emptied from Manage.`)) {
+        if (!pressedTwice(button, `Delete ${photos.length.toLocaleString()}?`)) {
           return;
         }
         photos.forEach(photo => setRemoved(photo, true));
@@ -437,7 +446,10 @@
       }
 
       function showPhoto(photo) {
+        // a first press was for the photo showing then, which may not be this one
+        disarmButton(document.getElementById('viewer-delete'));
         current = photo;
+        lastPicked = photo;
         renderViewerDetails();
         renderViewerImage();
         preloadNeighbors();
@@ -455,6 +467,7 @@
         if (!current) {
           return;
         }
+        disarmButton(document.getElementById('viewer-delete'));
         current.tile.scrollIntoView({block: 'nearest'});
         current = null;
         document.body.classList.remove('viewing');
@@ -585,9 +598,9 @@
         );
       }
 
-      function deleteCurrent() {
+      function deleteCurrent(button) {
         const photo = current;
-        if (!confirm(`Delete ${fileName(photo)}?`)) {
+        if (!pressedTwice(button)) {
           return;
         }
         removeWithUndo(
@@ -653,9 +666,10 @@
   </head>
   <body class="library-page">
     <div class="library-month-header">
-      <a href="{{ library_url }}" aria-label="Back to library">‹ Library</a>
+      <a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹ {{ back_label }}</a>
       <span id="summary">{{ title }}</span>
       <span class="month-steps">
+        {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
         {% if faces_checked %}<a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
@@ -682,7 +696,7 @@
         <button class="select-action" onclick="hideSelected()" disabled>
           <i class="fa fa-eye-slash" aria-hidden="true"></i> Hide
         </button>
-        <button class="select-action" onclick="deleteSelected()" disabled>
+        <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="They stay in the trash until it's emptied from Manage" disabled>
           <i class="fa fa-trash-o" aria-hidden="true"></i> Delete
         </button>
       </span>
@@ -718,7 +732,7 @@
           <button onclick="hideCurrent()" title="Hide" aria-label="Hide">
             <i class="fa fa-eye-slash" aria-hidden="true"></i>
           </button>
-          <button onclick="deleteCurrent()" title="Delete" aria-label="Delete">
+          <button id="viewer-delete" onclick="deleteCurrent(this)" title="Delete" aria-label="Delete">
             <i class="fa fa-trash-o" aria-hidden="true"></i>
           </button>
         </span>

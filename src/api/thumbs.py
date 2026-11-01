@@ -10,6 +10,9 @@ from PIL import Image, ImageOps
 
 CACHE_DIR = '/storage/thumbs'
 THUMB_SIZE = 480
+FACE_SIZE = 240
+# how much of what's around a face to show, as a share of the face's size
+FACE_MARGIN = 0.25
 RAW_EXTENSIONS = ('ARW', 'CR2', 'NEF')
 CLOCKWISE = {
     90: Image.Transpose.ROTATE_270,
@@ -150,3 +153,25 @@ def display(path, rotation=0):
         return _rotate(im, rotation)
 
     return _cached(path, f":display:{rotation}", 85, make)
+
+
+def face(path, rotation, box, face_id):
+    """
+    A picture of a face, given where Rekognition found it.  From the same copy of the photo it
+    was sent, since the position is only right for that one
+    """
+    def make():
+        with Image.open(display(path, rotation)) as im:
+            width, height = im.size
+            margin_x, margin_y = box['Width'] * FACE_MARGIN, box['Height'] * FACE_MARGIN
+            # a face can run off the edge of a photo
+            cropped = im.crop((
+                max(0, int((box['Left'] - margin_x) * width)),
+                max(0, int((box['Top'] - margin_y) * height)),
+                min(width, int((box['Left'] + box['Width'] + margin_x) * width)),
+                min(height, int((box['Top'] + box['Height'] + margin_y) * height))
+            ))
+            cropped.thumbnail((FACE_SIZE, FACE_SIZE))
+            return cropped
+
+    return _cached(path, f":face:{face_id}", 85, make)

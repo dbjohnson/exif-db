@@ -6,6 +6,8 @@ import subprocess
 import sys
 import threading
 
+from api.progress import remaining_secs
+
 
 WORKER = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -15,6 +17,8 @@ WORKER = os.path.join(
 QUEUE = '/storage/faces_queue.jsonl'
 PROGRESS = '/storage/faces_progress.json'
 LOCK = '/storage/faces.lock'
+# which scan's new photos have been dealt with, by when it finished
+LAST_SCAN_CHECKED = '/storage/faces_last_scan.json'
 
 
 def running():
@@ -37,12 +41,29 @@ def _progress():
         return None
 
 
+def last_scan_checked():
+    try:
+        with open(LAST_SCAN_CHECKED) as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0
+
+
+def set_last_scan_checked(finished):
+    tmp = f"{LAST_SCAN_CHECKED}.{os.getpid()}"
+    with open(tmp, 'w') as fh:
+        json.dump(finished, fh)
+    os.replace(tmp, LAST_SCAN_CHECKED)
+
+
 def status():
     is_running = running()
     progress = _progress()
     # a worker that stopped without saying so, such as in a restart, still reads as running
     if progress and not is_running and progress['state'] == 'running':
         progress['state'] = 'interrupted'
+    if progress and is_running and progress['state'] == 'running':
+        progress['remaining_secs'] = remaining_secs(progress['started'], progress['done'], progress['total'])
     return {'running': is_running, 'progress': progress}
 
 

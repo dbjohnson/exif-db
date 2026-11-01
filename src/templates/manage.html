@@ -20,6 +20,22 @@
         return `${result.mode} scan ${outcome}, ${formatTime(result.finished)} (${minutes} min)`;
       }
 
+      function formatRemaining(secs) {
+        if (secs === null || secs === undefined) {
+          return 'working out time left';
+        }
+        if (secs < 60) {
+          return 'less than a minute left';
+        }
+        // rounded up, so that it doesn't read as nearly done for the whole of its last hour
+        const minutes = Math.ceil(secs / 60);
+        const hours = Math.floor(minutes / 60);
+        const parts = [];
+        if (hours) parts.push(`${hours} hr`);
+        if (minutes % 60) parts.push(`${minutes % 60} min`);
+        return `about ${parts.join(' ')} left`;
+      }
+
       function showError(message) {
         document.getElementById('error').textContent = message;
       }
@@ -49,7 +65,7 @@
           bar.max = status.progress.total;
           bar.value = status.progress.done;
           document.getElementById('state').textContent +=
-            ` (${status.progress.done.toLocaleString()} of ${status.progress.total.toLocaleString()} files)`;
+            ` (${status.progress.done.toLocaleString()} of ${status.progress.total.toLocaleString()} files, ${formatRemaining(status.progress.remaining_secs)})`;
         }
 
         document.getElementById('scan').disabled = status.running;
@@ -173,6 +189,7 @@
         if (status.running && progress) {
           bar.max = progress.total || 1;
           bar.value = progress.done;
+          state.textContent += `, ${formatRemaining(progress.remaining_secs)}`;
         }
         const note = document.getElementById('faces-note');
         note.textContent = '';
@@ -280,7 +297,7 @@
       </div>
       <progress id="faces-progress" hidden></progress>
       <p id="faces-note" class="hint"></p>
-      <p class="hint">Checks photos that haven't been checked yet, on the NAS, without sending them anywhere. Stopping keeps what's been found so far. The results add a filter to the library.</p>
+      <p class="hint">Checks photos that haven't been checked yet, on the NAS, without sending them anywhere. This also starts by itself after each successful scan. Stopping keeps what's been found so far, and the next scan carries on from there. The results add a filter to the library.</p>
 
       <h2>Run</h2>
       <div class="actions">

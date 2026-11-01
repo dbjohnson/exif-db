@@ -380,16 +380,15 @@ def library_months(with_faces=False):
     return [{'month': month, 'photos': photos, 'cover': cover} for month, photos, cover in rows]
 
 
-def library_photos(month, with_faces=False):
-    # month as in library_months, where None is the undated photos
+def _library_rows(where, params):
     rows = db.execute(
         f"""
         SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned
         FROM {_with_status()}
-        WHERE ({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND review_status <> ? {_library_filter(with_faces)}
+        WHERE ({where}) AND review_status <> ?
         ORDER BY DateTimeOriginal, photo_id
         """,
-        [month, REJECTED]
+        [*params, REJECTED]
     ).fetchall()
     return [
         {
@@ -403,6 +402,15 @@ def library_photos(month, with_faces=False):
         }
         for photo_id, path, taken, status, favorite, rotation, date_assigned in rows
     ]
+
+
+def library_photos(month, with_faces=False):
+    # month as in library_months, where None is the undated photos
+    return _library_rows(f"({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? {_library_filter(with_faces)}", [month])
+
+
+def photos_with_ids(photo_ids):
+    return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids])
 
 
 def dated_folders():

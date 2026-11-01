@@ -1,9 +1,12 @@
+import asyncio
 import os
 import datetime
 import hashlib
 import itertools
+import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import quote, urlencode
 
@@ -12,12 +15,19 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from api import exif, faces, movies, scans, thumbs, trash
+from api import exif, faces, movies, people, scans, thumbs, trash
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(check_photos_after_scans())
+    yield
+    task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 TEMPLATES_DIR = os.path.join(APP_DIR, "templates")
@@ -33,6 +43,8 @@ IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
 Rotation = Literal[0, 90, 180, 270]
 # how many photos from other dates fill in a frame with too few from around today
 KIOSK_STAND_INS = 200
+# how often to see whether a scan has finished, leaving photos to check for faces
+SCAN_RESULT_POLL_SECS = 60
 
 
 def page_build():
@@ -548,7 +560,8 @@ def library_month_page(request, month, title, with_faces):
             "dated": month is not None,
             "with_faces": with_faces,
             "faces_checked": exif.face_counts()['checked'],
-            "library_url": f"/library{library_query(with_faces)}",
+            "back_url": f"/library{library_query(with_faces)}",
+            "back_label": "Library",
             "other_filter_url": library_url(month, not with_faces),
             "month": month.replace(':', '-') if month else None,
             "today": datetime.date.today().isoformat(),
@@ -589,6 +602,165 @@ async def _library_month(request: Request, year: int, month: int, with_faces: bo
     except ValueError:
         return RedirectResponse(url=f"/library{library_query(with_faces)}")
     return library_month_page(request, f"{year:04d}:{month:02d}", title, with_faces)
+
+
+def check_photos_after_scan():
+    """
+    Once a scan has succeeded, check for faces in anything that hasn't been checked, which is
+    what it added along with anything an earlier check didn't get to.  This waits for its turn,
+    since a check already running was given its photos before the scan found the new ones
+    """
+    result = scans.last_result()
+    if not result or result.get('exit_code') != 0 or result['finished'] <= faces.last_scan_checked():
+        return
+    if scans.running() or faces.running():
+        return
+    photos = exif.photos_to_check_for_faces()
+    # with multiple workers, the worker's own lock lets only one of these run
+    if photos:
+        faces.start(photos, exif.FACES_CSV)
+    faces.set_last_scan_checked(result['finished'])
+
+
+# on the event loop rather than a thread of its own, like everything else using the database
+async def check_photos_after_scans():
+    while True:
+        await asyncio.sleep(SCAN_RESULT_POLL_SECS)
+        try:
+            check_photos_after_scan()
+        except Exception as e:
+            logger.warning(f"Can't start checking new photos for faces: {e}")
+
+
+def face_status():
+    try:
+        with open(os.path.join(people.DIR, 'status.json')) as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+class FaceNames(BaseModel):
+    face_ids: list[str]
+    # blank for faces that aren't anyone worth naming
+    name: str = Field(max_length=80)
+
+
+class FaceNamesRestore(BaseModel):
+    previous: dict[str, str | None]
+
+
+@app.get("/people")
+async def _people(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="people.html",
+        context={**people.overview(), "known_names": people.known_names(), "status": face_status()}
+    )
+
+
+def people_faces_page(request, title, face_ids, photos_url=None, name=None):
+    return templates.TemplateResponse(
+        request=request,
+        name="people_faces.html",
+        context={
+            "title": title,
+            "faces": face_ids,
+            "photos_url": photos_url,
+            "name": name,
+            "known_names": people.known_names()
+        }
+    )
+
+
+@app.get("/people/group/{group_id}")
+async def _people_group(request: Request, group_id: str):
+    face_ids = people.group_faces(group_id)
+    # groups change as faces in them are named
+    if not face_ids:
+        return RedirectResponse(url='/people')
+    return people_faces_page(request, "Who is this?", face_ids)
+
+
+@app.get("/people/group/{group_id}/ids")
+async def _people_group_ids(group_id: str):
+    face_ids = people.group_faces(group_id)
+    if not face_ids:
+        raise HTTPException(status_code=404, detail="That group has changed")
+    return face_ids
+
+
+@app.get("/people/{name}/faces")
+async def _person_faces(request: Request, name: str):
+    face_ids = people.person_faces(name)
+    if not face_ids:
+        return RedirectResponse(url='/people')
+    return people_faces_page(request, name, face_ids, f"/people/{quote(name)}", name)
+
+
+@app.get("/people/{name}")
+async def _person(request: Request, name: str):
+    photo_ids = people.person_photo_ids(name)
+    photos = exif.photos_with_ids(photo_ids)
+    if not photos:
+        return RedirectResponse(url='/people')
+    return templates.TemplateResponse(
+        request=request,
+        name="library_month.html",
+        context={
+            "title": name,
+            "dated": True,
+            "month": None,
+            "keeps_redated_photos": True,
+            "with_faces": False,
+            "faces_checked": 0,
+            "back_url": "/people",
+            "back_label": "People",
+            "faces_url": f"/people/{quote(name)}/faces",
+            "today": datetime.date.today().isoformat(),
+            "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
+            "photos": [
+                {**library_photo(photo), 'day': month_heading(photo)}
+                for photo in sorted(photos, key=lambda photo: photo['taken'], reverse=True)
+            ],
+            "newer_url": None,
+            "older_url": None
+        }
+    )
+
+
+def month_heading(photo):
+    # a person's photos can span years, so days would make for a very long page
+    try:
+        return f"{datetime.datetime.strptime(photo['taken'][:7], '%Y:%m'):%B %Y}"
+    except ValueError:
+        return 'Undated'
+
+
+@app.post("/api/people/faces")
+async def _name_faces(names: FaceNames):
+    # a name is part of its page's address, where a slash would mean something else
+    name = ' '.join(names.name.split()).replace('/', '-')
+    return {'previous': people.set_names(names.face_ids, name)}
+
+
+@app.post("/api/people/faces/restore")
+async def _restore_face_names(restore: FaceNamesRestore):
+    people.restore_names(restore.previous)
+    return "saved"
+
+
+# not async: making one is slow, and would otherwise hold up every other request
+@app.get("/api/face/{face_id}")
+def _face(face_id: str):
+    try:
+        cached = people.crop(face_id)
+    except Exception as e:
+        logger.warning(f"Can't make a picture of face {face_id}: {e}")
+        cached = None
+    if cached is None:
+        raise HTTPException(status_code=404, detail="Face not available")
+    return FileResponse(cached, media_type='image/jpeg', headers=IMAGE_CACHE_HEADERS)
 
 
 class DateAssignment(BaseModel):

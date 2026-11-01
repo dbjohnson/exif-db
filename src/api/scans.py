@@ -8,6 +8,8 @@ import subprocess
 import threading
 import time
 
+from api.progress import remaining_secs
+
 
 SCAN_SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -73,13 +75,21 @@ def _progress(log):
     return None
 
 
+def last_result():
+    return _read_json(RESULT)
+
+
 def status():
     is_running = running()
     log = log_tail()
+    current = _current() if is_running else None
+    progress = _progress(log) if is_running else None
+    if progress and current:
+        progress['remaining_secs'] = remaining_secs(current['started'], progress['done'], progress['total'])
     return {
         'running': is_running,
-        'current': _current() if is_running else None,
-        'progress': _progress(log) if is_running else None,
+        'current': current,
+        'progress': progress,
         'last_result': _read_json(RESULT),
         'schedule_hours': schedule_hours(),
         'schedule_time': schedule_time(),

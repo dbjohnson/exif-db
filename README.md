@@ -49,7 +49,15 @@ Any month, and Undated, has a Select button for approving, favoriting, rotating,
 
 `/manage` can check the library for photos with faces in them, which adds a filter to `/library`.  It runs on the server, using [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) on each photo's thumbnail, and no photos leave it.  It takes about 2 hours per 60,000 photos on a Celeron J4125.  It only notes that a face is there, not whose it is.
 
-Results are kept in `faces.csv` in the storage volume, so stopping or restarting loses at most a few photos' work and starting again carries on.  It doesn't run by itself: start it again to check photos added since.
+It also starts by itself after each successful scan, for whatever hasn't been checked yet, such as photos the scan just added.  That doesn't send anything to Rekognition.
+
+Results are kept in `faces.csv` in the storage volume, so stopping or restarting loses at most a few photos' work and starting again carries on.
+
+## People
+
+`scripts/index_faces.py` sends display copies of photos with faces to Amazon Rekognition, one year at a time and up to a limit on API calls (about $0.001 each), and keeps what it finds in `rekognition/` in the storage volume.  Running it again carries on without paying twice.  It runs in its own container, the `exif-db-faces` service in [compose.yml](./src/compose.yml), since it's the only part that needs the AWS key: a credentials file outside the storage volume.  Rekognition keeps a numeric description of each face, not the photos.
+
+`/people` groups the faces it found by which look alike.  Naming a group, or some of the faces in it, adds that person's photos to their own page, and those names are kept in `people.csv` in the storage volume.
 
 ## Home movies
 
