@@ -12,6 +12,9 @@ from api import thumbs
 DIR = '/storage/rekognition'
 # who each face is, as an append-only log of "<face id>,<name>,<time>"; the latest row wins
 NAMES_CSV = '/storage/people.csv'
+# which face stands for each person, as "<name>,<face id>,<time>"; the latest row wins, and a blank
+# face goes back to choosing one automatically
+COVERS_CSV = '/storage/people_covers.csv'
 # a face that's been looked at and isn't anyone worth naming
 NOBODY = ''
 # for taking a decision back, so that the face returns to its group
@@ -67,6 +70,7 @@ def _load_faces():
     stamp = _stamp(_indexed_path(), _searched_path())
     if _cache.get('stamp') != stamp:
         faces = {}
+        by_photo = {}
         for row in _jsonl(_indexed_path()):
             for face in row['faces']:
                 faces[face['face_id']] = {
@@ -75,6 +79,7 @@ def _load_faces():
                     'path': row['path'],
                     'rotation': row['rotation']
                 }
+                by_photo.setdefault(row['id'], []).append(face['face_id'])
         # both ways, since faces sent later were only compared to from their side
         matches = {}
         for row in _jsonl(_searched_path()):
@@ -82,7 +87,7 @@ def _load_faces():
                 if row['face_id'] in faces and match['face_id'] in faces:
                     matches.setdefault(row['face_id'], []).append((match['face_id'], match['similarity']))
                     matches.setdefault(match['face_id'], []).append((row['face_id'], match['similarity']))
-        _cache.update(stamp=stamp, faces=faces, matches=matches)
+        _cache.update(stamp=stamp, faces=faces, matches=matches, by_photo=by_photo)
     return _cache['faces'], _cache['matches']
 
 
@@ -124,11 +129,123 @@ def restore_names(previous):
     _append(NAMES_CSV, [(face_id, UNDECIDED if name is None else name) for face_id, name in previous.items()])
 
 
+def clear_names(face_ids):
+    """
+    Takes faces back to undecided, so that they return to their groups.  Returns what each was
+    called before, for restore_names
+    """
+    faces, _ = _load_faces()
+    current = names()
+    previous = {face_id: current[face_id] for face_id in face_ids if face_id in faces and face_id in current}
+    restore_names({face_id: None for face_id in previous})
+    return previous
+
+
+def rename(old, new):
+    """
+    Gives everyone called old the name new, which joins them up if new is already someone.  Returns
+    what each face was called before, or None if there's nobody called old
+    """
+    members = person_faces(old)
+    if not members or old == new:
+        return None
+    # this person's chosen cover goes along, unless the person they're joining has one
+    cover = covers().get(old)
+    joining_with_cover = covers().get(new) in person_faces(new)
+    previous = {face_id: old for face_id in members}
+    _append(NAMES_CSV, [(face_id, new) for face_id in members])
+    if cover in members and not joining_with_cover:
+        _append(COVERS_CSV, [(new, cover)])
+    return previous
+
+
+def remove(name):
+    """
+    Takes a person away, with their faces going back to undecided.  Returns what each face was
+    called before, or None if there's nobody by that name
+    """
+    members = person_faces(name)
+    if not members:
+        return None
+    return clear_names(members)
+
+
+def covers():
+    """
+    The latest face chosen to stand for each person, whether or not it's still theirs
+    """
+    stamp = _stamp(COVERS_CSV)
+    if _cache.get('covers_stamp') != stamp:
+        latest = {}
+        if os.path.exists(COVERS_CSV):
+            with open(COVERS_CSV, newline='', encoding='utf-8', errors='surrogateescape') as fh:
+                for row in csv.reader(fh):
+                    # a row cut short by a crash isn't a decision
+                    if len(row) != 3:
+                        continue
+                    if row[1]:
+                        latest[row[0]] = row[1]
+                    else:
+                        latest.pop(row[0], None)
+        _cache.update(covers_stamp=stamp, covers=latest)
+    return _cache['covers']
+
+
+def cover(name, members=None):
+    """
+    The face standing for a person: the one chosen if it's still theirs, or else their best
+    """
+    members = person_faces(name) if members is None else members
+    chosen = covers().get(name)
+    if chosen in members:
+        return chosen
+    return _best(members, 1)[0] if members else None
+
+
+def chosen_cover(name):
+    chosen = covers().get(name)
+    return chosen if chosen in person_faces(name) else None
+
+
+def set_cover(name, face_id):
+    """
+    Chooses the face standing for a person, or None to go back to automatic.  Returns the one chosen
+    before, for putting back, or False if that face isn't this person's
+    """
+    if face_id is not None and names().get(face_id) != name:
+        return False
+    previous = chosen_cover(name)
+    _append(COVERS_CSV, [(name, face_id or '')])
+    return previous
+
+
+def photo_faces(photo_id):
+    """
+    Every face found in a photo, where it is and who it's said to be.  name is None for a face that
+    hasn't been decided on, and NOBODY for one that was skipped.  A box is a fraction of the copy of
+    the photo that was sent, which was turned by rotation: the photo may have been turned since
+    """
+    faces, _ = _load_faces()
+    decided = names()
+    result = []
+    for face_id in _cache['by_photo'].get(photo_id, ()):
+        face = faces[face_id]
+        name = decided.get(face_id)
+        result.append({
+            'id': face_id,
+            'box': face['box'],
+            'rotation': face['rotation'],
+            'name': name,
+            'cover': bool(name) and covers().get(name) == face_id
+        })
+    return result
+
+
 def _append(path, rows):
     with open(path, 'a', newline='', encoding='utf-8', errors='surrogateescape') as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
         now = time.time_ns()
-        csv.writer(fh, lineterminator='\n').writerows((face_id, name, now) for face_id, name in rows)
+        csv.writer(fh, lineterminator='\n').writerows((first, second, now) for first, second in rows)
 
 
 def _groups():
@@ -188,7 +305,7 @@ def _best(face_ids, limit):
 def overview(max_groups=100, preview_faces=8):
     faces, _ = _load_faces()
     # a suggestion means going through every match of every face in a group
-    stamp = (_cache['stamp'], _stamp(NAMES_CSV), max_groups, preview_faces)
+    stamp = (_cache['stamp'], _stamp(NAMES_CSV), _stamp(COVERS_CSV), max_groups, preview_faces)
     if _cache.get('overview_stamp') == stamp:
         return _cache['overview']
     by_name = {}
@@ -206,7 +323,7 @@ def overview(max_groups=100, preview_faces=8):
                     'name': name,
                     'faces': len(members),
                     'photos': len({faces[face_id]['photo_id'] for face_id in members}),
-                    'cover': _best(members, 1)[0]
+                    'cover': cover(name, members)
                 }
                 for name, members in by_name.items()
             ),
@@ -241,6 +358,22 @@ def person_faces(name):
     faces, _ = _load_faces()
     members = [face_id for face_id, given in names().items() if given == name and face_id in faces]
     return _best(members, len(members))
+
+
+def face_details(face_ids):
+    """
+    Where each face is, for showing it in its photo
+    """
+    faces, _ = _load_faces()
+    return [
+        {
+            'id': face_id,
+            'path': faces[face_id]['path'],
+            'rotation': faces[face_id]['rotation'],
+            'box': faces[face_id]['box']
+        }
+        for face_id in face_ids
+    ]
 
 
 def person_photo_ids(name):

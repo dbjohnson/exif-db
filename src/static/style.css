@@ -1,26 +1,246 @@
-body, html {
+/* everything shared across pages.  The kiosk has its own kiosk.css, so nothing here reaches it */
+:root {
+  color-scheme: dark;
+  --bg: #000;
+  --surface: #151515;
+  --surface-raised: #1a1a1a;
+  --hover: #2a2a2a;
+  --selected: #333;
+  --text: #ddd;
+  --text-strong: #fff;
+  --muted: #999;
+  --disabled: #666;
+  --border: #555;
+  --border-strong: #aaa;
+  --accent: #2a7de1;
+  --heart: #e5566d;
+  --highlight: #ffd24d;
+  --danger: #c33;
+  --error: #e88;
+  --radius: 8px;
+  --radius-tile: 4px;
+  --page-margin: 12px;
+  --control-height: 34px;
+  --control-font: 13px;
+  --input-font: 13px;
+}
+
+/* fingers need bigger targets, and iOS zooms the page when focusing an input under 16px */
+@media (pointer: coarse), (max-width: 768px) {
+  :root {
+    --control-height: 44px;
+    --control-font: 15px;
+    --input-font: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  :root {
+    --page-margin: 8px;
+  }
+}
+
+html {
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* no background here: the day's stand-in photo sits behind the body */
+body {
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-family: Arial, sans-serif;
+  min-height: 100vh;
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 button {
   background-color: rgba(0, 0, 0, 0.5);
-  color: #ddd;
+  color: var(--text);
   border: none;
   padding: 8px;
   text-align: center;
   display: inline-block;
-  border-radius: 6px;
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background-color 0.3s;
+  font: inherit;
+  transition: background-color 0.2s;
 }
 
-button:hover {
-  background-color: rgba(50, 50, 50, 0.9);
+button:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
+/* touch screens keep :hover after a tap, which would leave a pressed button looking lit */
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    background-color: var(--hover);
+  }
+}
+
+/* every outlined button and link, so that they have one height and shape on every page */
+.control,
+.manage button,
+.manage .link-button,
+.review-header button,
+.review-header a,
+.review-footer button,
+.library-month-header a,
+.library-month-header button,
+.select-bar button,
+.people button,
+.toast button,
+.group-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  box-sizing: border-box;
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font-size: var(--control-font);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .control:hover,
+  .manage .link-button:hover,
+  .review-header a:hover,
+  .library-month-header a:hover {
+    background-color: var(--hover);
+  }
+
+  .control:hover,
+  .manage button:hover:not(:disabled),
+  .manage .link-button:hover,
+  .review-header button:hover:not(:disabled),
+  .review-header a:hover,
+  .review-footer button:hover:not(:disabled),
+  .library-month-header a:hover,
+  .library-month-header button:hover:not(:disabled),
+  .select-bar button:hover:not(:disabled),
+  .people button:hover:not(:disabled),
+  .toast button:hover,
+  .group-action:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+}
+
+.manage button:disabled,
+.review-header button:disabled,
+.review-footer button:disabled,
+.library-month-header button:disabled,
+.select-bar button:disabled,
+.people button:disabled,
+.library-day .group-action:disabled {
+  border-color: var(--selected);
+  color: var(--disabled);
+}
+
+/* the one thing a screen is for */
+.review-footer #save,
+.select-bar #select-apply {
+  border-color: var(--text);
+  background: var(--text);
+  color: #000;
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  .review-footer #save:hover:not(:disabled),
+  .select-bar #select-apply:hover:not(:disabled) {
+    border-color: var(--text-strong);
+    background: var(--text-strong);
+  }
+}
+
+.review-footer #save:disabled,
+.select-bar #select-apply:disabled {
+  border-color: var(--selected);
+  background: var(--selected);
+  color: var(--disabled);
+}
+
+.people input[type="text"],
+.person-edit input[type="text"],
+.viewer-face-editor input[type="text"],
+.select-bar input[type="text"],
+.select-bar input[type="date"],
+.manage select,
+.manage input[type="time"],
+.date-controls input[type="date"] {
+  box-sizing: border-box;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--input-font);
+}
+
+.site-nav {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+}
+
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .site-nav a:hover {
+    background: var(--hover);
+    color: var(--text-strong);
+  }
+}
+
+.site-nav a[aria-current="page"] {
+  background: var(--selected);
+  color: var(--text-strong);
+}
+
+.with-background .site-nav a:not([aria-current="page"]) {
+  color: var(--text);
+  text-shadow: 0 1px 3px #000;
 }
 
 .date-controls {
@@ -28,33 +248,24 @@ button:hover {
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 12px;
-  margin: 0 10px 10px;
-  color: #888;
-  font-size: 12px;
+  gap: 4px 12px;
+  margin: 0 var(--page-margin) 8px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
-.date-controls input[type="date"] {
-  background: transparent;
-  color: #888;
-  border: none;
-  border-bottom: 1px solid #333;
-  padding: 2px 0;
-  font: inherit;
-  color-scheme: dark;
-}
-
-.date-controls input[type="date"]:hover,
-.date-controls input[type="date"]:focus {
-  color: #ddd;
-  border-bottom-color: #888;
-  outline: none;
+.date-controls .edit-link,
+.date-controls .review-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
 }
 
 .toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  min-height: var(--control-height);
   cursor: pointer;
 }
 
@@ -89,7 +300,7 @@ button:hover {
 
 .toggle input:checked::after {
   transform: translateX(10px);
-  background: #ddd;
+  background: var(--text);
 }
 
 .toggle input:focus-visible {
@@ -99,11 +310,11 @@ button:hover {
 
 .no-images {
   margin: 40px 10px;
-  color: #888;
+  color: var(--muted);
 }
 
 .favorite-toggle[aria-pressed="true"] {
-  color: #e5566d;
+  color: var(--heart);
 }
 
 /* stands in for the photos on a day with none to show, dimmed so text stays readable */
@@ -123,27 +334,30 @@ button:hover {
 .with-background .review-badge,
 .with-background .review-cta p,
 .with-background .no-images {
-  color: #ddd;
+  color: var(--text);
   text-shadow: 0 1px 3px #000;
 }
 
 .review-badge,
 .edit-link {
-  color: #888;
+  color: var(--muted);
   text-decoration: none;
 }
 
 .review-badge {
-  padding: 2px 8px;
-  border: 1px solid #555;
-  border-radius: 10px;
-  color: #bbb;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
 }
 
-.review-badge:hover,
-.edit-link:hover {
-  color: #ddd;
-  border-color: #888;
+@media (hover: hover) {
+  .review-badge:hover,
+  .edit-link:hover,
+  .reset-link:hover:not(:disabled) {
+    color: var(--text-strong);
+    border-color: var(--border-strong);
+  }
 }
 
 .reset-link,
@@ -156,7 +370,7 @@ button:hover {
 .review-cta {
   margin: 60px 16px;
   text-align: center;
-  color: #888;
+  color: var(--muted);
   font-size: 16px;
 }
 
@@ -168,7 +382,7 @@ button:hover {
   display: inline-block;
   padding: 24px 48px;
   border-radius: 12px;
-  background: #ddd;
+  background: var(--text);
   color: #000;
   font-size: 26px;
   font-weight: bold;
@@ -176,8 +390,10 @@ button:hover {
   transition: background-color 0.3s;
 }
 
-.review-cta a:hover {
-  background: #fff;
+@media (hover: hover) {
+  .review-cta a:hover {
+    background: var(--text-strong);
+  }
 }
 
 .review-page {
@@ -190,7 +406,7 @@ button:hover {
   height: 100dvh;
   overflow: hidden;
   background-color: #000;
-  color: #ddd;
+  color: var(--text);
 }
 
 .review-header,
@@ -206,62 +422,29 @@ button:hover {
   font-size: 14px;
 }
 
-.review-header a {
-  color: #888;
-  text-decoration: none;
-}
-
-.review-header a:hover {
-  color: #ddd;
-}
-
 #summary {
   flex: 1;
   min-width: 0;
   text-align: center;
-  color: #aaa;
-}
-
-.review-header button,
-.review-footer button {
-  border: 1px solid #666;
+  color: var(--muted);
 }
 
 .review-footer {
   justify-content: space-between;
 }
 
-.review-footer button:disabled {
-  border-color: #333;
-  color: #555;
-  cursor: default;
-}
-
 .review-footer #save {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   max-width: 420px;
   margin: 0 auto;
-  padding: 12px;
-  border-color: #ddd;
-  background: #ddd;
-  color: #000;
   font-size: 16px;
-  font-weight: bold;
-}
-
-.review-footer #save:hover {
-  background: #fff;
-}
-
-.review-footer #save:disabled {
-  background: #333;
-  border-color: #333;
-  color: #777;
+  white-space: normal;
 }
 
 .review-error {
   flex: none;
-  color: #e88;
+  color: var(--error);
   font-size: 14px;
   text-align: center;
 }
@@ -284,7 +467,7 @@ button:hover {
   aspect-ratio: 1;
   overflow: hidden;
   border-radius: 4px;
-  background: #151515;
+  background: var(--surface);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -311,7 +494,7 @@ button:hover {
   border: 2px solid #fff;
   border-radius: 50%;
   box-sizing: border-box;
-  background: #2a7de1;
+  background: var(--accent);
   color: #fff;
   font-size: 14px;
   line-height: 20px;
@@ -342,7 +525,7 @@ button:hover {
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.6);
   color: #ccc;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .review-item .date {
@@ -375,11 +558,11 @@ button:hover {
   font-weight: bold;
 }
 
+/* on the edge above zoom: a narrow tile has no room along the bottom, and tapping the middle checks the photo */
 .review-item .more {
   position: absolute;
-  left: 50%;
-  bottom: 3px;
-  transform: translateX(-50%);
+  right: 3px;
+  bottom: 42px;
   padding: 3px 10px;
   border: 1px solid #aaa;
   border-radius: 12px;
@@ -396,7 +579,7 @@ button:hover {
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.6);
   color: #ccc;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .review-large {
@@ -408,10 +591,6 @@ button:hover {
   justify-content: center;
   background: #000;
   cursor: pointer;
-}
-
-.review-large[hidden] {
-  display: none;
 }
 
 .review-large img {
@@ -427,7 +606,7 @@ button:hover {
   padding: 8px 14px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.6);
-  color: #ddd;
+  color: var(--text);
 }
 
 /* sized for fingers on the frame's 13 inch touchscreen, where 1mm is about 6.6px */
@@ -443,9 +622,10 @@ button:hover {
   align-items: center;
   min-height: 72px;
   padding: 0 28px;
-  border: 1px solid #666;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #ddd;
+  color: var(--text);
+  font-size: 22px;
 }
 
 .kiosk-review .review-header button,
@@ -507,7 +687,10 @@ button:hover {
 }
 
 .kiosk-review .review-item .more {
+  right: auto;
+  left: 50%;
   bottom: 6px;
+  transform: translateX(-50%);
   min-width: 72px;
   height: 56px;
   border-radius: 28px;
@@ -541,8 +724,8 @@ button:hover {
   position: absolute;
   inset: 0;
   padding: 70px 8px 8px;
-  color: #888;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -554,18 +737,15 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 16px;
+  box-sizing: border-box;
+  width: max-content;
   max-width: 90vw;
   transform: translateX(-50%);
   padding: 8px 16px;
   border-radius: 8px;
   background: rgba(30, 30, 30, 0.95);
-  color: #ddd;
+  color: var(--text);
   font-size: 14px;
-}
-
-.toast button {
-  flex: none;
-  border: 1px solid #888;
 }
 
 .manage {
@@ -573,19 +753,20 @@ button:hover {
   width: 100%;
   max-width: 640px;
   padding: 0 16px 32px;
-  color: #ddd;
+  color: var(--text);
   font-size: 14px;
 }
 
 .manage h1 {
-  font-size: 18px;
+  margin: 12px 0;
+  font-size: 20px;
   font-weight: normal;
 }
 
 .manage h2 {
   margin: 28px 0 8px;
-  color: #888;
-  font-size: 13px;
+  color: var(--muted);
+  font-size: 14px;
   font-weight: normal;
 }
 
@@ -597,7 +778,7 @@ button:hover {
 }
 
 .manage dt {
-  color: #888;
+  color: var(--muted);
 }
 
 .manage dd {
@@ -607,44 +788,29 @@ button:hover {
 .manage .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  align-items: center;
+  gap: 8px;
 }
 
-.manage button {
-  border: 2px solid #ddd;
-}
-
-.manage button:disabled {
-  border-color: #444;
-  color: #666;
-  cursor: default;
-}
-
-.manage .link-button {
-  padding: 8px;
-  border: 2px solid #ddd;
-  border-radius: 6px;
-  color: #ddd;
-  text-decoration: none;
-}
-
-.manage .link-button[hidden] {
-  display: none;
+.manage label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .manage .trash-summary {
-  align-self: center;
   margin-right: 8px;
 }
 
 .manage .hint {
   margin: 8px 0 0;
-  color: #888;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .manage .error {
-  color: #e88;
+  color: var(--error);
 }
 
 .manage progress {
@@ -653,33 +819,8 @@ button:hover {
   margin-top: 8px;
 }
 
-.manage progress[hidden] {
-  display: none;
-}
-
-.manage select {
-  background: #000;
-  color: #ddd;
-  border: 1px solid #666;
-  border-radius: 6px;
-  padding: 6px;
-}
-
-.manage input[type="time"] {
-  background: #000;
-  color: #ddd;
-  border: 1px solid #666;
-  border-radius: 6px;
-  padding: 6px;
-  color-scheme: dark;
-}
-
 .manage .schedule-time {
   margin-left: 8px;
-}
-
-.manage .schedule-time[hidden] {
-  display: none;
 }
 
 .manage pre {
@@ -687,41 +828,24 @@ button:hover {
   padding: 8px;
   overflow-x: auto;
   background: #111;
-  color: #aaa;
+  color: var(--muted);
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .library-page {
   width: 100%;
-  background-color: #000;
-  color: #ddd;
   align-items: stretch;
+}
+
+.library-filter {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
 }
 
 .library-page.viewing {
   overflow: hidden;
-}
-
-.library-nav {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 5px;
-  margin: 10px;
-}
-
-.library-nav a {
-  padding: 8px;
-  border: 2px solid #ddd;
-  border-radius: 6px;
-  color: #ddd;
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.library-nav a:hover {
-  background-color: rgba(50, 50, 50, 0.9);
 }
 
 .year-rail {
@@ -732,28 +856,34 @@ button:hover {
   gap: 2px;
   justify-content: safe center;
   overflow-x: auto;
-  padding: 6px 10px;
-  background: #000;
+  scrollbar-width: none;
+  padding: 4px var(--page-margin);
+  background: var(--bg);
 }
 
 .year-rail a {
+  display: inline-flex;
+  align-items: center;
   flex: none;
-  padding: 6px 8px;
-  border-radius: 4px;
-  color: #999;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--muted);
   font-size: 13px;
   text-decoration: none;
 }
 
-.year-rail a:hover {
-  background: #222;
-  color: #fff;
+@media (hover: hover) {
+  .year-rail a:hover {
+    background: var(--hover);
+    color: var(--text-strong);
+  }
 }
 
 .library-year {
   /* clears the year rail when jumped to */
-  scroll-margin-top: 44px;
-  margin: 0 12px 24px;
+  scroll-margin-top: 60px;
+  margin: 0 var(--page-margin) 24px;
 }
 
 .library-year h2,
@@ -765,14 +895,14 @@ button:hover {
 
 .library-year h2 span {
   margin-left: 6px;
-  color: #777;
+  color: var(--muted);
   font-size: 13px;
 }
 
 .month-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
 .month-tile {
@@ -780,9 +910,9 @@ button:hover {
   display: block;
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 6px;
-  background: #151515;
-  color: #fff;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  color: var(--text-strong);
   text-decoration: none;
 }
 
@@ -794,8 +924,10 @@ button:hover {
   transition: transform 0.2s;
 }
 
-.month-tile:hover img {
-  transform: scale(1.04);
+@media (hover: hover) {
+  .month-tile:hover img {
+    transform: scale(1.04);
+  }
 }
 
 .month-label {
@@ -812,7 +944,7 @@ button:hover {
 
 .month-count {
   color: #bbb;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .library-month-header {
@@ -820,51 +952,42 @@ button:hover {
   top: 0;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background: #000;
+  gap: 6px 8px;
+  padding: 8px var(--page-margin);
+  background: var(--bg);
   font-size: 14px;
-}
-
-.library-month-header a {
-  flex: none;
-  padding: 6px 8px;
-  border: 1px solid #555;
-  border-radius: 6px;
-  color: #ddd;
-  text-decoration: none;
-}
-
-.library-month-header a:hover {
-  border-color: #aaa;
-}
-
-.library-month-header #summary {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
 }
 
 .month-steps {
   flex: none;
   display: flex;
   gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .library-hint {
-  margin: 8px 12px;
-  color: #888;
+  margin: 8px var(--page-margin);
+  color: var(--muted);
   font-size: 13px;
 }
 
+.library-month-header #summary {
+  flex: 1 1 120px;
+  min-width: 0;
+  text-align: center;
+}
+
 .library-days {
-  margin: 0 12px 32px;
+  margin: 0 var(--page-margin) 32px;
 }
 
 .library-day h2 {
   font-size: 14px;
-  color: #aaa;
+  color: var(--muted);
 }
 
 /* nothing left in a day once its photos have been hidden or deleted */
@@ -879,10 +1002,18 @@ button:hover {
   gap: 6px 10px;
 }
 
-.group-action {
-  padding: 3px 8px;
-  border: 1px solid #555;
+.library-day .group-action {
+  min-height: 28px;
+  padding: 0 8px;
   font-size: 12px;
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .library-day .group-action {
+    min-height: 36px;
+    font-size: 13px;
+    white-space: normal;
+  }
 }
 
 /* a day's button only matters once selecting, but a folder's is the way to start */
@@ -895,15 +1026,15 @@ button:hover {
   position: absolute;
   top: 5px;
   right: 5px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
   border: 2px solid #fff;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.5);
   color: transparent;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 14px;
+  line-height: 20px;
   text-align: center;
 }
 
@@ -912,7 +1043,7 @@ button:hover {
 }
 
 .library-tile.selected .tile-check {
-  background: #2a7de1;
+  background: var(--accent);
   color: #fff;
 }
 
@@ -933,18 +1064,16 @@ button:hover {
   justify-content: center;
   align-items: center;
   gap: 8px 12px;
-  padding: 10px 12px;
-  background: #1a1a1a;
-  border-top: 1px solid #444;
+  padding: 10px var(--page-margin);
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
   font-size: 14px;
 }
 
-.select-bar[hidden] {
-  display: none;
-}
-
-.select-bar button {
-  border: 1px solid #666;
+.select-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .select-bar button:disabled {
@@ -974,31 +1103,15 @@ button:hover {
 }
 
 .select-bar #select-apply {
-  background: #ddd;
+  background: var(--text);
   color: #000;
   font-weight: bold;
 }
 
 .select-bar #select-apply:disabled {
   background: #333;
-  color: #777;
+  color: var(--muted);
   cursor: default;
-}
-
-.select-bar input[type="date"] {
-  padding: 6px;
-  border: 1px solid #666;
-  border-radius: 6px;
-  background: #000;
-  color: #ddd;
-  color-scheme: dark;
-}
-
-.library-month-header button {
-  flex: none;
-  padding: 6px 8px;
-  border: 1px solid #555;
-  font-size: 14px;
 }
 
 .library-grid {
@@ -1012,12 +1125,8 @@ button:hover {
   display: block;
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 3px;
-  background: #151515;
-}
-
-.library-tile[hidden] {
-  display: none;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
 }
 
 .library-tile img {
@@ -1030,8 +1139,8 @@ button:hover {
 .library-tile .no-preview {
   display: block;
   padding: 8px;
-  color: #888;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -1039,7 +1148,7 @@ button:hover {
   position: absolute;
   right: 5px;
   bottom: 5px;
-  color: #e5566d;
+  color: var(--heart);
   text-shadow: 0 1px 2px #000;
 }
 
@@ -1054,17 +1163,191 @@ button:hover {
   background: #000;
 }
 
-.library-viewer[hidden],
-.library-viewer img[hidden],
-.library-viewer button[hidden] {
-  display: none;
-}
-
-.library-viewer img {
+.library-viewer > img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* the row of faces sits under the photo, so that it doesn't cover anyone in it */
+.library-viewer.showing-faces > img {
+  height: calc(100% - var(--people-height, 0px));
+}
+
+.face-boxes {
+  position: absolute;
+  pointer-events: none;
+}
+
+.face-box {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  border-radius: var(--radius-tile);
+  background: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+
+/* a small face still has to be possible to tap */
+.face-box::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+@media (hover: hover) {
+  button.face-box:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.15);
+  }
+}
+
+.face-box.mine {
+  border-color: var(--accent);
+}
+
+.face-box.chosen {
+  border-color: var(--highlight);
+  border-width: 3px;
+}
+
+.face-box-label {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--text-strong);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.face-box-label.below {
+  top: 100%;
+  bottom: auto;
+}
+
+.viewer-people {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  padding: 8px;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+}
+
+.viewer-people-list {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.face-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 2px 10px 2px 2px;
+  border: 1px solid var(--border);
+  background: none;
+  font-size: 13px;
+}
+
+.face-chip img {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-tile);
+  object-fit: cover;
+}
+
+.face-chip[aria-pressed="true"] {
+  border-color: var(--highlight);
+}
+
+.viewer-face-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.viewer-face-editor input[type="text"] {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.viewer-face-editor button {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: none;
+  font-size: var(--control-font);
+}
+
+.viewer-bar #viewer-faces[aria-pressed="true"] {
+  color: var(--highlight);
+}
+
+.viewer-caption {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: #ccc;
+  overflow-wrap: anywhere;
+}
+
+.person-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px var(--page-margin);
+  background: var(--surface-raised);
+}
+
+.person-edit label {
+  display: inline-flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.person-edit input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.person-edit .library-hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.person-edit button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  background: none;
+  font-size: var(--control-font);
+}
+
+.person-edit .person-remove {
+  border-color: var(--danger);
 }
 
 .viewer-missing {
@@ -1074,12 +1357,8 @@ button:hover {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  color: #888;
+  color: var(--muted);
   overflow-wrap: anywhere;
-}
-
-.viewer-missing[hidden] {
-  display: none;
 }
 
 .viewer-bar {
@@ -1102,25 +1381,22 @@ button:hover {
 
 .viewer-bar button,
 .viewer-link {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: var(--control-height);
+  min-height: var(--control-height);
   box-sizing: border-box;
   padding: 8px;
   border-radius: 6px;
   background: none;
-  color: #ddd;
+  color: var(--text);
   font-size: 15px;
   text-align: center;
   text-decoration: none;
 }
 
-.viewer-bar button:hover,
-.viewer-link:hover {
-  background-color: rgba(50, 50, 50, 0.9);
-}
-
-.viewer-bar .favorite-toggle[aria-pressed="true"] {
-  color: #e5566d;
+@media (hover: hover) {
+  .viewer-link:hover {
+    background-color: var(--hover);
+  }
 }
 
 #viewer-caption {
@@ -1237,11 +1513,6 @@ button:hover {
   font-size: 30px;
 }
 
-.movie-big-play[hidden],
-.movie-spinner[hidden] {
-  display: none;
-}
-
 .movie-big-play i {
   margin-left: 5px;
 }
@@ -1252,7 +1523,7 @@ button:hover {
   left: 50%;
   z-index: 3;
   margin: -20px 0 0 -20px;
-  color: #ddd;
+  color: var(--text);
   font-size: 40px;
   pointer-events: none;
 }
@@ -1328,7 +1599,7 @@ button:hover {
 
 .movie-scrub-fill {
   height: 100%;
-  background: #e5566d;
+  background: var(--heart);
 }
 
 .movie-scrub-ticks span {
@@ -1358,13 +1629,9 @@ button:hover {
   overflow: hidden;
   border-radius: 6px;
   background: #111;
-  color: #ddd;
+  color: var(--text);
   font-size: 12px;
   pointer-events: none;
-}
-
-.movie-scrub-preview[hidden] {
-  display: none;
 }
 
 .movie-scrub-preview img {
@@ -1372,10 +1639,6 @@ button:hover {
   width: 100%;
   height: 96px;
   object-fit: cover;
-}
-
-.movie-scrub-preview img[hidden] {
-  display: none;
 }
 
 .movie-scrub-preview span {
@@ -1388,21 +1651,35 @@ button:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 4px;
-  color: #ddd;
+  color: var(--text);
   font-size: 13px;
 }
 
+.movie-summary {
+  margin: 0 var(--page-margin) 8px;
+  font-size: 13px;
+}
+
+/* a phone on its side has no height to spare above the movie */
+@media (max-height: 480px) {
+  .movie-summary {
+    display: none;
+  }
+}
+
 .movie-buttons button {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: var(--control-height);
+  min-height: var(--control-height);
   padding: 6px;
   background: none;
-  color: #ddd;
+  color: var(--text);
   font-size: 15px;
 }
 
-.movie-buttons button:hover:not(:disabled) {
-  background-color: rgba(70, 70, 70, 0.8);
+@media (hover: hover) {
+  .movie-buttons button:hover:not(:disabled) {
+    background-color: rgba(70, 70, 70, 0.8);
+  }
 }
 
 .movie-buttons button:disabled {
@@ -1435,8 +1712,8 @@ button:hover {
 }
 
 .movie-hidden {
-  margin: 0 12px 32px;
-  color: #999;
+  margin: 0 var(--page-margin) 32px;
+  color: var(--muted);
   font-size: 14px;
 }
 
@@ -1451,11 +1728,11 @@ button:hover {
 
 .movie-volume {
   width: 80px;
-  accent-color: #e5566d;
+  accent-color: var(--heart);
 }
 
 .movie-rails {
-  padding: 8px 12px 4px;
+  padding: 8px var(--page-margin) 4px;
 }
 
 .movie-years {
@@ -1468,19 +1745,22 @@ button:hover {
 
 .movie-years button {
   flex: none;
-  padding: 6px 8px;
+  min-height: var(--control-height);
+  padding: 0 8px;
   background: none;
-  color: #999;
+  color: var(--muted);
   font-size: 13px;
 }
 
-.movie-years button:hover {
-  background: #222;
-  color: #fff;
+@media (hover: hover) {
+  .movie-years button:hover {
+    background: var(--hover);
+    color: var(--text-strong);
+  }
 }
 
 .movie-years button.playing {
-  color: #e5566d;
+  color: var(--heart);
 }
 
 .movie-years button.browsed {
@@ -1509,8 +1789,10 @@ button:hover {
   font-size: 12px;
 }
 
-.movie-month:hover:not(:disabled) {
-  background: #222;
+@media (hover: hover) {
+  .movie-month:hover:not(:disabled) {
+    background: var(--hover);
+  }
 }
 
 .movie-month:disabled {
@@ -1537,19 +1819,19 @@ button:hover {
 }
 
 .movie-month.playing .movie-month-bar {
-  background: #e5566d;
+  background: var(--heart);
 }
 
 .movie-clips-heading {
   margin: 14px 0 0;
-  color: #999;
+  color: var(--muted);
   font-size: 14px;
   font-weight: normal;
 }
 
 .movie-day h2 {
   margin: 16px 0 8px;
-  color: #aaa;
+  color: var(--muted);
   font-size: 14px;
   font-weight: normal;
 }
@@ -1557,7 +1839,7 @@ button:hover {
 .movie-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
 .movie-tile {
@@ -1566,14 +1848,16 @@ button:hover {
   aspect-ratio: 16 / 10;
   padding: 0;
   overflow: hidden;
-  border-radius: 6px;
-  background: #151515;
-  color: #fff;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  color: var(--text-strong);
   font-size: 12px;
 }
 
-.movie-tile:hover {
-  background: #252525;
+@media (hover: hover) {
+  .movie-tile:hover {
+    background: var(--hover);
+  }
 }
 
 .movie-tile img {
@@ -1616,7 +1900,7 @@ button:hover {
 .people {
   box-sizing: border-box;
   width: 100%;
-  padding: 0 12px 40px;
+  padding: 0 var(--page-margin) 40px;
 }
 
 .people h2 {
@@ -1627,7 +1911,7 @@ button:hover {
 
 .people h2 span,
 .people-hint {
-  color: #888;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -1638,7 +1922,7 @@ button:hover {
 .people-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 8px;
+  gap: 4px;
 }
 
 .person-tile {
@@ -1646,9 +1930,9 @@ button:hover {
   display: block;
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 6px;
-  background: #151515;
-  color: #fff;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  color: var(--text-strong);
   text-decoration: none;
 }
 
@@ -1668,10 +1952,6 @@ button:hover {
   border-top: 1px solid #222;
 }
 
-.person-group[hidden] {
-  display: none;
-}
-
 .person-group-faces {
   display: flex;
   flex: 1 1 320px;
@@ -1686,14 +1966,14 @@ button:hover {
 .face-tile img {
   display: block;
   object-fit: cover;
-  background: #151515;
+  background: var(--surface);
 }
 
 .person-group-faces img {
   flex: none;
   width: 72px;
   height: 72px;
-  border-radius: 4px;
+  border-radius: var(--radius-tile);
 }
 
 .person-group-actions {
@@ -1704,29 +1984,68 @@ button:hover {
   font-size: 13px;
 }
 
-.people input[type="text"],
-.select-bar input[type="text"] {
+.people input[type="text"] {
   width: 130px;
-  padding: 6px;
-  border: 1px solid #666;
-  border-radius: 6px;
-  background: #000;
-  color: #ddd;
-}
-
-.people button {
-  border: 1px solid #666;
 }
 
 .people .suggested-name {
-  border-color: #2a7de1;
+  border-color: var(--accent);
 }
 
 .face-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   gap: 4px;
-  margin: 8px 12px 110px;
+  margin: 8px var(--page-margin) 170px;
+}
+
+.face-pick {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+
+.face-show,
+.face-cover-mark {
+  position: absolute;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-tile);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.face-show {
+  right: 4px;
+}
+
+.face-cover-mark {
+  left: 4px;
+  display: none;
+  color: var(--highlight);
+  font-size: 16px;
+}
+
+.face-tile.cover .face-cover-mark {
+  display: flex;
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .face-show {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
 }
 
 .face-tile {
@@ -1735,12 +2054,8 @@ button:hover {
   aspect-ratio: 1;
   padding: 0;
   overflow: hidden;
-  border-radius: 4px;
-  background: #151515;
-}
-
-.face-tile[hidden] {
-  display: none;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
 }
 
 .face-tile img {
@@ -1752,20 +2067,20 @@ button:hover {
   position: absolute;
   top: 4px;
   right: 4px;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
   border: 2px solid #fff;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.5);
   color: transparent;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 20px;
   text-align: center;
 }
 
 .face-tile.selected .tile-check {
-  background: #2a7de1;
+  background: var(--accent);
   color: #fff;
 }
 
@@ -1779,13 +2094,6 @@ button:hover {
 .review-grid {
   -webkit-user-select: none;
   user-select: none;
-}
-
-button.confirming,
-button.confirming:hover {
-  background: #c33;
-  color: #fff;
-  font-weight: bold;
 }
 
 .image-container {
@@ -1811,31 +2119,105 @@ button.confirming:hover {
   position: absolute;
   top: 5px;
   left: 5px;
-  color: #ddd;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  max-width: calc(100% - 10px);
+  color: var(--text);
   background-color: rgba(0, 0, 0, 0.5);
-  padding: 5px;
-  border-radius: 6px;
+  padding: 4px 4px 4px 8px;
+  border-radius: var(--radius);
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity 0.2s;
 }
 
-.image-container:hover .badge {
+.badge button {
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0;
+  background: none;
+}
+
+.image-container:focus-within .badge {
   opacity: 1;
 }
 
-@media (max-width: 768px) {
-  /* the selection bar takes up to three rows here */
-  .selecting .library-days {
-    padding-bottom: 190px;
+@media (hover: hover) {
+  .image-container:hover .badge {
+    opacity: 1;
   }
-  .selecting .toast {
-    bottom: 170px;
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .toggle input {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
   }
-  .movie-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  .toggle input::after {
+    width: 16px;
+    height: 16px;
+  }
+  .toggle input:checked::after {
+    transform: translateX(16px);
+  }
+  .review-item .delete {
+    min-width: 36px;
+    height: 36px;
+  }
+  .review-item .zoom {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
+  }
+  .review-item .date {
+    max-width: calc(100% - 46px);
+    overflow: hidden;
+    white-space: nowrap;
   }
   .movie-volume {
     display: none;
+  }
+  /* there's no hovering to show a photo's controls, so they go under it instead of over it */
+  .image-container {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+  }
+  .image-container .badge {
+    position: static;
+    justify-content: flex-end;
+    max-width: 100%;
+    padding: 0 4px;
+    border-radius: 0;
+    background: none;
+    opacity: 1;
+  }
+  .image-container .badge span:first-of-type {
+    margin-right: auto;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .image-container .badge span:empty {
+    display: none;
+  }
+  .image-container .badge button {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 768px) {
+  .selecting .library-days {
+    padding-bottom: 120px;
+  }
+  .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
   .movie-month {
     font-size: 11px;
@@ -1847,35 +2229,36 @@ button.confirming:hover {
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
     gap: 2px;
   }
-  .review-footer button {
-    min-height: 44px;
+  .people-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
-  .badge, button {
-    padding: 5px 10px;
-    font-size: 14px;
-    opacity: 1;
+  .image-container img {
+    max-width: 100vw;
   }
-  .button-container {
-    opacity: 1;
+  .image-container:not(.loaded) {
+    width: 100vw;
+  }
+  .review-cta a {
+    padding: 16px 32px;
+    font-size: 20px;
   }
 }
-
 
 .duplicate-group {
   margin: 0 0 16px;
   padding: 10px;
-  border: 1px solid #333;
-  border-radius: 6px;
+  border: 1px solid var(--selected);
+  border-radius: var(--radius);
 }
 
 .duplicate-copies {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 170px));
   gap: 10px;
 }
 
 .duplicate-tile {
-  width: 170px;
+  min-width: 0;
   margin: 0;
 }
 
@@ -1884,8 +2267,8 @@ button.confirming:hover {
   width: 100%;
   height: 170px;
   object-fit: contain;
-  border-radius: 3px;
-  background: #151515;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
 }
 
 .duplicate-tile.hidden-copy img {
@@ -1893,7 +2276,7 @@ button.confirming:hover {
 }
 
 .duplicate-tile.kept img {
-  outline: 2px solid #2a7de1;
+  outline: 2px solid var(--accent);
 }
 
 .duplicate-tile figcaption {
@@ -1901,13 +2284,13 @@ button.confirming:hover {
   flex-direction: column;
   gap: 2px;
   margin-top: 6px;
-  color: #aaa;
+  color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .duplicate-badge {
-  color: #ddd;
+  color: var(--text);
 }
 
 .duplicate-actions {
@@ -1918,7 +2301,134 @@ button.confirming:hover {
 }
 
 .duplicate-actions button {
-  padding: 4px 8px;
-  border: 1px solid #555;
-  font-size: 12px;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  font-size: var(--control-font);
+}
+
+@media (max-width: 600px) {
+  .site-nav {
+    justify-content: space-between;
+    gap: 0;
+    padding: 4px;
+  }
+  .site-nav a {
+    padding: 0 5px;
+    font-size: 13px;
+  }
+  /* a month's buttons take their own row, so its title isn't squeezed into a column */
+  .month-steps:has(> :nth-child(3)) {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+  .month-steps:has(> :nth-child(3)) > * {
+    padding: 0 8px;
+  }
+  .viewer-actions {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+  /* room for the two rows of controls under the middle of the movie */
+  .movie-stage {
+    min-height: 300px;
+  }
+  .movie-big-play {
+    top: 35%;
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+  .movie-player.filling-window .movie-stage,
+  .movie-player:fullscreen .movie-stage {
+    min-height: 0;
+  }
+  .movie-player.filling-window .movie-big-play,
+  .movie-player:fullscreen .movie-big-play {
+    top: 50%;
+  }
+  .person-group-actions {
+    flex: 1 1 100%;
+  }
+  .person-group-actions input[type="text"] {
+    flex: 1 1 100px;
+    min-width: 0;
+  }
+  .select-bar {
+    gap: 8px;
+  }
+  .select-bar label {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  .select-bar input[type="text"],
+  .select-bar input[type="date"] {
+    flex: 1;
+    width: 0;
+    min-width: 0;
+  }
+  .select-bar #select-count {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+  /* a phone's selection bar for photos: what's selected, then the actions, then the date */
+  .select-bar:has(.select-actions) {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .select-bar:has(.select-actions) #select-count {
+    text-align: left;
+  }
+  .select-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    width: 100%;
+  }
+  .select-actions button {
+    flex-direction: column;
+    gap: 2px;
+    min-height: 52px;
+    padding: 4px 2px;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+  }
+  .select-actions button i {
+    font-size: 16px;
+  }
+  .selecting .library-days {
+    padding-bottom: 200px;
+  }
+  .selecting .toast {
+    bottom: 190px;
+  }
+  /* a name, its buttons and the count take up to three rows here */
+  .library-page:has(.face-grid) .toast {
+    bottom: 160px;
+  }
+  .library-page.viewing .toast {
+    bottom: calc(var(--people-height, 0px) + 12px);
+  }
+  .viewer-word {
+    display: none;
+  }
+}
+
+/* six links don't fit on one row of the smallest phones */
+@media (max-width: 359px) {
+  .site-nav {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* last, so that an armed delete is red whichever kind of button it is */
+button.confirming,
+button.confirming:hover,
+button.confirming:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--text-strong);
+  font-weight: bold;
 }

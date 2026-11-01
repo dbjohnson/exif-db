@@ -1,24 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>Library</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
   </head>
   <body class="library-page">
-    <div class="library-nav">
-      <a href="/random">Random photos</a>
-      <a href="/onthisday">Photos from this date</a>
-      <a href="/movies">Home movies</a>
-      <a href="/people">People</a>
-      <a href="/manage">Manage</a>
-      {% if faces_checked %}
-      <a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Only photos with faces' }}</a>
-      {% endif %}
+    {% include '_nav.html' %}
+    {% if faces_checked %}
+    <div class="library-filter">
+      <a class="control" href="{{ other_filter_url }}">{{ 'Show all photos' if with_faces else 'Only photos with faces' }}</a>
     </div>
+    {% endif %}
     {% if not total %}
     <div class="no-images">No photos {{ 'with faces ' if with_faces }}yet</div>
     {% endif %}

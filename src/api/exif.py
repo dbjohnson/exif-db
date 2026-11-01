@@ -384,7 +384,7 @@ def _library_rows(where, params):
         SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned
         FROM {_with_status()}
         WHERE ({where}) AND review_status <> ?
-        ORDER BY DateTimeOriginal, photo_id
+        ORDER BY DateTimeOriginal DESC, photo_id
         """,
         [*params, REJECTED]
     ).fetchall()
@@ -621,7 +621,7 @@ def _review_queue_page(datestring, offset, limit):
                 Make IS NULL AND Model IS NULL AS no_camera
             FROM numbered
             WHERE tile > ? AND tile <= ?
-            ORDER BY tile, position
+            ORDER BY tile, position DESC
             """,
             [f"{datestring}%", start, start + limit]
         ).fetchall()

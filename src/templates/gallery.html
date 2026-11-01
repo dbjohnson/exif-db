@@ -1,11 +1,8 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
   <head>
-    <title>Exif DB</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Photos</title>
+    {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
     <script>
@@ -161,44 +158,11 @@
       }
     </script>
   </head>
-  <body style="background-color:#000"{% if background %} class="with-background"{% endif %}>
+  <body class="gallery-page{% if background %} with-background{% endif %}">
     {% if background %}
     <img class="day-background" src="{{ background }}" alt="" />
     {% endif %}
-    <div
-      style="display:flex;justify-content:center;align-items:center;gap:5px;margin:10px;"
-    >
-      <button
-        onclick="window.location.href='/random'"
-        style="border:2px solid #ddd;"
-      >
-        Random photos
-      </button>
-      <button
-        onclick="window.location.href='/onthisday'"
-        style="border:2px solid #ddd;"
-      >
-        Photos from this date
-      </button>
-      <button
-        onclick="window.location.href='/library'"
-        style="border:2px solid #ddd;"
-      >
-        Library
-      </button>
-      <button
-        onclick="window.location.href='/movies'"
-        style="border:2px solid #ddd;"
-      >
-        Home movies
-      </button>
-      <button
-        onclick="window.location.href='/manage'"
-        style="border:2px solid #ddd;"
-      >
-        Manage
-      </button>
-    </div>
+    {% include '_nav.html' %}
     <div class="date-controls">
       <input
         id="date-picker"

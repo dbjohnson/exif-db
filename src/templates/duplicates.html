@@ -1,12 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>Duplicates</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
     <script src="/static/toast.js"></script>
     <script>
       async function act(url, body) {
@@ -36,10 +32,7 @@
     </script>
   </head>
   <body class="library-page">
-    <div class="library-nav">
-      <a href="/library">Library</a>
-      <a href="/manage">Manage</a>
-    </div>
+    {% include '_nav.html' %}
     {% macro tile(photo) %}
     <figure class="duplicate-tile{{ ' kept' if photo.best }}{{ ' hidden-copy' if not photo.showing }}">
       <a href="/api/image{{ photo.path | urlencode }}{% if photo.rotation %}?rotate={{ photo.rotation }}{% endif %}" target="_blank" rel="noopener">

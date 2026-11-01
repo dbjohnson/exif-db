@@ -1,12 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>Home movies</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
     <script>
@@ -155,7 +151,13 @@
           byYear.get(year).months.push(month);
           byYear.get(year).seconds += month.seconds;
         }
-        years = [...byYear.values()];
+        // newest first, with undated last, as in the library.  clips stays in filmed order, since
+        // that's the order the stream plays in: only what's listed runs backwards
+        const allYears = [...byYear.values()];
+        years = [
+          ...allYears.filter(year => year.year !== UNDATED).reverse(),
+          ...allYears.filter(year => year.year === UNDATED)
+        ];
       }
 
       // ---- finding your way around
@@ -187,7 +189,7 @@
         }
         const keys = browsedYear === UNDATED
           ? [UNDATED]
-          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(number + 1).padStart(2, '0')}`);
+          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(12 - number).padStart(2, '0')}`);
         const most = Math.max(...year.months.map(month => month.seconds));
         rail.replaceChildren(...keys.map(key => {
           const month = months.get(key);
@@ -251,7 +253,7 @@
 
         let grid = null;
         let day;
-        for (let index = month.first; index <= month.last; index++) {
+        for (let index = month.last; index >= month.first; index--) {
           const clip = clips[index];
           if (gone(clip)) {
             continue;
@@ -288,7 +290,7 @@
 
       // looking through a year doesn't interrupt what's playing; choosing a month or movie does
       function browseYear(year) {
-        browseMonth(year.months[0].key);
+        browseMonth(year.months[year.months.length - 1].key);
       }
 
       // ---- the scrubber, which covers the month being played
@@ -673,7 +675,7 @@
       }
 
       function renderHidden() {
-        const hidden = clips.flatMap((clip, index) => clip.hidden ? [index] : []);
+        const hidden = clips.flatMap((clip, index) => clip.hidden ? [index] : []).reverse();
         byId('hidden').hidden = !hidden.length;
         byId('hidden-count').textContent = `${hidden.length.toLocaleString()} hidden movie${hidden.length === 1 ? '' : 's'}`;
         byId('hidden-grid').replaceChildren(...hidden.map(index => {
@@ -1018,10 +1020,8 @@
     </script>
   </head>
   <body class="library-page">
-    <div class="library-month-header">
-      <a href="/library" aria-label="Back to library">‹ Library</a>
-      <span id="summary">Home movies</span>
-    </div>
+    {% include '_nav.html' %}
+    <p id="summary" class="movie-summary">Home movies</p>
     <div id="empty" class="no-images" hidden>
       No movies yet. They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
     </div>

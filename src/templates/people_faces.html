@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>{{ title }}</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
+    <script src="/static/faces.js"></script>
+    {% if name %}<script src="/static/people.js"></script>{% endif %}
     <script>
       // a page of faces that all get a name, or just the ones picked out
       const CURRENT_NAME = {{ name | tojson }};
+      const FACES = new Map({{ faces | tojson }}.map(face => [face.id, face]));
+      let coverFace = {{ (cover or none) | tojson }};
       const selected = new Set();
       let lastPicked = null;
 
@@ -23,7 +24,76 @@
         document.getElementById('select-count').textContent = count
           ? `${count.toLocaleString()} selected`
           : 'None selected: applies to all';
+        const coverButton = document.getElementById('use-cover');
+        if (coverButton) {
+          const only = count === 1 ? [...selected][0].dataset.faceId : null;
+          coverButton.disabled = !only;
+          coverButton.textContent = only && only === coverFace ? 'Automatic cover' : 'Use as cover';
+        }
       }
+
+      function renderCover() {
+        document.querySelectorAll('.face-tile').forEach(tile => tile.classList.toggle('cover', tile.dataset.faceId === coverFace));
+      }
+
+      async function setCover(faceId) {
+        const {previous} = await postJson('/api/people/cover', {name: CURRENT_NAME, face_id: faceId});
+        coverFace = faceId;
+        renderCover();
+        render();
+        return previous;
+      }
+
+      async function useAsCover() {
+        const only = [...selected][0].dataset.faceId;
+        const choosing = only === coverFace ? null : only;
+        try {
+          const previous = await setCover(choosing);
+          showToast(choosing ? 'Cover set' : 'Cover is automatic again', async () => {
+            try {
+              await setCover(previous);
+            } catch (error) {
+              showToast(`Couldn't undo: ${error.message}`);
+            }
+          });
+        } catch (error) {
+          showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
+
+      // the very copy this face was found in, so that its box needs no turning
+      function showInPhoto(faceId) {
+        const face = FACES.get(faceId);
+        const viewer = document.getElementById('face-photo');
+        const image = document.getElementById('face-photo-image');
+        const boxes = document.getElementById('face-photo-boxes');
+        history.pushState({facePhoto: true}, '');
+        document.body.classList.add('viewing');
+        viewer.hidden = false;
+        document.getElementById('face-photo-caption').textContent = face.path.split('/').pop();
+        const box = makeFaceBox(face.box, CURRENT_NAME);
+        box.classList.add('chosen');
+        boxes.replaceChildren(box);
+        image.onload = () => coverPhoto(boxes, image);
+        image.src = `/api/image${encodePath(face.path)}${face.rotation ? `?rotate=${face.rotation}` : ''}`;
+      }
+
+      function hideFacePhoto() {
+        document.body.classList.remove('viewing');
+        document.getElementById('face-photo').hidden = true;
+        document.getElementById('face-photo-image').removeAttribute('src');
+        document.getElementById('face-photo-boxes').replaceChildren();
+      }
+
+      window.addEventListener('popstate', hideFacePhoto);
+      window.addEventListener('resize', () => coverPhoto(document.getElementById('face-photo-boxes'), document.getElementById('face-photo-image')));
+      window.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !document.getElementById('face-photo').hidden) {
+          history.back();
+        }
+      });
 
       function setPicked(tile, picked) {
         if (picked) {
@@ -97,19 +167,27 @@
       <a href="{{ photos_url or '/people' }}">‹ {{ 'Photos' if photos_url else 'People' }}</a>
       <span id="summary">{{ title }} · <span id="count"></span></span>
       <span class="month-steps">
+        {% if name %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
         <button onclick="toggleAll()">Select all</button>
       </span>
     </div>
-    <p class="library-hint" style="margin:8px 12px">
-      {% if name %}Select any that aren't {{ name }}, then give them the right name, or skip them.
+    {% if name %}{% set person = name %}{% include '_person_edit.html' %}{% endif %}
+    <p class="library-hint">
+      {% if name %}Select any that aren't {{ name }}, then give them the right name, or skip them. Select one to use it as the cover on {{ name }}'s folder.
       {% else %}If these are all one person, name them. If not, select the ones who are the same person and name those; the rest stay here. Shift-click selects a range.{% endif %}
     </p>
     <div class="face-grid">
       {% for face in faces %}
-      <button class="face-tile" data-face-id="{{ face }}" onclick="pick(this, event.shiftKey)">
-        <img src="/api/face/{{ face }}" loading="lazy" decoding="async" alt="" />
-        <span class="tile-check" aria-hidden="true">✓</span>
-      </button>
+      <div class="face-tile{{ ' cover' if face.id == cover }}" data-face-id="{{ face.id }}">
+        <button class="face-pick" aria-label="Select this face" onclick="pick(this.closest('.face-tile'), event.shiftKey)">
+          <img src="/api/face/{{ face.id }}" loading="lazy" decoding="async" alt="" />
+          <span class="tile-check" aria-hidden="true">✓</span>
+        </button>
+        <span class="face-cover-mark" title="This person's cover" aria-label="This person's cover">★</span>
+        <button class="face-show" onclick="showInPhoto('{{ face.id }}')" title="Show in its photo" aria-label="Show in its photo">
+          <i class="fa fa-picture-o" aria-hidden="true"></i>
+        </button>
+      </div>
       {% endfor %}
     </div>
     <datalist id="names">
@@ -125,6 +203,15 @@
       </label>
       <button onclick="applyTyped()">Save</button>
       <button onclick="apply('')" title="Not someone worth naming">Skip</button>
+      {% if name %}<button id="use-cover" onclick="useAsCover()" title="Show this face on {{ name }}'s folder" disabled>Use as cover</button>{% endif %}
+    </div>
+    <div id="face-photo" class="library-viewer" hidden>
+      <img id="face-photo-image" alt="" />
+      <div id="face-photo-boxes" class="face-boxes"></div>
+      <div class="viewer-bar">
+        <button onclick="history.back()" title="Close" aria-label="Close"><i class="fa fa-times" aria-hidden="true"></i></button>
+        <span id="face-photo-caption" class="viewer-caption"></span>
+      </div>
     </div>
   </body>
 </html>

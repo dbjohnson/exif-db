@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>{{ title }}</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
+    <script src="/static/faces.js"></script>
+    {% if person %}<script src="/static/people.js"></script>{% endif %}
     <script>
       const PHOTOS = {{ photos | tojson }};
+      // whose page this is, or null
+      const PERSON = {{ (person or none) | tojson }};
       const TITLE = {{ title | tojson }};
       // this page's "YYYY-MM", or null for undated photos
       const MONTH = {{ month | tojson }};
@@ -30,6 +30,10 @@
       let lastPicked = null;
       const groups = [];
       let deletesRunning = 0;
+      // a person's page is about whose face is where, so it starts out showing them
+      let showingFaces = PERSON !== null;
+      let chosenFace = null;
+      const photoFaces = new Map();
 
       const shown = () => PHOTOS.filter(photo => !photo.removed);
       const fileName = photo => photo.path.split('/').pop();
@@ -450,9 +454,175 @@
         disarmButton(document.getElementById('viewer-delete'));
         current = photo;
         lastPicked = photo;
+        chosenFace = null;
         renderViewerDetails();
         renderViewerImage();
+        renderFaces();
         preloadNeighbors();
+      }
+
+      async function facesIn(photo) {
+        if (!photoFaces.has(photo.id)) {
+          const response = await fetch(`/api/photo-faces?${new URLSearchParams({photo_id: photo.id})}`);
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          photoFaces.set(photo.id, await response.json());
+        }
+        return photoFaces.get(photo.id);
+      }
+
+      const faceLabel = face => face.name || (face.name === '' ? 'Skipped' : 'Who is this?');
+
+      function fitFaceLayer() {
+        const people = document.getElementById('viewer-people');
+        // on the body, since messages use it to stay clear of the row of faces too
+        document.body.style.setProperty('--people-height', people.hidden ? '0px' : `${people.offsetHeight}px`);
+        coverPhoto(document.getElementById('viewer-boxes'), document.getElementById('viewer-image'));
+      }
+
+      function renderFaceEditor(faces) {
+        const editor = document.getElementById('viewer-face-editor');
+        const face = faces.find(other => other.id === chosenFace);
+        editor.hidden = !face;
+        if (!face) {
+          return;
+        }
+        document.getElementById('viewer-face-name').value = face.name || '';
+        document.getElementById('viewer-face-clear').hidden = face.name === null;
+        // a wrong name comes off first, since a name and skipping are different mistakes
+        document.getElementById('viewer-face-skip').hidden = face.name !== null;
+        const cover = document.getElementById('viewer-face-cover');
+        cover.hidden = !face.name;
+        cover.textContent = face.cover ? 'Automatic cover' : 'Use as cover';
+      }
+
+      async function renderFaces() {
+        const photo = current;
+        const viewer = document.getElementById('viewer');
+        const boxes = document.getElementById('viewer-boxes');
+        const people = document.getElementById('viewer-people');
+        document.getElementById('viewer-faces').setAttribute('aria-pressed', showingFaces);
+        viewer.classList.toggle('showing-faces', showingFaces);
+        if (!showingFaces || !photo) {
+          boxes.hidden = true;
+          people.hidden = true;
+          fitFaceLayer();
+          return;
+        }
+        let faces = [];
+        try {
+          faces = await facesIn(photo);
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't load this photo's faces: ${error.message}`);
+        }
+        if (photo !== current || !showingFaces) {
+          return;
+        }
+        const list = document.getElementById('viewer-people-list');
+        list.replaceChildren(...faces.map(face => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'face-chip';
+          chip.setAttribute('aria-pressed', face.id === chosenFace);
+          chip.onclick = () => chooseFace(face.id);
+          const crop = document.createElement('img');
+          crop.src = `/api/face/${face.id}`;
+          crop.alt = '';
+          crop.loading = 'lazy';
+          const label = document.createElement('span');
+          label.textContent = (face.cover ? '★ ' : '') + faceLabel(face);
+          chip.append(crop, label);
+          return chip;
+        }));
+        document.getElementById('viewer-no-faces').hidden = faces.length > 0;
+        boxes.replaceChildren(...faces.map(face => {
+          const box = makeFaceBox(turnedBox(face.box, photo.rotation - face.rotation), faceLabel(face));
+          box.classList.toggle('mine', Boolean(PERSON) && face.name === PERSON);
+          box.classList.toggle('named', Boolean(face.name));
+          box.classList.toggle('chosen', face.id === chosenFace);
+          box.setAttribute('aria-label', `Change ${faceLabel(face)}`);
+          box.onclick = () => chooseFace(face.id);
+          return box;
+        }));
+        boxes.hidden = false;
+        people.hidden = false;
+        renderFaceEditor(faces);
+        fitFaceLayer();
+      }
+
+      function chooseFace(faceId) {
+        chosenFace = chosenFace === faceId ? null : faceId;
+        renderFaces();
+      }
+
+      function toggleFaces() {
+        showingFaces = !showingFaces;
+        chosenFace = null;
+        renderFaces();
+      }
+
+      // after a face's name or a person's cover has changed
+      async function facesChanged(photo) {
+        // all of them, since a new cover also takes the star off a face in some other photo
+        photoFaces.clear();
+        if (PERSON && !(await facesIn(photo)).some(face => face.name === PERSON)) {
+          // with none of this person's faces left in it, this isn't one of their photos any more
+          removeFromView(photo);
+        } else if (photo === current) {
+          renderFaces();
+        }
+      }
+
+      async function changeFaceName(name) {
+        const photo = current;
+        const faceId = chosenFace;
+        try {
+          const {previous} = await (name === null
+            ? postJson('/api/people/faces/clear', {face_ids: [faceId]})
+            : postJson('/api/people/faces', {face_ids: [faceId], name}));
+          const said = name === null ? 'Name removed' : name ? `Named ${name.trim()}` : 'Skipped';
+          chosenFace = null;
+          await facesChanged(photo);
+          showToast(said, () => run(async () => {
+            await postJson('/api/people/faces/restore', {previous});
+            if (photo.removed) {
+              restored(photo);
+            }
+            await facesChanged(photo);
+          }, "Couldn't undo"));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      function saveFaceName() {
+        const typed = document.getElementById('viewer-face-name').value;
+        if (typed.trim()) {
+          changeFaceName(typed);
+        }
+      }
+
+      async function setFaceCover() {
+        const photo = current;
+        const face = (await facesIn(photo)).find(other => other.id === chosenFace);
+        if (!face || !face.name) {
+          return;
+        }
+        const name = face.name;
+        try {
+          const {previous} = await postJson('/api/people/cover', {name, face_id: face.cover ? null : face.id});
+          await facesChanged(photo);
+          showToast(face.cover ? `${name}'s cover is automatic again` : `Cover set for ${name}`, () => run(async () => {
+            await postJson('/api/people/cover', {name, face_id: previous});
+            await facesChanged(photo);
+          }, "Couldn't undo"));
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't save: ${error.message}`);
+        }
       }
 
       function openViewer(photo) {
@@ -554,6 +724,7 @@
         }
         if (photo === current) {
           renderViewerImage();
+          renderFaces();
         }
       }
 
@@ -628,6 +799,10 @@
       });
 
       window.addEventListener('keydown', event => {
+        // typing a name, where arrows move through the text
+        if (event.target.closest?.('input')) {
+          return;
+        }
         if (!current) {
           if (selecting && event.key === 'Escape') {
             setSelecting(false);
@@ -649,8 +824,13 @@
 
         const viewer = document.getElementById('viewer');
         let swipeStart = null;
+        document.getElementById('viewer-image').addEventListener('load', fitFaceLayer);
+        window.addEventListener('resize', fitFaceLayer);
         viewer.addEventListener('touchstart', event => {
-          swipeStart = event.touches.length === 1 ? event.touches[0].clientX : null;
+          // the row of faces scrolls sideways by itself
+          swipeStart = event.touches.length === 1 && !event.target.closest('.viewer-people')
+            ? event.touches[0].clientX
+            : null;
         }, {passive: true});
         viewer.addEventListener('touchend', event => {
           if (swipeStart === null) {
@@ -670,12 +850,19 @@
       <span id="summary">{{ title }}</span>
       <span class="month-steps">
         {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
+        {% if person %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
         {% if faces_checked %}<a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
         {% if newer_url %}<a href="{{ newer_url }}" title="Newer month">Newer ›</a>{% endif %}
       </span>
     </div>
+    {% if person %}{% include '_person_edit.html' %}{% endif %}
+    <datalist id="names">
+      {% for known in known_names or [] %}
+      <option value="{{ known }}"></option>
+      {% endfor %}
+    </datalist>
     {% if not dated %}
     <p class="library-hint">These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.</p>
     {% endif %}
@@ -708,6 +895,7 @@
     </div>
     <div id="viewer" class="library-viewer" hidden>
       <img id="viewer-image" alt="" />
+      <div id="viewer-boxes" class="face-boxes" hidden></div>
       <div id="viewer-missing" class="viewer-missing" hidden></div>
       <button id="viewer-previous" class="viewer-step previous" onclick="step(-1)" aria-label="Previous photo">‹</button>
       <button id="viewer-next" class="viewer-step next" onclick="step(1)" aria-label="Next photo">›</button>
@@ -717,11 +905,14 @@
         </button>
         <span id="viewer-caption"></span>
         <span class="viewer-actions">
-          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the gallery and kiosk">
-            <i class="fa fa-check" aria-hidden="true"></i> Approve
+          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the gallery and kiosk" aria-label="Approve">
+            <i class="fa fa-check" aria-hidden="true"></i> <span class="viewer-word">Approve</span>
           </button>
           <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">
             <i class="fa fa-heart-o" aria-hidden="true"></i>
+          </button>
+          <button id="viewer-faces" onclick="toggleFaces()" title="Show who's where" aria-label="Show faces" aria-pressed="false">
+            <i class="fa fa-user-o" aria-hidden="true"></i>
           </button>
           <button onclick="rotateCurrent()" title="Rotate 90° clockwise" aria-label="Rotate">
             <i class="fa fa-rotate-right" aria-hidden="true"></i>
@@ -736,6 +927,17 @@
             <i class="fa fa-trash-o" aria-hidden="true"></i>
           </button>
         </span>
+      </div>
+      <div id="viewer-people" class="viewer-people" hidden>
+        <div id="viewer-people-list" class="viewer-people-list"></div>
+        <div id="viewer-no-faces" class="people-hint" hidden>No faces have been matched in this photo.</div>
+        <div id="viewer-face-editor" class="viewer-face-editor" hidden>
+          <input id="viewer-face-name" type="text" list="names" maxlength="80" placeholder="Name" aria-label="Name for this face" onkeydown="if (event.key === 'Enter') saveFaceName();" />
+          <button onclick="saveFaceName()">Save</button>
+          <button id="viewer-face-clear" onclick="changeFaceName(null)" title="This face goes back to Who is this?">Remove name</button>
+          <button id="viewer-face-skip" onclick="changeFaceName('')" title="Not someone worth naming">Skip</button>
+          <button id="viewer-face-cover" onclick="setFaceCover()" title="Show this face on this person's folder">Use as cover</button>
+        </div>
       </div>
     </div>
   </body>

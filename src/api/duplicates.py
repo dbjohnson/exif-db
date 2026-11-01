@@ -153,7 +153,9 @@ def _groups_for_page():
     for is_sure, group in described:
         if group:
             (sure if is_sure else possible).append(group)
-    return sure, possible
+    # newest first, going by the latest photo in each
+    newest = lambda group: max(photo['date'] or '' for photo in group['photos'])
+    return sorted(sure, key=newest, reverse=True), sorted(possible, key=newest, reverse=True)
 
 
 def page():

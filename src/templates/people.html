@@ -1,13 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>People</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    {% include '_head.html' %}
     <script src="/static/toast.js"></script>
+    <script src="/static/people.js"></script>
     <script>
       async function undoNames(previous, row) {
         try {
@@ -44,16 +41,12 @@
     </script>
   </head>
   <body class="library-page">
-    <div class="library-nav">
-      <a href="/library">Library</a>
-      <a href="/random">Random photos</a>
-      <a href="/manage">Manage</a>
-    </div>
+    {% include '_nav.html' %}
     <div class="people">
       <p class="people-hint">
         {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status and status.state != 'finished' %}, still in progress: {{ status.state }}{% endif %}.
       </p>
-      <p id="reload-note" class="people-hint" hidden><a href="/people" style="color:#bbb">Reload</a> to see names added here and the groups that changed.</p>
+      <p id="reload-note" class="people-hint" hidden><a href="/people">Reload</a> to see names added here and the groups that changed.</p>
 
       {% if people %}
       <h2>People</h2>

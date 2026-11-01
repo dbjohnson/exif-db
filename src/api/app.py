@@ -542,7 +542,9 @@ def library_month_photos(month, with_faces):
     photos = exif.library_photos(month, with_faces)
     if month is None:
         dated_folders = exif.dated_folders()
-        return sorted((undated_photo(photo, dated_folders) for photo in photos), key=lambda photo: photo['day'])
+        by_folder = sorted((undated_photo(photo, dated_folders) for photo in photos), key=lambda photo: photo['day'])
+        # newest first like everything else, by what a folder's name suggests; those with no date go last
+        return sorted(by_folder, key=lambda photo: (photo['suggested'] or {}).get('date', ''), reverse=True)
     return list(map(library_photo, photos))
 
 
@@ -567,6 +569,7 @@ def library_month_page(request, month, title, with_faces):
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
             "photos": library_month_photos(month, with_faces),
+            "known_names": people.known_names(),
             "newer_url": library_url(months[position - 1], with_faces) if position else None,
             "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None
         }
@@ -654,6 +657,25 @@ class FaceNamesRestore(BaseModel):
     previous: dict[str, str | None]
 
 
+class FaceIds(BaseModel):
+    face_ids: list[str]
+
+
+class PersonRename(BaseModel):
+    name: str
+    new_name: str = Field(max_length=80)
+
+
+class PersonName(BaseModel):
+    name: str
+
+
+class PersonCover(BaseModel):
+    name: str
+    # or null to go back to choosing one automatically
+    face_id: str | None
+
+
 @app.get("/people")
 async def _people(request: Request):
     return templates.TemplateResponse(
@@ -669,9 +691,10 @@ def people_faces_page(request, title, face_ids, photos_url=None, name=None):
         name="people_faces.html",
         context={
             "title": title,
-            "faces": face_ids,
+            "faces": people.face_details(face_ids),
             "photos_url": photos_url,
             "name": name,
+            "cover": people.chosen_cover(name) if name else None,
             "known_names": people.known_names()
         }
     )
@@ -721,6 +744,8 @@ async def _person(request: Request, name: str):
             "back_url": "/people",
             "back_label": "People",
             "faces_url": f"/people/{quote(name)}/faces",
+            "person": name,
+            "known_names": people.known_names(),
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
             "photos": [
@@ -741,11 +766,52 @@ def month_heading(photo):
         return 'Undated'
 
 
+def clean_name(name):
+    # a name is part of its page's address, where a slash would mean something else
+    return ' '.join(name.split()).replace('/', '-')
+
+
 @app.post("/api/people/faces")
 async def _name_faces(names: FaceNames):
-    # a name is part of its page's address, where a slash would mean something else
-    name = ' '.join(names.name.split()).replace('/', '-')
-    return {'previous': people.set_names(names.face_ids, name)}
+    return {'previous': people.set_names(names.face_ids, clean_name(names.name))}
+
+
+@app.post("/api/people/faces/clear")
+async def _clear_face_names(faces_to_clear: FaceIds):
+    return {'previous': people.clear_names(faces_to_clear.face_ids)}
+
+
+@app.post("/api/people/rename")
+async def _rename_person(rename: PersonRename):
+    new_name = clean_name(rename.new_name)
+    if not new_name:
+        raise HTTPException(status_code=422, detail="A name can't be blank")
+    previous = people.rename(rename.name, new_name)
+    if previous is None and rename.name != new_name:
+        raise HTTPException(status_code=404, detail="There's nobody by that name")
+    return {'name': new_name, 'previous': previous or {}}
+
+
+@app.post("/api/people/remove")
+async def _remove_person(person: PersonName):
+    previous = people.remove(person.name)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="There's nobody by that name")
+    return {'previous': previous}
+
+
+@app.post("/api/people/cover")
+async def _set_person_cover(choice: PersonCover):
+    previous = people.set_cover(choice.name, choice.face_id)
+    if previous is False:
+        raise HTTPException(status_code=422, detail="That face isn't this person's")
+    return {'previous': previous}
+
+
+# what the viewer draws boxes from.  A query parameter, since a photo's id can hold anything
+@app.get("/api/photo-faces")
+async def _photo_faces(photo_id: str):
+    return people.photo_faces(photo_id)
 
 
 @app.post("/api/people/faces/restore")

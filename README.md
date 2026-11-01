@@ -41,7 +41,7 @@ Deleting moves a photo to `deleted/` in the storage volume and records it in `de
 
 ## The library
 
-`/library` browses the whole index by year and month, then shows a month's photos by day, with a viewer for favoriting, rotating, hiding, deleting and downloading.  Unlike the gallery it includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, are under Undated, by folder.
+`/library` browses the whole index by year and month, newest first, then shows a month's photos by day, also newest first, with a viewer for favoriting, rotating, hiding, deleting and downloading.  Unlike the gallery it includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, are under Undated, by folder.
 
 Any month, and Undated, has a Select button for approving, favoriting, rotating, hiding, deleting or setting the date of many photos at once (shift-click selects a range).  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
@@ -59,9 +59,13 @@ Results are kept in `faces.csv` in the storage volume, so stopping or restarting
 
 `/people` groups the faces it found by which look alike.  Naming a group, or some of the faces in it, adds that person's photos to their own page, and those names are kept in `people.csv` in the storage volume.
 
+Edit on a person's page renames them, or removes them, which sends their faces back to "Who is this?" and leaves the photos alone.  Using a name someone already has joins the two together.  All of these can be undone straight afterwards.
+
+The viewer's person button draws a box around each face found in a photo, and a person's page starts out showing them.  Pressing a box or a face in the row below it gives that face a different name, takes its name off, skips it, or makes it the person's cover.  A person's Faces page also shows any face in its photo, and selecting one there can make it their cover, which is kept in `people_covers.csv` in the storage volume.  A person's cover is otherwise their largest, sharpest face.
+
 ## Home movies
 
-`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  Pick a year and month to drop in at the start of that month, or a movie in the month's list, and the scrubber covers the month being played.  It picks up where it left off on that device.
+`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  The years, months and movies are listed newest first, like the library, while the stream itself always plays forward in time.  Pick a year and month to drop in at the start of that month, or a movie in the month's list, and the scrubber covers the month being played.  It picks up where it left off on that device.
 
 Keyboard: Space plays and pauses, ←/→ moves 10 seconds and carries over into the next or previous movie, Shift+←/→ moves by movie, ↑/↓ moves by month, F is full screen and M mutes.
 
