@@ -42,17 +42,13 @@ img.hidden {
   color: #888;
 }
 
-/* only the date and the review link stay up over the photo */
-.badge.idle .controls {
+/* nothing stays up over the photo; display: none so that hidden buttons can't be tapped */
+.badge.idle {
   display: none;
 }
 
 .controls {
   display: inline-block;
-}
-
-.badge.idle {
-  background-color: rgba(0, 0, 0, 0.4);
 }
 
 button {
