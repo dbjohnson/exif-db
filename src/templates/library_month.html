@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{ title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
+    <script>
+      const PHOTOS = {{ photos | tojson }};
+      const TITLE = {{ title | tojson }};
+      const SWIPE_PX = 50;
+
+      // the photo in the viewer, if it's open
+      let current = null;
+      // keeps a run of quick presses saving in order
+      let savingRotation = Promise.resolve();
+
+      const shown = () => PHOTOS.filter(photo => !photo.removed);
+      const fileName = photo => photo.path.split('/').pop();
+      const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
+      const photoUrl = (api, photo) =>
+        `/api/${api}${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+
+      function renderTile(photo) {
+        const tile = document.createElement('a');
+        tile.className = 'library-tile';
+        // somewhere to go if the script stops, or to open in a new tab
+        tile.href = photoUrl('image', photo);
+        tile.setAttribute('aria-label', fileName(photo));
+        tile.onclick = event => {
+          if (!event.metaKey && !event.ctrlKey) {
+            event.preventDefault();
+            openViewer(photo);
+          }
+        };
+
+        const image = document.createElement('img');
+        image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = photoUrl('thumb', photo);
+        image.onerror = () => {
+          image.remove();
+          const message = document.createElement('span');
+          message.className = 'no-preview';
+          message.textContent = `No preview: ${fileName(photo)}`;
+          tile.prepend(message);
+        };
+
+        const heart = document.createElement('i');
+        heart.className = 'fa fa-heart tile-favorite';
+        heart.setAttribute('aria-hidden', 'true');
+        heart.hidden = !photo.favorite;
+
+        tile.append(image, heart);
+        photo.tile = tile;
+        return tile;
+      }
+
+      function renderGrid() {
+        const days = document.getElementById('days');
+        let grid = null;
+        let day;
+        for (const photo of PHOTOS) {
+          if (!grid || photo.day !== day) {
+            day = photo.day;
+            const section = document.createElement('section');
+            section.className = 'library-day';
+            if (day) {
+              const heading = document.createElement('h2');
+              heading.textContent = day;
+              section.append(heading);
+            }
+            grid = document.createElement('div');
+            grid.className = 'library-grid';
+            section.append(grid);
+            days.append(section);
+          }
+          grid.append(renderTile(photo));
+        }
+        renderCount();
+      }
+
+      function renderCount() {
+        const count = shown().length;
+        document.getElementById('summary').textContent =
+          `${TITLE} · ${count.toLocaleString()} photo${count === 1 ? '' : 's'}`;
+      }
+
+      function setRemoved(photo, removed) {
+        photo.removed = removed;
+        photo.tile.hidden = removed;
+        renderCount();
+      }
+
+      function renderViewerDetails() {
+        const list = shown();
+        const position = list.indexOf(current);
+        const when = current.day ? `${current.day}, ${TITLE.split(' ').pop()} · ${current.time} · ` : '';
+        document.getElementById('viewer-caption').textContent =
+          `${when}${fileName(current)} · ${position + 1} of ${list.length.toLocaleString()}`;
+        document.getElementById('viewer-previous').hidden = position === 0;
+        document.getElementById('viewer-next').hidden = position === list.length - 1;
+        const favorite = document.getElementById('viewer-favorite');
+        favorite.setAttribute('aria-pressed', current.favorite);
+        favorite.querySelector('i').className = current.favorite ? 'fa fa-heart' : 'fa fa-heart-o';
+        document.getElementById('viewer-approve').hidden = current.status !== 'unreviewed';
+        document.getElementById('viewer-download').href = `/api/original${encodePath(current.path)}`;
+        document.getElementById('viewer-download').download = fileName(current);
+      }
+
+      // the thumbnail shows straight away, so that the old photo never sits under the new one's
+      // caption and buttons while the NAS makes the larger copy
+      function renderViewerImage() {
+        const photo = current;
+        const rotation = photo.rotation;
+        const isCurrent = () => photo === current && rotation === photo.rotation;
+        const image = document.getElementById('viewer-image');
+        const missing = document.getElementById('viewer-missing');
+        image.hidden = false;
+        missing.hidden = true;
+        image.src = photoUrl('thumb', photo);
+        const large = new Image();
+        large.onload = () => {
+          if (isCurrent()) {
+            image.src = large.src;
+          }
+        };
+        large.onerror = () => {
+          if (isCurrent()) {
+            image.hidden = true;
+            missing.hidden = false;
+            missing.textContent = `No preview: ${fileName(photo)}`;
+          }
+        };
+        large.src = photoUrl('image', photo);
+      }
+
+      function preloadNeighbors() {
+        const list = shown();
+        const position = list.indexOf(current);
+        for (const neighbor of [list[position + 1], list[position - 1]]) {
+          if (neighbor) {
+            new Image().src = photoUrl('image', neighbor);
+          }
+        }
+      }
+
+      function showPhoto(photo) {
+        current = photo;
+        renderViewerDetails();
+        renderViewerImage();
+        preloadNeighbors();
+      }
+
+      function openViewer(photo) {
+        // so that the back button closes the viewer rather than leaving the month
+        history.pushState({viewer: true}, '');
+        document.body.classList.add('viewing');
+        document.getElementById('viewer').hidden = false;
+        showPhoto(photo);
+      }
+
+      function hideViewer() {
+        if (!current) {
+          return;
+        }
+        current.tile.scrollIntoView({block: 'nearest'});
+        current = null;
+        document.body.classList.remove('viewing');
+        document.getElementById('viewer').hidden = true;
+        document.getElementById('viewer-image').removeAttribute('src');
+      }
+
+      function closeViewer() {
+        history.back();
+      }
+
+      function step(direction) {
+        const list = shown();
+        const next = list[list.indexOf(current) + direction];
+        if (next) {
+          showPhoto(next);
+        }
+      }
+
+      // a removed photo's place in the viewer goes to the one after it, or the one before if it
+      // was the last
+      function removeFromView(photo) {
+        const list = shown();
+        const position = list.indexOf(photo);
+        const next = list[position + 1] || list[position - 1];
+        setRemoved(photo, true);
+        if (photo !== current) {
+          if (current) {
+            renderViewerDetails();
+          }
+        } else if (next) {
+          showPhoto(next);
+        } else {
+          closeViewer();
+        }
+      }
+
+      function restored(photo) {
+        setRemoved(photo, false);
+        if (current) {
+          renderViewerDetails();
+        }
+      }
+
+      async function run(action, failure) {
+        try {
+          await action();
+        } catch (error) {
+          console.log(error);
+          showToast(`${failure}: ${error.message}`);
+        }
+      }
+
+      function approve(photo) {
+        return postJson('/api/review', {approved: [photo.id]}).then(() => {
+          photo.status = 'approved';
+          if (photo === current) {
+            renderViewerDetails();
+          }
+        });
+      }
+
+      function approveCurrent() {
+        run(() => approve(current), "Couldn't approve");
+      }
+
+      // a favorite that isn't approved wouldn't appear anywhere favorites are used
+      function toggleFavorite() {
+        const photo = current;
+        const favorite = !photo.favorite;
+        run(async () => {
+          await postJson('/api/favorite', {photo_id: photo.id, favorite});
+          photo.favorite = favorite;
+          photo.tile.querySelector('.tile-favorite').hidden = !favorite;
+          if (photo === current) {
+            renderViewerDetails();
+          }
+          if (favorite && photo.status === 'unreviewed') {
+            await approve(photo);
+          }
+        }, "Couldn't save favorite");
+      }
+
+      function setRotation(photo, rotation) {
+        photo.rotation = rotation;
+        const thumb = photo.tile.querySelector('img');
+        if (thumb) {
+          thumb.src = photoUrl('thumb', photo);
+        }
+        if (photo === current) {
+          renderViewerImage();
+        }
+      }
+
+      function rotateCurrent() {
+        const photo = current;
+        const rotation = (photo.rotation + 90) % 360;
+        setRotation(photo, rotation);
+        savingRotation = savingRotation
+          .then(() => postJson('/api/rotate', {photo_id: photo.id, rotation}))
+          .catch(error => {
+            console.log(error);
+            setRotation(photo, (photo.rotation + 270) % 360);
+            showToast(`Couldn't rotate: ${error.message}`);
+          });
+      }
+
+      // gone straight away, so that browsing carries on while the NAS catches up
+      async function removeWithUndo(photo, done, failure, request, undo) {
+        removeFromView(photo);
+        try {
+          const result = await request();
+          showToast(done, () => run(async () => {
+            await undo(result);
+            restored(photo);
+          }, "Couldn't undo"));
+        } catch (error) {
+          console.log(error);
+          restored(photo);
+          showToast(`${failure}: ${error.message}`);
+        }
+      }
+
+      function hideCurrent() {
+        const photo = current;
+        removeWithUndo(
+          photo,
+          'Photo hidden',
+          "Couldn't hide",
+          () => postJson('/api/review', {rejected: [photo.id]}),
+          () => postJson('/api/review', {[photo.status]: [photo.id]})
+        );
+      }
+
+      function deleteCurrent() {
+        const photo = current;
+        if (!confirm(`Delete ${fileName(photo)}?`)) {
+          return;
+        }
+        removeWithUndo(
+          photo,
+          'Photo deleted',
+          "Couldn't delete",
+          async () => {
+            // keepalive so that it still completes if the page is left straight after
+            const response = await fetch(`/api/image${encodePath(photo.path)}`, {method: 'DELETE', keepalive: true});
+            if (!response.ok) {
+              throw new Error('Status: ' + response.status);
+            }
+            return response.json();
+          },
+          ({files}) => postJson('/api/restore', {files})
+        );
+      }
+
+      window.addEventListener('popstate', hideViewer);
+
+      window.addEventListener('keydown', event => {
+        if (!current) {
+          return;
+        }
+        if (event.key === 'ArrowLeft') {
+          step(-1);
+        } else if (event.key === 'ArrowRight') {
+          step(1);
+        } else if (event.key === 'Escape') {
+          closeViewer();
+        }
+      });
+
+      window.addEventListener('DOMContentLoaded', () => {
+        renderGrid();
+
+        const viewer = document.getElementById('viewer');
+        let swipeStart = null;
+        viewer.addEventListener('touchstart', event => {
+          swipeStart = event.touches.length === 1 ? event.touches[0].clientX : null;
+        }, {passive: true});
+        viewer.addEventListener('touchend', event => {
+          if (swipeStart === null) {
+            return;
+          }
+          const moved = event.changedTouches[0].clientX - swipeStart;
+          if (Math.abs(moved) >= SWIPE_PX) {
+            step(moved < 0 ? 1 : -1);
+          }
+        }, {passive: true});
+      });
+    </script>
+  </head>
+  <body class="library-page">
+    <div class="library-month-header">
+      <a href="/library" aria-label="Back to library">‹ Library</a>
+      <span id="summary">{{ title }}</span>
+      <span class="month-steps">
+        {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
+        {% if newer_url %}<a href="{{ newer_url }}" title="Newer month">Newer ›</a>{% endif %}
+      </span>
+    </div>
+    {% if not dated %}
+    <p class="library-hint">These photos have a date their camera couldn't have recorded, like 1901 or 0000, usually because its clock was never set.</p>
+    {% endif %}
+    <div id="days" class="library-days"></div>
+    <div id="viewer" class="library-viewer" hidden>
+      <img id="viewer-image" alt="" />
+      <div id="viewer-missing" class="viewer-missing" hidden></div>
+      <button id="viewer-previous" class="viewer-step previous" onclick="step(-1)" aria-label="Previous photo">‹</button>
+      <button id="viewer-next" class="viewer-step next" onclick="step(1)" aria-label="Next photo">›</button>
+      <div class="viewer-bar">
+        <button onclick="closeViewer()" title="Close" aria-label="Close">
+          <i class="fa fa-times" aria-hidden="true"></i>
+        </button>
+        <span id="viewer-caption"></span>
+        <span class="viewer-actions">
+          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the gallery and kiosk">
+            <i class="fa fa-check" aria-hidden="true"></i> Approve
+          </button>
+          <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">
+            <i class="fa fa-heart-o" aria-hidden="true"></i>
+          </button>
+          <button onclick="rotateCurrent()" title="Rotate 90° clockwise" aria-label="Rotate">
+            <i class="fa fa-rotate-right" aria-hidden="true"></i>
+          </button>
+          <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
+            <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
+          </a>
+          <button onclick="hideCurrent()" title="Hide" aria-label="Hide">
+            <i class="fa fa-eye-slash" aria-hidden="true"></i>
+          </button>
+          <button onclick="deleteCurrent()" title="Delete" aria-label="Delete">
+            <i class="fa fa-trash-o" aria-hidden="true"></i>
+          </button>
+        </span>
+      </div>
+    </div>
+  </body>
+</html>

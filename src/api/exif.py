@@ -27,6 +27,14 @@ RESTORED = 'restored'
 # long run of different shots isn't all decided by one of them
 BURST_GAP_SECS = 5
 BURST_MAX_PHOTOS = 12
+# cameras with unset clocks give dates like 1901:01:01, which shouldn't appear as years of photos
+LIBRARY_EARLIEST_YEAR = 1902
+# a photo's "YYYY:MM" in the library, or NULL if its date can't be trusted
+LIBRARY_MONTH = f"""
+    CASE WHEN regexp_matches(DateTimeOriginal, '^\\d{{4}}:(0[1-9]|1[0-2]):')
+        AND LEFT(DateTimeOriginal, 4) >= '{LIBRARY_EARLIEST_YEAR}'
+    THEN LEFT(DateTimeOriginal, 7) END
+"""
 db = duckdb.connect(database=':memory:', read_only=False)
 _log_sizes = {}
 # deleted paths that were left out when the index was last loaded
@@ -187,12 +195,13 @@ def photos_version():
     return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
 
 
-def record_reviews(approved=(), rejected=()):
+def record_reviews(approved=(), rejected=(), unreviewed=()):
     _append_log(
         REVIEWS_CSV,
         [
             *((photo_id, APPROVED) for photo_id in approved),
-            *((photo_id, REJECTED) for photo_id in rejected)
+            *((photo_id, REJECTED) for photo_id in rejected),
+            *((photo_id, UNREVIEWED) for photo_id in unreviewed)
         ]
     )
 
@@ -299,6 +308,60 @@ def review_counts(datestring=''):
         [f"{datestring}%"]
     ).fetchall()
     return {APPROVED: 0, REJECTED: 0, UNREVIEWED: 0, **dict(rows)}
+
+
+def library_months():
+    """
+    Every month with photos to browse, newest first and undated photos last.  Unlike the gallery
+    this includes unreviewed photos, which are most of a library, but not hidden ones.  A month's
+    cover stays the same until its photos change: a favorite or approved photo if there is one,
+    preferring camera photos over screenshots and JPEGs, which are the quickest to make a
+    thumbnail from
+    """
+    rows = db.execute(
+        f"""
+        SELECT
+            {LIBRARY_MONTH} AS month,
+            COUNT(*),
+            first(struct_pack(path := SourceFile, rotation := rotation) ORDER BY
+                favorite DESC,
+                review_status = ? DESC,
+                Make IS NOT NULL DESC,
+                FileType = 'JPEG' DESC,
+                hash(photo_id)
+            )
+        FROM {_with_status()}
+        WHERE review_status <> ?
+        GROUP BY month
+        ORDER BY month DESC NULLS LAST
+        """,
+        [APPROVED, REJECTED]
+    ).fetchall()
+    return [{'month': month, 'photos': photos, 'cover': cover} for month, photos, cover in rows]
+
+
+def library_photos(month):
+    # month as in library_months, where None is the undated photos
+    rows = db.execute(
+        f"""
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation
+        FROM {_with_status()}
+        WHERE ({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND review_status <> ?
+        ORDER BY DateTimeOriginal, photo_id
+        """,
+        [month, REJECTED]
+    ).fetchall()
+    return [
+        {
+            'id': photo_id,
+            'path': path,
+            'taken': taken,
+            'status': status,
+            'favorite': favorite,
+            'rotation': rotation
+        }
+        for photo_id, path, taken, status, favorite, rotation in rows
+    ]
 
 
 def _review_item(photo_id, path, taken, review_status, rotation, no_camera=False):

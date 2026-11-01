@@ -692,6 +692,339 @@ button:hover {
   font-size: 11px;
 }
 
+.library-page {
+  width: 100%;
+  background-color: #000;
+  color: #ddd;
+  align-items: stretch;
+}
+
+.library-page.viewing {
+  overflow: hidden;
+}
+
+.library-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  margin: 10px;
+}
+
+.library-nav a {
+  padding: 8px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.library-nav a:hover {
+  background-color: rgba(50, 50, 50, 0.9);
+}
+
+.year-rail {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  justify-content: safe center;
+  overflow-x: auto;
+  padding: 6px 10px;
+  background: #000;
+}
+
+.year-rail a {
+  flex: none;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: #999;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.year-rail a:hover {
+  background: #222;
+  color: #fff;
+}
+
+.library-year {
+  /* clears the year rail when jumped to */
+  scroll-margin-top: 44px;
+  margin: 0 12px 24px;
+}
+
+.library-year h2,
+.library-day h2 {
+  margin: 16px 0 8px;
+  font-size: 20px;
+  font-weight: normal;
+}
+
+.library-year h2 span {
+  margin-left: 6px;
+  color: #777;
+  font-size: 13px;
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.month-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #151515;
+  color: #fff;
+  text-decoration: none;
+}
+
+.month-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+
+.month-tile:hover img {
+  transform: scale(1.04);
+}
+
+.month-label {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  padding: 20px 8px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  font-size: 14px;
+}
+
+.month-count {
+  color: #bbb;
+  font-size: 11px;
+}
+
+.library-month-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #000;
+  font-size: 14px;
+}
+
+.library-month-header a {
+  flex: none;
+  padding: 6px 8px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #ddd;
+  text-decoration: none;
+}
+
+.library-month-header a:hover {
+  border-color: #aaa;
+}
+
+.library-month-header #summary {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.month-steps {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.library-hint {
+  margin: 8px 12px;
+  color: #888;
+  font-size: 13px;
+}
+
+.library-days {
+  margin: 0 12px 32px;
+}
+
+.library-day h2 {
+  font-size: 14px;
+  color: #aaa;
+}
+
+/* nothing left in a day once its photos have been hidden or deleted */
+.library-day:not(:has(.library-tile:not([hidden]))) {
+  display: none;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 4px;
+}
+
+.library-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #151515;
+}
+
+.library-tile[hidden] {
+  display: none;
+}
+
+.library-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-tile .no-preview {
+  display: block;
+  padding: 8px;
+  color: #888;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.tile-favorite {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  color: #e5566d;
+  text-shadow: 0 1px 2px #000;
+}
+
+.tile-favorite[hidden] {
+  display: none;
+}
+
+.library-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #000;
+}
+
+.library-viewer[hidden],
+.library-viewer img[hidden],
+.library-viewer button[hidden] {
+  display: none;
+}
+
+.library-viewer img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.viewer-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: #888;
+  overflow-wrap: anywhere;
+}
+
+.viewer-missing[hidden] {
+  display: none;
+}
+
+.viewer-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 13px;
+}
+
+.viewer-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewer-bar button,
+.viewer-link {
+  min-width: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 8px;
+  border-radius: 6px;
+  background: none;
+  color: #ddd;
+  font-size: 15px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.viewer-bar button:hover,
+.viewer-link:hover {
+  background-color: rgba(50, 50, 50, 0.9);
+}
+
+.viewer-bar .favorite-toggle[aria-pressed="true"] {
+  color: #e5566d;
+}
+
+#viewer-caption {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: #ccc;
+  overflow-wrap: anywhere;
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.viewer-step {
+  position: absolute;
+  top: 50%;
+  width: 48px;
+  height: 72px;
+  transform: translateY(-50%);
+  font-size: 32px;
+  line-height: 1;
+}
+
+.viewer-step.previous {
+  left: 8px;
+}
+
+.viewer-step.next {
+  right: 8px;
+}
+
 .image-container {
   position: relative;
   display: inline-block;
@@ -728,6 +1061,13 @@ button:hover {
 }
 
 @media (max-width: 768px) {
+  .month-grid {
+    grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  }
+  .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 2px;
+  }
   .review-footer button {
     min-height: 44px;
   }

@@ -1,6 +1,7 @@
 import os
 import datetime
 import hashlib
+import itertools
 import logging
 from typing import Literal
 from urllib.parse import quote, urlencode
@@ -303,6 +304,7 @@ async def _random(request: Request, n: int = DEFAULT_NUM_IMAGES):
 class ReviewDecisions(BaseModel):
     approved: list[str] = []
     rejected: list[str] = []
+    unreviewed: list[str] = []
 
 
 class FavoriteChange(BaseModel):
@@ -351,7 +353,7 @@ async def _review_today():
 
 @app.post("/api/review")
 async def _record_reviews(decisions: ReviewDecisions):
-    exif.record_reviews(decisions.approved, decisions.rejected)
+    exif.record_reviews(decisions.approved, decisions.rejected, decisions.unreviewed)
     return "saved"
 
 
@@ -396,6 +398,90 @@ async def _review(
             }
         }
     )
+
+
+def library_url(month):
+    return '/library/' + (month.replace(':', '/') if month else 'undated')
+
+
+def library_tile(entry):
+    # an entry from exif.library_months, with what the page shows for it
+    year, number = entry['month'].split(':') if entry['month'] else (None, None)
+    return {
+        **entry,
+        'year': year,
+        'name': datetime.date(2000, int(number), 1).strftime('%B') if number else 'Undated',
+        'url': library_url(entry['month'])
+    }
+
+
+def library_years(tiles):
+    dated = (tile for tile in tiles if tile['year'])
+    years = []
+    for year, group in itertools.groupby(dated, key=lambda tile: tile['year']):
+        months = list(group)
+        years.append({'year': year, 'months': months, 'photos': sum(tile['photos'] for tile in months)})
+    return years
+
+
+def library_photo(photo, dated):
+    # with a page's own dates spelled out; a date's day can still be impossible, like Feb 30
+    day = time = None
+    if dated:
+        try:
+            taken = datetime.datetime.strptime(photo['taken'][:19], '%Y:%m:%d %H:%M:%S')
+            day = f"{taken:%A}, {taken:%B} {taken.day}"
+            time = f"{taken.hour % 12 or 12}:{taken:%M %p}"
+        except ValueError:
+            pass
+    return {**photo, 'day': day, 'time': time}
+
+
+def library_month_page(request, month, title):
+    months = [entry['month'] for entry in exif.library_months()]
+    # a month can empty out while its page is open, such as by deleting everything in it
+    if month not in months:
+        return RedirectResponse(url='/library')
+    position = months.index(month)
+    return templates.TemplateResponse(
+        request=request,
+        name="library_month.html",
+        context={
+            "title": title,
+            "dated": month is not None,
+            "photos": [library_photo(photo, month is not None) for photo in exif.library_photos(month)],
+            "newer_url": library_url(months[position - 1]) if position else None,
+            "older_url": library_url(months[position + 1]) if position + 1 < len(months) else None
+        }
+    )
+
+
+@app.get("/library")
+async def _library(request: Request):
+    tiles = [library_tile(entry) for entry in exif.library_months()]
+    return templates.TemplateResponse(
+        request=request,
+        name="library.html",
+        context={
+            "total": sum(tile['photos'] for tile in tiles),
+            "years": library_years(tiles),
+            "undated": next((tile for tile in tiles if not tile['year']), None)
+        }
+    )
+
+
+@app.get("/library/undated")
+async def _library_undated(request: Request):
+    return library_month_page(request, None, "Undated")
+
+
+@app.get("/library/{year}/{month}")
+async def _library_month(request: Request, year: int, month: int):
+    try:
+        title = f"{datetime.date(year, month, 1):%B} {year}"
+    except ValueError:
+        return RedirectResponse(url='/library')
+    return library_month_page(request, f"{year:04d}:{month:02d}", title)
 
 
 def slides(df):

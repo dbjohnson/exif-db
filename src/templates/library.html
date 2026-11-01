@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Library</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body class="library-page">
+    <div class="library-nav">
+      <a href="/random">Random photos</a>
+      <a href="/onthisday">Photos from this date</a>
+      <a href="/manage">Manage</a>
+    </div>
+    {% if not total %}
+    <div class="no-images">No photos yet</div>
+    {% endif %}
+    <nav class="year-rail" aria-label="Years">
+      {% for year in years %}
+      <a href="#y{{ year.year }}">{{ year.year }}</a>
+      {% endfor %}
+      {% if undated %}
+      <a href="#undated">Undated</a>
+      {% endif %}
+    </nav>
+    {% macro month_tile(tile) %}
+    <a class="month-tile" href="{{ tile.url }}">
+      <img
+        src="/api/thumb{{ tile.cover.path | urlencode }}{% if tile.cover.rotation %}?rotate={{ tile.cover.rotation }}{% endif %}"
+        loading="lazy"
+        decoding="async"
+        alt=""
+        onerror="this.remove()"
+      />
+      <span class="month-label">
+        <span>{{ tile.name }}</span>
+        <span class="month-count">{{ "{:,}".format(tile.photos) }}</span>
+      </span>
+    </a>
+    {% endmacro %}
+    {% for year in years %}
+    <section id="y{{ year.year }}" class="library-year">
+      <h2>{{ year.year }} <span>{{ "{:,}".format(year.photos) }} photo{{ '' if year.photos == 1 else 's' }}</span></h2>
+      <div class="month-grid">
+        {% for tile in year.months %}
+        {{ month_tile(tile) }}
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+    {% if undated %}
+    <section id="undated" class="library-year">
+      <h2>Undated <span>camera clock not set</span></h2>
+      <div class="month-grid">
+        {{ month_tile(undated) }}
+      </div>
+    </section>
+    {% endif %}
+  </body>
+</html>
