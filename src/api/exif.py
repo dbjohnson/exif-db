@@ -13,6 +13,8 @@ EXIF_CSV = '/storage/exif.csv'
 REVIEWS_CSV = '/storage/reviews.csv'
 FAVORITES_CSV = '/storage/favorites.csv'
 ROTATIONS_CSV = '/storage/rotations.csv'
+# dates given to photos by hand, which take the place of what's in the file
+DATES_CSV = '/storage/dates.csv'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
 # where the faces are in each photo, written by scripts/find_faces.py
@@ -30,6 +32,8 @@ RESTORED = 'restored'
 # long run of different shots isn't all decided by one of them
 BURST_GAP_SECS = 5
 BURST_MAX_PHOTOS = 12
+# what a photo with no date of its own is treated as having
+NO_DATE = '0000:00:00 00:00:00'
 # cameras with unset clocks give dates like 1901:01:01, which shouldn't appear as years of photos
 LIBRARY_EARLIEST_YEAR = 1902
 # a photo's "YYYY:MM" in the library, or NULL if its date can't be trusted
@@ -47,22 +51,25 @@ _left_out_of_index = set()
 def load_csv(force_reload=False):
     # Load the CSV data into a DuckDB table, and keep only one row for each photo.
     # Copies / alternate formats of a photo share a base name and capture time;
-    # base names alone are reused by cameras and phones.  Reviews are keyed on this
-    # identity rather than a path, since which copy is kept can change between loads
+    # base names alone are reused by cameras and phones.  Without a capture time to go on,
+    # copies share a base name and size.  Reviews are keyed on this identity rather than
+    # a path, since which copy is kept can change between loads
     if force_reload or update_available() or _left_out_path_returned():
         _load_deletions(force_reload=True)
         _left_out_of_index.clear()
         _left_out_of_index.update(_deleted_paths())
         db.execute(
-            """
+            f"""
             CREATE OR REPLACE TABLE exif AS
             SELECT
-                *,
+                * REPLACE (COALESCE(DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal),
                 ?::TIMESTAMP last_modified,
-                LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', '')) || '|' || DateTimeOriginal AS photo_id
+                LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', '')) || '|' || CASE
+                    WHEN DateTimeOriginal IS NULL OR DateTimeOriginal = '{NO_DATE}' THEN 'size ' || FileSize
+                    ELSE DateTimeOriginal
+                END AS photo_id
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
-            AND DateTimeOriginal IS NOT NULL
             -- so that another copy of a deleted photo can take its place
             AND SourceFile NOT IN (SELECT photo_id FROM deletions)
             -- prefer JPEGs, then PNGs, then HEICs, then everything else
@@ -193,7 +200,7 @@ def photos_version():
     """
     Changes whenever the photos to show might have, so that a page can tell without fetching them
     """
-    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, DELETIONS_CSV)
+    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, DATES_CSV, DELETIONS_CSV)
     stats = [os.stat(path) if os.path.exists(path) else None for path in files]
     return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
 
@@ -215,11 +222,11 @@ def reset_reviews(datestring=''):
     library includes photos no longer in the index, so they don't return with an old
     decision if their files do
     """
-    _with_status()
+    table = _with_status()
     rows = db.execute(
-        """
+        f"""
         SELECT photo_id
-        FROM reviews LEFT JOIN exif USING (photo_id)
+        FROM reviews LEFT JOIN {table} USING (photo_id)
         WHERE value <> ? AND (? OR DateTimeOriginal LIKE ?)
         """,
         [UNREVIEWED, not datestring, f"{datestring}%"]
@@ -228,12 +235,12 @@ def reset_reviews(datestring=''):
     return len(rows)
 
 
-def set_favorite(photo_id, favorite):
-    _append_log(FAVORITES_CSV, [(photo_id, FAVORITE if favorite else NOT_FAVORITE)])
+def set_favorites(photo_ids, favorite):
+    _append_log(FAVORITES_CSV, [(photo_id, FAVORITE if favorite else NOT_FAVORITE) for photo_id in photo_ids])
 
 
-def set_rotation(photo_id, rotation):
-    _append_log(ROTATIONS_CSV, [(photo_id, rotation)])
+def set_rotations(rotations):
+    _append_log(ROTATIONS_CSV, list(rotations.items()))
 
 
 def _with_status():
@@ -241,11 +248,13 @@ def _with_status():
     _load_log('reviews', REVIEWS_CSV)
     _load_log('favorites', FAVORITES_CSV)
     _load_log('rotations', ROTATIONS_CSV)
+    _load_log('dates', DATES_CSV)
     _load_deletions()
     return f"""
         (
             SELECT
-                exif.*,
+                exif.* REPLACE (COALESCE(dates.value, exif.DateTimeOriginal) AS DateTimeOriginal),
+                dates.value IS NOT NULL AS date_assigned,
                 COALESCE(reviews.value, '{UNREVIEWED}') AS review_status,
                 COALESCE(favorites.value = '{FAVORITE}', false) AS favorite,
                 COALESCE(TRY_CAST(rotations.value AS INTEGER), 0) AS rotation
@@ -253,6 +262,7 @@ def _with_status():
             LEFT JOIN reviews USING (photo_id)
             LEFT JOIN favorites USING (photo_id)
             LEFT JOIN rotations USING (photo_id)
+            LEFT JOIN dates USING (photo_id)
             WHERE exif.SourceFile NOT IN (SELECT photo_id FROM deletions)
         )
     """
@@ -354,7 +364,7 @@ def library_photos(month, with_faces=False):
     # month as in library_months, where None is the undated photos
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned
         FROM {_with_status()}
         WHERE ({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND review_status <> ? {_library_filter(with_faces)}
         ORDER BY DateTimeOriginal, photo_id
@@ -368,10 +378,52 @@ def library_photos(month, with_faces=False):
             'taken': taken,
             'status': status,
             'favorite': favorite,
-            'rotation': rotation
+            'rotation': rotation,
+            'date_assigned': date_assigned
         }
-        for photo_id, path, taken, status, favorite, rotation in rows
+        for photo_id, path, taken, status, favorite, rotation, date_assigned in rows
     ]
+
+
+def dated_folders():
+    # each folder with a month its photos are from, going by the dates in the files themselves
+    return set(db.execute(
+        f"""
+        SELECT DISTINCT REGEXP_REPLACE(SourceFile, '/[^/]*$', ''), {LIBRARY_MONTH}
+        FROM {_with_status()}
+        WHERE NOT date_assigned AND ({LIBRARY_MONTH}) IS NOT NULL
+        """
+    ).fetchall())
+
+
+def assign_date(photo_ids, date):
+    """
+    Give photos a date, keeping their order.  Their times are only there to keep that order, and
+    to keep them apart, since photos close together in time get reviewed as a burst.  Returns
+    what each photo's date was before, as restore_dates takes it, with '' for its own date
+    """
+    _with_status()
+    rows = db.execute(
+        """
+        SELECT photo_id, COALESCE(dates.value, '')
+        FROM exif LEFT JOIN dates USING (photo_id)
+        WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))
+        ORDER BY exif.DateTimeOriginal, photo_id
+        """,
+        [photo_ids]
+    ).fetchall()
+    midnight = datetime.datetime.combine(date, datetime.time())
+    gap = datetime.timedelta(seconds=BURST_GAP_SECS + 1)
+    per_day = datetime.timedelta(days=1) // gap
+    _append_log(DATES_CSV, [
+        (photo_id, (midnight + gap * (position % per_day)).strftime('%Y:%m:%d %H:%M:%S'))
+        for position, (photo_id, _) in enumerate(rows)
+    ])
+    return dict(rows)
+
+
+def restore_dates(previous):
+    _append_log(DATES_CSV, list(previous.items()))
 
 
 def face_counts():

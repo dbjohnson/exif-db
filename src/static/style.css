@@ -872,6 +872,135 @@ button:hover {
   display: none;
 }
 
+.library-day h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.group-action {
+  padding: 3px 8px;
+  border: 1px solid #555;
+  font-size: 12px;
+}
+
+/* a day's button only matters once selecting, but a folder's is the way to start */
+.library-page:not(.selecting) .library-day .select-group.day-only {
+  display: none;
+}
+
+.library-tile .tile-check {
+  display: none;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: transparent;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.selecting .library-tile .tile-check {
+  display: block;
+}
+
+.library-tile.selected .tile-check {
+  background: #2a7de1;
+  color: #fff;
+}
+
+.library-tile.selected img {
+  opacity: 0.6;
+}
+
+.selecting .library-days {
+  padding-bottom: 72px;
+}
+
+.select-bar {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border-top: 1px solid #444;
+  font-size: 14px;
+}
+
+.select-bar[hidden] {
+  display: none;
+}
+
+.select-bar button {
+  border: 1px solid #666;
+}
+
+.select-bar button:disabled {
+  border-color: #333;
+  color: #666;
+  cursor: default;
+}
+
+.select-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* whether a photo is already approved matters when choosing what to approve or hide */
+.selecting .library-tile.approved::after {
+  content: "\2713";
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(30, 120, 60, 0.9);
+  color: #fff;
+  font-size: 12px;
+}
+
+.select-bar #select-apply {
+  background: #ddd;
+  color: #000;
+  font-weight: bold;
+}
+
+.select-bar #select-apply:disabled {
+  background: #333;
+  color: #777;
+  cursor: default;
+}
+
+.select-bar input[type="date"] {
+  padding: 6px;
+  border: 1px solid #666;
+  border-radius: 6px;
+  background: #000;
+  color: #ddd;
+  color-scheme: dark;
+}
+
+.library-month-header button {
+  flex: none;
+  padding: 6px 8px;
+  border: 1px solid #555;
+  font-size: 14px;
+}
+
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -1061,6 +1190,13 @@ button:hover {
 }
 
 @media (max-width: 768px) {
+  /* the selection bar takes up to three rows here */
+  .selecting .library-days {
+    padding-bottom: 190px;
+  }
+  .selecting .toast {
+    bottom: 170px;
+  }
   .month-grid {
     grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
   }

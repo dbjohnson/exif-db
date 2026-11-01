@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import itertools
 import logging
+import re
 from typing import Literal
 from urllib.parse import quote, urlencode
 
@@ -312,20 +313,41 @@ class FavoriteChange(BaseModel):
     favorite: bool
 
 
+class FavoritesChange(BaseModel):
+    photo_ids: list[str]
+    favorite: bool
+
+
 class RotationChange(BaseModel):
     photo_id: str
     rotation: Rotation
 
 
+class RotationsChange(BaseModel):
+    rotations: dict[str, Rotation]
+
+
 @app.post("/api/rotate")
 async def _set_rotation(change: RotationChange):
-    exif.set_rotation(change.photo_id, change.rotation)
+    exif.set_rotations({change.photo_id: change.rotation})
+    return "saved"
+
+
+@app.post("/api/rotations")
+async def _set_rotations(change: RotationsChange):
+    exif.set_rotations(change.rotations)
     return "saved"
 
 
 @app.post("/api/favorite")
 async def _set_favorite(change: FavoriteChange):
-    exif.set_favorite(change.photo_id, change.favorite)
+    exif.set_favorites([change.photo_id], change.favorite)
+    return "saved"
+
+
+@app.post("/api/favorites")
+async def _set_favorites(change: FavoritesChange):
+    exif.set_favorites(change.photo_ids, change.favorite)
     return "saved"
 
 
@@ -428,17 +450,82 @@ def library_years(tiles):
     return years
 
 
-def library_photo(photo, dated):
-    # with a page's own dates spelled out; a date's day can still be impossible, like Feb 30
-    day = time = None
-    if dated:
+def folder_date(path, dated_folders):
+    """
+    What a folder's name says about when its photos were taken, as a date and how to describe
+    it, such as for "2002/2002.03.11 - Escalante", "2008.10 - Trip", "2024/04" or "2003 - Wedding".
+    A bare year and month only counts if other photos there are really from that month: they can
+    also be where a tool filed photos with nothing else to go on
+    """
+    if 'unsorted' in path.lower():
+        return None
+    parts = path.split('/')
+    for position, part in reversed(list(enumerate(parts))):
+        parent = parts[position - 1] if position else ''
+        day = re.match(r'(\d{4})[.-](\d{2})[.-](\d{2})\b', part)
+        month = re.match(r'(\d{4})[.-](\d{2})\b', part)
+        filed_by_month = re.fullmatch(r'\d{2}', part) and re.fullmatch(r'\d{4}', parent)
+        year = re.fullmatch(r'(\d{4})( - .*)?', part)
         try:
-            taken = datetime.datetime.strptime(photo['taken'][:19], '%Y:%m:%d %H:%M:%S')
-            day = f"{taken:%A}, {taken:%B} {taken.day}"
-            time = f"{taken.hour % 12 or 12}:{taken:%M %p}"
+            if day:
+                date = datetime.date(int(day[1]), int(day[2]), int(day[3]))
+                label = f"{date:%B} {date.day}, {date.year}"
+            elif month:
+                date = datetime.date(int(month[1]), int(month[2]), 1)
+                label = f"{date:%B %Y}"
+            elif filed_by_month:
+                if (path, f"{parent}:{part}") not in dated_folders:
+                    return None
+                date = datetime.date(int(parent), int(part), 1)
+                label = f"{date:%B %Y}"
+            elif year:
+                date = datetime.date(int(year[1]), 1, 1)
+                label = f"{date.year}, as January 1"
+            else:
+                continue
         except ValueError:
-            pass
-    return {**photo, 'day': day, 'time': time}
+            continue
+        if valid_photo_date(date):
+            return {'date': date.isoformat(), 'label': label}
+    return None
+
+
+def valid_photo_date(date):
+    return exif.LIBRARY_EARLIEST_YEAR <= date.year and date <= datetime.date.today()
+
+
+def library_photo(photo):
+    # with its date spelled out; a date's day can still be impossible, like Feb 30
+    day = when = None
+    try:
+        taken = datetime.datetime.strptime(photo['taken'][:19], '%Y:%m:%d %H:%M:%S')
+        day = f"{taken:%A}, {taken:%B} {taken.day}"
+        when = f"{day}, {taken.year}"
+        # the time of a date given by hand doesn't mean anything
+        if not photo['date_assigned']:
+            when += f" · {taken.hour % 12 or 12}:{taken:%M %p}"
+    except ValueError:
+        pass
+    return {**photo, 'day': day, 'when': when}
+
+
+def undated_photo(photo, dated_folders):
+    # undated photos are laid out by folder, which is the best clue to when they're from
+    folder = os.path.dirname(photo['path'])
+    return {
+        **photo,
+        'day': os.path.relpath(folder, exif.LIBRARY_ROOT),
+        'when': None,
+        'suggested': folder_date(folder, dated_folders)
+    }
+
+
+def library_month_photos(month, with_faces):
+    photos = exif.library_photos(month, with_faces)
+    if month is None:
+        dated_folders = exif.dated_folders()
+        return sorted((undated_photo(photo, dated_folders) for photo in photos), key=lambda photo: photo['day'])
+    return list(map(library_photo, photos))
 
 
 def library_month_page(request, month, title, with_faces):
@@ -457,10 +544,10 @@ def library_month_page(request, month, title, with_faces):
             "faces_checked": exif.face_counts()['checked'],
             "library_url": f"/library{library_query(with_faces)}",
             "other_filter_url": library_url(month, not with_faces),
-            "photos": [
-                library_photo(photo, month is not None)
-                for photo in exif.library_photos(month, with_faces)
-            ],
+            "month": month.replace(':', '-') if month else None,
+            "today": datetime.date.today().isoformat(),
+            "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
+            "photos": library_month_photos(month, with_faces),
             "newer_url": library_url(months[position - 1], with_faces) if position else None,
             "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None
         }
@@ -496,6 +583,35 @@ async def _library_month(request: Request, year: int, month: int, with_faces: bo
     except ValueError:
         return RedirectResponse(url=f"/library{library_query(with_faces)}")
     return library_month_page(request, f"{year:04d}:{month:02d}", title, with_faces)
+
+
+class DateAssignment(BaseModel):
+    photo_ids: list[str]
+    date: datetime.date
+
+
+class DateRestore(BaseModel):
+    # what /api/dates said the dates were before: as stored, or '' for the photo's own date
+    previous: dict[str, str]
+
+
+@app.post("/api/dates")
+async def _assign_date(assignment: DateAssignment):
+    if not valid_photo_date(assignment.date):
+        raise HTTPException(
+            status_code=422,
+            detail=f"The date has to be from {exif.LIBRARY_EARLIEST_YEAR} up to today"
+        )
+    return {'previous': exif.assign_date(assignment.photo_ids, assignment.date)}
+
+
+@app.post("/api/dates/restore")
+async def _restore_dates(restore: DateRestore):
+    for value in restore.previous.values():
+        if value and not re.fullmatch(r'\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}', value):
+            raise HTTPException(status_code=422, detail="Not a date from /api/dates")
+    exif.restore_dates(restore.previous)
+    return "saved"
 
 
 @app.get("/api/faces")

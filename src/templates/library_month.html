@@ -12,12 +12,22 @@
     <script>
       const PHOTOS = {{ photos | tojson }};
       const TITLE = {{ title | tojson }};
+      // this page's "YYYY-MM", or null for undated photos
+      const MONTH = {{ month | tojson }};
       const SWIPE_PX = 50;
+      // moving files is slow on a NAS, so undoing a big delete mustn't be one long request
+      const RESTORE_BATCH = 20;
 
       // the photo in the viewer, if it's open
       let current = null;
       // keeps a run of quick presses saving in order
       let savingRotation = Promise.resolve();
+      let selecting = false;
+      const selected = new Set();
+      // where a shift-click's range starts from
+      let lastPicked = null;
+      const groups = [];
+      let deletesRunning = 0;
 
       const shown = () => PHOTOS.filter(photo => !photo.removed);
       const fileName = photo => photo.path.split('/').pop();
@@ -32,7 +42,10 @@
         tile.href = photoUrl('image', photo);
         tile.setAttribute('aria-label', fileName(photo));
         tile.onclick = event => {
-          if (!event.metaKey && !event.ctrlKey) {
+          if (selecting) {
+            event.preventDefault();
+            pick(photo, event.shiftKey);
+          } else if (!event.metaKey && !event.ctrlKey) {
             event.preventDefault();
             openViewer(photo);
           }
@@ -56,51 +69,324 @@
         heart.setAttribute('aria-hidden', 'true');
         heart.hidden = !photo.favorite;
 
-        tile.append(image, heart);
+        const check = document.createElement('span');
+        check.className = 'tile-check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+
+        tile.classList.toggle('approved', photo.status === 'approved');
+        tile.append(image, heart, check);
         photo.tile = tile;
         return tile;
       }
 
-      function renderGrid() {
-        const days = document.getElementById('days');
-        let grid = null;
-        let day;
-        for (const photo of PHOTOS) {
-          if (!grid || photo.day !== day) {
-            day = photo.day;
-            const section = document.createElement('section');
-            section.className = 'library-day';
-            if (day) {
-              const heading = document.createElement('h2');
-              heading.textContent = day;
-              section.append(heading);
-            }
-            grid = document.createElement('div');
-            grid.className = 'library-grid';
-            section.append(grid);
-            days.append(section);
-          }
-          grid.append(renderTile(photo));
+      function renderGroup(group) {
+        const section = document.createElement('section');
+        section.className = 'library-day';
+
+        const heading = document.createElement('h2');
+        const label = document.createElement('span');
+        label.className = 'group-label';
+        group.label = label;
+        heading.append(label);
+
+        const selectAll = document.createElement('button');
+        selectAll.className = `group-action select-group${MONTH ? " day-only" : ""}`;
+        selectAll.textContent = 'Select all';
+        selectAll.onclick = () => pickGroup(group);
+        heading.append(selectAll);
+
+        if (group.suggested) {
+          const dateAll = document.createElement('button');
+          dateAll.className = 'group-action date-group';
+          dateAll.textContent = `Date all: ${group.suggested.label}`;
+          dateAll.onclick = () => assignDate(group.photos.filter(photo => !photo.removed), group.suggested.date);
+          heading.append(dateAll);
         }
+        section.append(heading);
+
+        const grid = document.createElement('div');
+        grid.className = 'library-grid';
+        grid.append(...group.photos.map(renderTile));
+        section.append(grid);
+        return section;
+      }
+
+      function renderGrid() {
+        for (const photo of PHOTOS) {
+          const group = groups[groups.length - 1];
+          if (group && group.name === photo.day) {
+            group.photos.push(photo);
+          } else {
+            groups.push({name: photo.day, suggested: photo.suggested, photos: [photo]});
+          }
+        }
+        document.getElementById('days').append(...groups.map(renderGroup));
         renderCount();
       }
 
+      const plural = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
+
       function renderCount() {
-        const count = shown().length;
-        document.getElementById('summary').textContent =
-          `${TITLE} · ${count.toLocaleString()} photo${count === 1 ? '' : 's'}`;
+        document.getElementById('summary').textContent = `${TITLE} · ${plural(shown().length, 'photo')}`;
+        for (const group of groups) {
+          // folders can be told apart by size; every photo on a day is on screen anyway
+          const count = MONTH ? '' : ` · ${plural(group.photos.filter(photo => !photo.removed).length, 'photo')}`;
+          group.label.textContent = (group.name || 'Unknown day') + count;
+        }
+      }
+
+      function renderSelection() {
+        document.body.classList.toggle('selecting', selecting);
+        document.getElementById('select-bar').hidden = !selecting;
+        document.getElementById('select-toggle').textContent = selecting ? 'Done' : 'Select';
+        document.getElementById('select-count').textContent = `${selected.size.toLocaleString()} selected`;
+        document.querySelectorAll('.select-action').forEach(button => button.disabled = !selected.size);
+        document.getElementById('select-apply').disabled =
+          !selected.size || !document.getElementById('select-date').value;
+        const allFavorites = selected.size && [...selected].every(photo => photo.favorite);
+        document.getElementById('select-favorite-label').textContent = allFavorites ? 'Unfavorite' : 'Favorite';
+        document.getElementById('select-favorite').querySelector('i').className =
+          allFavorites ? 'fa fa-heart-o' : 'fa fa-heart';
+      }
+
+      function setPicked(photo, picked) {
+        if (picked) {
+          selected.add(photo);
+        } else {
+          selected.delete(photo);
+        }
+        photo.tile.classList.toggle('selected', picked);
+      }
+
+      function setSelecting(on) {
+        selecting = on;
+        if (!on) {
+          [...selected].forEach(photo => setPicked(photo, false));
+          lastPicked = null;
+          // so that one batch's date can't quietly carry over to the next
+          document.getElementById('select-date').value = '';
+        }
+        renderSelection();
+      }
+
+      function pick(photo, range) {
+        const picked = !selected.has(photo);
+        const list = shown();
+        const from = range && lastPicked ? list.indexOf(lastPicked) : -1;
+        const to = list.indexOf(photo);
+        const between = from < 0 ? [photo] : list.slice(Math.min(from, to), Math.max(from, to) + 1);
+        between.forEach(other => setPicked(other, picked));
+        lastPicked = photo;
+        renderSelection();
+      }
+
+      function pickAll(photos) {
+        const remaining = photos.filter(photo => !photo.removed);
+        const picked = !remaining.every(photo => selected.has(photo));
+        remaining.forEach(photo => setPicked(photo, picked));
+        renderSelection();
+      }
+
+      function pickGroup(group) {
+        selecting = true;
+        pickAll(group.photos);
+        // what the folder's name says is a good start, and easy to change
+        const date = document.getElementById('select-date');
+        if (group.suggested && !date.value) {
+          date.value = group.suggested.date;
+          renderSelection();
+        }
+      }
+
+      function assignDate(photos, date) {
+        return run(async () => {
+          const {previous} = await postJson('/api/dates', {photo_ids: photos.map(photo => photo.id), date});
+          // they change places within this month, so only the server knows the new layout
+          if (date.slice(0, 7) === MONTH) {
+            window.location.reload();
+            return;
+          }
+          photos.forEach(photo => setRemoved(photo, true));
+          // so that one batch's date can't quietly carry over to the next
+          document.getElementById('select-date').value = '';
+          renderSelection();
+          const [year, month] = date.split('-').map(Number);
+          const name = new Date(year, month - 1, 1).toLocaleString(undefined, {month: 'long', year: 'numeric'});
+          showToast(`Moved ${plural(photos.length, 'photo')} to ${name}`, () => run(async () => {
+            await postJson('/api/dates/restore', {previous});
+            photos.forEach(restored);
+          }, "Couldn't undo"));
+        }, "Couldn't set the date");
+      }
+
+      function applySelected() {
+        assignDate([...selected], document.getElementById('select-date').value);
+      }
+
+      const ids = photos => photos.map(photo => photo.id);
+
+      function clearPicks() {
+        [...selected].forEach(photo => setPicked(photo, false));
+        lastPicked = null;
+        renderSelection();
+      }
+
+      function setStatus(photos, status) {
+        for (const photo of photos) {
+          photo.status = status;
+          photo.tile.classList.toggle('approved', status === 'approved');
+        }
+        if (current) {
+          renderViewerDetails();
+        }
+      }
+
+      function setFavorites(photos, favorite) {
+        for (const photo of photos) {
+          photo.favorite = favorite;
+          photo.tile.querySelector('.tile-favorite').hidden = !favorite;
+        }
+        if (current) {
+          renderViewerDetails();
+        }
+      }
+
+      function approveSelected() {
+        const photos = [...selected].filter(photo => photo.status === 'unreviewed');
+        run(async () => {
+          clearPicks();
+          if (!photos.length) {
+            showToast('Those are already approved');
+            return;
+          }
+          await postJson('/api/review', {approved: ids(photos)});
+          setStatus(photos, 'approved');
+          showToast(`Approved ${plural(photos.length, 'photo')}`, () => run(async () => {
+            await postJson('/api/review', {unreviewed: ids(photos)});
+            setStatus(photos, 'unreviewed');
+          }, "Couldn't undo"));
+        }, "Couldn't approve");
+      }
+
+      // as with one photo, a favorite that isn't approved wouldn't appear anywhere
+      function favoriteSelected() {
+        const favorite = ![...selected].every(photo => photo.favorite);
+        const photos = [...selected].filter(photo => photo.favorite !== favorite);
+        const approving = favorite ? photos.filter(photo => photo.status === 'unreviewed') : [];
+        run(async () => {
+          clearPicks();
+          await postJson('/api/favorites', {photo_ids: ids(photos), favorite});
+          setFavorites(photos, favorite);
+          if (approving.length) {
+            await postJson('/api/review', {approved: ids(approving)});
+            setStatus(approving, 'approved');
+          }
+          showToast(`${favorite ? 'Favorited' : 'Unfavorited'} ${plural(photos.length, 'photo')}`, () => run(async () => {
+            await postJson('/api/favorites', {photo_ids: ids(photos), favorite: !favorite});
+            setFavorites(photos, !favorite);
+            if (approving.length) {
+              await postJson('/api/review', {unreviewed: ids(approving)});
+              setStatus(approving, 'unreviewed');
+            }
+          }, "Couldn't undo"));
+        }, "Couldn't save favorites");
+      }
+
+      // stays selected, since a photo that's still sideways takes another press
+      function rotateSelected() {
+        const photos = [...selected];
+        const rotations = {};
+        for (const photo of photos) {
+          rotations[photo.id] = (photo.rotation + 90) % 360;
+          setRotation(photo, rotations[photo.id]);
+        }
+        savingRotation = savingRotation
+          .then(() => postJson('/api/rotations', {rotations}))
+          .catch(error => {
+            console.log(error);
+            photos.forEach(photo => setRotation(photo, (photo.rotation + 270) % 360));
+            showToast(`Couldn't rotate: ${error.message}`);
+          });
+      }
+
+      // back to what each one was, rather than all to one status
+      function statusesOf(photos) {
+        const statuses = {};
+        for (const photo of photos) {
+          (statuses[photo.status] ||= []).push(photo.id);
+        }
+        return statuses;
+      }
+
+      function hideSelected() {
+        const photos = [...selected];
+        const before = statusesOf(photos);
+        removeWithUndo(
+          photos,
+          `Hid ${plural(photos.length, 'photo')}`,
+          "Couldn't hide",
+          () => postJson('/api/review', {rejected: ids(photos)}),
+          () => postJson('/api/review', before)
+        );
+      }
+
+      async function restoreFiles(files) {
+        for (let start = 0; start < files.length; start += RESTORE_BATCH) {
+          await postJson('/api/restore', {files: files.slice(start, start + RESTORE_BATCH)});
+        }
+      }
+
+      // one at a time, as a single request for many could outlast the proxy's patience.  They're
+      // gone from the page straight away, so that browsing carries on meanwhile
+      async function deleteSelected() {
+        const photos = [...selected];
+        if (!confirm(`Delete ${plural(photos.length, 'photo')}? They'll stay in the trash until it's emptied from Manage.`)) {
+          return;
+        }
+        photos.forEach(photo => setRemoved(photo, true));
+        renderSelection();
+        deletesRunning += 1;
+        const files = [];
+        const failed = [];
+        for (const [position, photo] of photos.entries()) {
+          if (photos.length > 1) {
+            showToast(`Deleting ${position + 1} of ${photos.length.toLocaleString()}…`);
+          }
+          try {
+            const response = await fetch(`/api/image${encodePath(photo.path)}`, {method: 'DELETE'});
+            if (!response.ok) {
+              throw new Error('Status: ' + response.status);
+            }
+            files.push(...(await response.json()).files);
+          } catch (error) {
+            console.log(error);
+            failed.push(photo);
+          }
+        }
+        deletesRunning -= 1;
+        failed.forEach(restored);
+        const deleted = photos.filter(photo => !failed.includes(photo));
+        const message = `Deleted ${plural(deleted.length, 'photo')}` + (failed.length ? `, couldn't delete ${failed.length.toLocaleString()}` : '');
+        showToast(message, deleted.length ? () => run(async () => {
+          await restoreFiles(files);
+          deleted.forEach(restored);
+        }, "Couldn't undo") : undefined);
       }
 
       function setRemoved(photo, removed) {
         photo.removed = removed;
         photo.tile.hidden = removed;
+        if (removed) {
+          setPicked(photo, false);
+        }
         renderCount();
       }
 
       function renderViewerDetails() {
         const list = shown();
         const position = list.indexOf(current);
-        const when = current.day ? `${current.day}, ${TITLE.split(' ').pop()} · ${current.time} · ` : '';
+        const when = current.when ? `${current.when} · ` : '';
         document.getElementById('viewer-caption').textContent =
           `${when}${fileName(current)} · ${position + 1} of ${list.length.toLocaleString()}`;
         document.getElementById('viewer-previous').hidden = position === 0;
@@ -223,12 +509,7 @@
       }
 
       function approve(photo) {
-        return postJson('/api/review', {approved: [photo.id]}).then(() => {
-          photo.status = 'approved';
-          if (photo === current) {
-            renderViewerDetails();
-          }
-        });
+        return postJson('/api/review', {approved: [photo.id]}).then(() => setStatus([photo], 'approved'));
       }
 
       function approveCurrent() {
@@ -277,17 +558,18 @@
       }
 
       // gone straight away, so that browsing carries on while the NAS catches up
-      async function removeWithUndo(photo, done, failure, request, undo) {
-        removeFromView(photo);
+      async function removeWithUndo(photos, done, failure, request, undo) {
+        photos.forEach(removeFromView);
+        renderSelection();
         try {
           const result = await request();
           showToast(done, () => run(async () => {
             await undo(result);
-            restored(photo);
+            photos.forEach(restored);
           }, "Couldn't undo"));
         } catch (error) {
           console.log(error);
-          restored(photo);
+          photos.forEach(restored);
           showToast(`${failure}: ${error.message}`);
         }
       }
@@ -295,7 +577,7 @@
       function hideCurrent() {
         const photo = current;
         removeWithUndo(
-          photo,
+          [photo],
           'Photo hidden',
           "Couldn't hide",
           () => postJson('/api/review', {rejected: [photo.id]}),
@@ -309,7 +591,7 @@
           return;
         }
         removeWithUndo(
-          photo,
+          [photo],
           'Photo deleted',
           "Couldn't delete",
           async () => {
@@ -326,8 +608,17 @@
 
       window.addEventListener('popstate', hideViewer);
 
+      window.addEventListener('beforeunload', event => {
+        if (deletesRunning) {
+          event.preventDefault();
+        }
+      });
+
       window.addEventListener('keydown', event => {
         if (!current) {
+          if (selecting && event.key === 'Escape') {
+            setSelecting(false);
+          }
           return;
         }
         if (event.key === 'ArrowLeft') {
@@ -341,6 +632,7 @@
 
       window.addEventListener('DOMContentLoaded', () => {
         renderGrid();
+        renderSelection();
 
         const viewer = document.getElementById('viewer');
         let swipeStart = null;
@@ -364,15 +656,42 @@
       <a href="{{ library_url }}" aria-label="Back to library">‹ Library</a>
       <span id="summary">{{ title }}</span>
       <span class="month-steps">
+        <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
         {% if faces_checked %}<a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
         {% if newer_url %}<a href="{{ newer_url }}" title="Newer month">Newer ›</a>{% endif %}
       </span>
     </div>
     {% if not dated %}
-    <p class="library-hint">These photos have a date their camera couldn't have recorded, like 1901 or 0000, usually because its clock was never set.</p>
+    <p class="library-hint">These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.</p>
     {% endif %}
     <div id="days" class="library-days"></div>
+    <div id="select-bar" class="select-bar" hidden>
+      <span id="select-count"></span>
+      <button onclick="pickAll(PHOTOS)">Select all</button>
+      <span class="select-actions">
+        <button class="select-action" onclick="approveSelected()" title="Approve for the gallery and kiosk" disabled>
+          <i class="fa fa-check" aria-hidden="true"></i> Approve
+        </button>
+        <button id="select-favorite" class="select-action" onclick="favoriteSelected()" disabled>
+          <i class="fa fa-heart" aria-hidden="true"></i> <span id="select-favorite-label">Favorite</span>
+        </button>
+        <button class="select-action" onclick="rotateSelected()" title="Rotate 90° clockwise" disabled>
+          <i class="fa fa-rotate-right" aria-hidden="true"></i> Rotate
+        </button>
+        <button class="select-action" onclick="hideSelected()" disabled>
+          <i class="fa fa-eye-slash" aria-hidden="true"></i> Hide
+        </button>
+        <button class="select-action" onclick="deleteSelected()" disabled>
+          <i class="fa fa-trash-o" aria-hidden="true"></i> Delete
+        </button>
+      </span>
+      <label>
+        Date
+        <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" oninput="renderSelection()" />
+      </label>
+      <button id="select-apply" onclick="applySelected()" disabled>Set date</button>
+    </div>
     <div id="viewer" class="library-viewer" hidden>
       <img id="viewer-image" alt="" />
       <div id="viewer-missing" class="viewer-missing" hidden></div>
