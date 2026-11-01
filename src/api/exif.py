@@ -17,6 +17,7 @@ ROTATIONS_CSV = '/storage/rotations.csv'
 DATES_CSV = '/storage/dates.csv'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
+MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
 # where the faces are in each photo, written by scripts/find_faces.py
 FACES_CSV = '/storage/faces.csv'
 NO_FACES = 'none'
@@ -27,6 +28,8 @@ REVIEWED = 'reviewed'
 FAVORITE = 'favorite'
 NOT_FAVORITE = 'not_favorite'
 DELETED = 'deleted'
+HIDDEN = 'hidden'
+NOT_HIDDEN = 'not_hidden'
 RESTORED = 'restored'
 # photos this close together from one camera are reviewed as one, up to a limit so that a
 # long run of different shots isn't all decided by one of them
@@ -168,6 +171,23 @@ def _load_deletions(force_reload=False):
 
 def _deleted_paths():
     return {path for path, in db.execute("SELECT photo_id FROM deletions").fetchall()}
+
+
+def deleted_paths():
+    _load_deletions()
+    return _deleted_paths()
+
+
+def set_movie_hidden(movie_id, hidden):
+    _append_log(MOVIES_HIDDEN_CSV, [(movie_id, HIDDEN if hidden else NOT_HIDDEN)])
+
+
+def hidden_movies():
+    _load_log('movies_hidden', MOVIES_HIDDEN_CSV)
+    return {
+        movie_id
+        for movie_id, in db.execute("SELECT photo_id FROM movies_hidden WHERE value = ?", [HIDDEN]).fetchall()
+    }
 
 
 def _left_out_path_returned():

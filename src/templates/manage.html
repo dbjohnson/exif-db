@@ -30,6 +30,7 @@
           ? `${current ? current.mode + ' scan' : 'scan'} running${current ? ' since ' + formatTime(current.started) : ''}`
           : 'idle';
         document.getElementById('indexed').textContent = status.indexed_photos.toLocaleString();
+        document.getElementById('indexed-movies').textContent = status.indexed_movies.toLocaleString();
         document.getElementById('approved').textContent = status.reviews.approved.toLocaleString();
         const toReview = document.getElementById('to-review');
         toReview.textContent = `${status.reviews.unreviewed.toLocaleString()} to review`;
@@ -232,6 +233,12 @@
       >
         Library
       </button>
+      <button
+        onclick="window.location.href='/movies'"
+        style="border:2px solid #ddd;"
+      >
+        Home movies
+      </button>
     </div>
     <div class="manage">
       <h1>Manage scans</h1>
@@ -240,6 +247,8 @@
         <dd id="state">Loading…</dd>
         <dt>Photos indexed</dt>
         <dd id="indexed"></dd>
+        <dt>Movies indexed</dt>
+        <dd id="indexed-movies"></dd>
         <dt>Photos approved</dt>
         <dd id="approved"></dd>
         <dt>Last scan</dt>

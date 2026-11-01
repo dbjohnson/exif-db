@@ -1154,6 +1154,465 @@ button:hover {
   right: 8px;
 }
 
+.movie-player {
+  position: relative;
+  background: #000;
+}
+
+.movie-stage {
+  position: relative;
+  height: min(70vh, 62vw);
+  min-height: 240px;
+  overflow: hidden;
+  background: #000;
+  cursor: pointer;
+}
+
+.movie-player:fullscreen,
+.movie-player:-webkit-full-screen,
+.movie-player.filling-window {
+  width: 100%;
+  height: 100%;
+}
+
+.movie-player.filling-window {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+}
+
+.movie-player:fullscreen .movie-stage,
+.movie-player:-webkit-full-screen .movie-stage,
+.movie-player.filling-window .movie-stage {
+  height: 100%;
+}
+
+.movie-player:fullscreen .movie-rails,
+.movie-player:-webkit-full-screen .movie-rails,
+.movie-player.filling-window .movie-rails {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  padding-bottom: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  transition: opacity 0.3s;
+}
+
+.movie-player.idle .movie-rails {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.movie-player.idle .movie-stage {
+  cursor: none;
+}
+
+.movie-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+}
+
+.movie-video.shown {
+  opacity: 1;
+  /* matches FADE_MS in movies.html */
+  transition: opacity 0.16s;
+}
+
+.movie-big-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 30px;
+}
+
+.movie-big-play[hidden],
+.movie-spinner[hidden] {
+  display: none;
+}
+
+.movie-big-play i {
+  margin-left: 5px;
+}
+
+.movie-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  margin: -20px 0 0 -20px;
+  color: #ddd;
+  font-size: 40px;
+  pointer-events: none;
+}
+
+.movie-caption {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 3;
+  padding: 14px 16px 30px;
+  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+  color: #eee;
+  font-size: 14px;
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+
+#caption-title:not(:empty) {
+  margin-bottom: 3px;
+  font-size: 20px;
+}
+
+.movie-player.idle .movie-caption:not(.announcing) {
+  opacity: 0;
+}
+
+/* where the years and months would be, in full screen */
+.movie-player:fullscreen .movie-caption,
+.movie-player:-webkit-full-screen .movie-caption,
+.movie-player.filling-window .movie-caption {
+  top: 130px;
+}
+
+.movie-player:fullscreen.idle .movie-caption,
+.movie-player:-webkit-full-screen.idle .movie-caption,
+.movie-player.filling-window.idle .movie-caption {
+  top: 0;
+}
+
+.movie-controls {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 3;
+  padding: 26px 12px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8) 55%);
+  cursor: default;
+  transition: opacity 0.3s;
+}
+
+.movie-player.idle .movie-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.movie-scrubber {
+  position: relative;
+  height: 22px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.movie-scrub-track {
+  position: absolute;
+  inset: 8px 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.movie-scrubber:hover .movie-scrub-track {
+  inset: 7px 0;
+}
+
+.movie-scrub-fill {
+  height: 100%;
+  background: #e5566d;
+}
+
+.movie-scrub-ticks span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.movie-scrub-handle {
+  position: absolute;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
+}
+
+.movie-scrub-preview {
+  position: absolute;
+  bottom: 26px;
+  width: 170px;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border-radius: 6px;
+  background: #111;
+  color: #ddd;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.movie-scrub-preview[hidden] {
+  display: none;
+}
+
+.movie-scrub-preview img {
+  display: block;
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+}
+
+.movie-scrub-preview img[hidden] {
+  display: none;
+}
+
+.movie-scrub-preview span {
+  display: block;
+  padding: 5px 7px;
+}
+
+.movie-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  color: #ddd;
+  font-size: 13px;
+}
+
+.movie-buttons button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px;
+  background: none;
+  color: #ddd;
+  font-size: 15px;
+}
+
+.movie-buttons button:hover:not(:disabled) {
+  background-color: rgba(70, 70, 70, 0.8);
+}
+
+.movie-buttons button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.movie-time {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.movie-month-steps {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 170px;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.movie-buttons button.confirming,
+.movie-buttons button.confirming:hover {
+  background-color: #c33;
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.movie-hidden {
+  margin: 0 12px 32px;
+  color: #999;
+  font-size: 14px;
+}
+
+.movie-hidden summary {
+  cursor: pointer;
+}
+
+.movie-hidden p {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.movie-volume {
+  width: 80px;
+  accent-color: #e5566d;
+}
+
+.movie-rails {
+  padding: 8px 12px 4px;
+}
+
+.movie-years {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.movie-years button {
+  flex: none;
+  padding: 6px 8px;
+  background: none;
+  color: #999;
+  font-size: 13px;
+}
+
+.movie-years button:hover {
+  background: #222;
+  color: #fff;
+}
+
+.movie-years button.playing {
+  color: #e5566d;
+}
+
+.movie-years button.browsed {
+  background: #333;
+  color: #fff;
+}
+
+.movie-months {
+  display: flex;
+  gap: 4px;
+  max-width: 720px;
+  margin: 8px auto 0;
+}
+
+.movie-month {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  min-width: 0;
+  height: 58px;
+  padding: 2px;
+  background: none;
+  color: #bbb;
+  font-size: 12px;
+}
+
+.movie-month:hover:not(:disabled) {
+  background: #222;
+}
+
+.movie-month:disabled {
+  color: #444;
+  cursor: default;
+}
+
+.movie-month-bar {
+  flex-shrink: 1;
+  min-height: 0;
+  max-height: 34px;
+  margin-bottom: 3px;
+  border-radius: 2px 2px 0 0;
+  background: #666;
+}
+
+.movie-month.browsed {
+  outline: 1px solid #777;
+  color: #fff;
+}
+
+.movie-month.playing {
+  color: #fff;
+}
+
+.movie-month.playing .movie-month-bar {
+  background: #e5566d;
+}
+
+.movie-clips-heading {
+  margin: 14px 0 0;
+  color: #999;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.movie-day h2 {
+  margin: 16px 0 8px;
+  color: #aaa;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.movie-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+
+.movie-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #151515;
+  color: #fff;
+  font-size: 12px;
+}
+
+.movie-tile:hover {
+  background: #252525;
+}
+
+.movie-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.movie-tile.playing {
+  outline: 2px solid #e5566d;
+  outline-offset: -2px;
+}
+
+.movie-tile-label,
+.movie-tile-length {
+  position: absolute;
+  bottom: 4px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.movie-tile-label {
+  left: 4px;
+  max-width: calc(100% - 66px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.movie-tile-label:empty {
+  display: none;
+}
+
+.movie-tile-length {
+  right: 4px;
+}
+
 .image-container {
   position: relative;
   display: inline-block;
@@ -1196,6 +1655,15 @@ button:hover {
   }
   .selecting .toast {
     bottom: 170px;
+  }
+  .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .movie-volume {
+    display: none;
+  }
+  .movie-month {
+    font-size: 11px;
   }
   .month-grid {
     grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));

@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Home movies</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
+    <script>
+      // the next movie starts loading this long before it's needed, so that it starts straight
+      // away, but not for the whole of an hour long film that might be skipped
+      const PREPARE_SECS = 45;
+      const SEEK_SECS = 10;
+      // the previous button goes back to the start of a movie that has got this far
+      const RESTART_SECS = 3;
+      const IDLE_MS = 3000;
+      const CAPTION_MS = 5000;
+      const SAVE_MS = 5000;
+      // matches the opacity transition in style.css
+      const FADE_MS = 160;
+      // in a row, which means the server's gone rather than a few movies that don't play
+      const MAX_FAILURES = 6;
+      // so that a short clip among long ones can still be hit on the scrubber
+      const MIN_SEGMENT_SHARE = 0.004;
+      // more than this and the marks between movies are just a solid line
+      const MAX_TICKS = 150;
+      const UNDATED = 'undated';
+      const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const STORED_POSITION = 'movies.position';
+      const STORED_SOUND = 'movies.sound';
+      const CAN_PLAY_HEVC = !!document.createElement('video').canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"');
+
+      let clips = [];
+      let months = new Map();
+      let monthKeys = [];
+      let years = [];
+      // the months and movies being looked at, which needn't be where playback is
+      let browsedYear = null;
+      let browsedMonth = null;
+      let shownTiles = new Map();
+
+      let active;
+      let standby;
+      let current = -1;
+      // the movie loaded and ready to go in the standby video
+      let prepared = -1;
+      let wantsPlay = false;
+      // for browsers that won't let a video start without a tap, unless it's already been playing
+      let singleVideo = false;
+      let fading = false;
+      let failures = 0;
+      let segments = [];
+      let scrubMonth = null;
+      let scrubbing = null;
+      let lastSaved = 0;
+      let idleTimer;
+      let captionTimer;
+      let wasIdle = false;
+
+      const byId = id => document.getElementById(id);
+      const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
+      const monthKey = clip => clip.taken ? clip.taken.slice(0, 7) : UNDATED;
+      // kept in the list either way, so that bringing one back only takes clearing this
+      const gone = clip => clip.hidden || clip.deleted;
+      const posterUrl = (clip, size = 'M') => `/api/poster${encodePath(clip.path)}?size=${size}`;
+
+      function movieUrl(clip) {
+        const params = new URLSearchParams();
+        if (!CAN_PLAY_HEVC) {
+          params.set('hevc', 'false');
+        }
+        if (clip.useCopy) {
+          params.set('copy', 'true');
+        }
+        const query = params.toString();
+        return `/api/movie${encodePath(clip.path)}${query ? `?${query}` : ''}`;
+      }
+
+      function clipDate(clip) {
+        const [date, time] = clip.taken.split(' ');
+        const [year, month, day] = date.split('-').map(Number);
+        const [hour, minute] = time.split(':').map(Number);
+        return new Date(year, month - 1, day, hour, minute);
+      }
+
+      function formatDay(clip) {
+        return clipDate(clip).toLocaleDateString(undefined, {weekday: 'long', month: 'long', day: 'numeric'});
+      }
+
+      function formatClock(clip) {
+        return clipDate(clip).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+      }
+
+      function formatMonth(key) {
+        if (key === UNDATED) {
+          return 'Undated';
+        }
+        const [year, month] = key.split('-').map(Number);
+        return new Date(year, month - 1, 1).toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
+      }
+
+      function formatWhen(clip) {
+        if (!clip.taken) {
+          return 'Undated';
+        }
+        if (clip.precision === 'month') {
+          return formatMonth(monthKey(clip));
+        }
+        const day = `${formatDay(clip)}, ${clip.taken.slice(0, 4)}`;
+        return clip.precision === 'time' ? `${day} · ${formatClock(clip)}` : day;
+      }
+
+      function formatDuration(seconds) {
+        const total = Math.max(Math.floor(seconds), 0);
+        const pad = value => String(value).padStart(2, '0');
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor(total / 60) % 60;
+        return hours ? `${hours}:${pad(minutes)}:${pad(total % 60)}` : `${minutes}:${pad(total % 60)}`;
+      }
+
+      function formatLength(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.round((seconds % 3600) / 60);
+        if (hours) {
+          return `${hours.toLocaleString()} hr${minutes ? ` ${minutes} min` : ''}`;
+        }
+        return minutes ? `${minutes} min` : `${Math.round(seconds)} sec`;
+      }
+
+      function organize() {
+        months = new Map();
+        clips.forEach((clip, index) => {
+          if (gone(clip)) {
+            return;
+          }
+          const key = monthKey(clip);
+          if (!months.has(key)) {
+            months.set(key, {key, first: index, last: index, seconds: 0, count: 0});
+          }
+          const month = months.get(key);
+          month.last = index;
+          month.seconds += clip.duration;
+          month.count++;
+        });
+        monthKeys = [...months.keys()];
+        const byYear = new Map();
+        for (const month of months.values()) {
+          const year = month.key === UNDATED ? UNDATED : month.key.slice(0, 4);
+          if (!byYear.has(year)) {
+            byYear.set(year, {year, months: [], seconds: 0});
+          }
+          byYear.get(year).months.push(month);
+          byYear.get(year).seconds += month.seconds;
+        }
+        years = [...byYear.values()];
+      }
+
+      // ---- finding your way around
+
+      function renderYears() {
+        const rail = byId('years');
+        rail.replaceChildren(...years.map(year => {
+          const button = document.createElement('button');
+          button.textContent = year.year === UNDATED ? 'Undated' : year.year;
+          button.title = formatLength(year.seconds);
+          button.classList.toggle('browsed', year.year === browsedYear);
+          button.classList.toggle('playing', current >= 0 && monthKey(clips[current]).startsWith(year.year));
+          button.onclick = () => browseYear(year);
+          return button;
+        }));
+        const selected = rail.querySelector('.browsed');
+        if (selected) {
+          // scrollIntoView would also scroll the page, away from whatever's being looked at
+          rail.scrollLeft = selected.offsetLeft - (rail.clientWidth - selected.offsetWidth) / 2;
+        }
+      }
+
+      function renderMonths() {
+        const rail = byId('months');
+        const year = years.find(entry => entry.year === browsedYear);
+        if (!year) {
+          rail.replaceChildren();
+          return;
+        }
+        const keys = browsedYear === UNDATED
+          ? [UNDATED]
+          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(number + 1).padStart(2, '0')}`);
+        const most = Math.max(...year.months.map(month => month.seconds));
+        rail.replaceChildren(...keys.map(key => {
+          const month = months.get(key);
+          const button = document.createElement('button');
+          button.className = 'movie-month';
+          button.disabled = !month;
+          button.title = month ? `${formatMonth(key)} · ${formatLength(month.seconds)}` : 'No movies';
+          button.classList.toggle('browsed', key === browsedMonth);
+          button.classList.toggle('playing', current >= 0 && monthKey(clips[current]) === key);
+          const bar = document.createElement('span');
+          bar.className = 'movie-month-bar';
+          // by square root, so that a month with an hour long film doesn't flatten the rest
+          bar.style.height = month ? `${Math.max(Math.sqrt(month.seconds / most) * 100, 6)}%` : '0';
+          const label = document.createElement('span');
+          label.textContent = key === UNDATED ? 'Undated' : MONTH_NAMES[Number(key.slice(5)) - 1];
+          button.append(bar, label);
+          if (month) {
+            button.onclick = () => dropIn(month.first);
+          }
+          return button;
+        }));
+      }
+
+      function renderTile(index) {
+        const clip = clips[index];
+        const tile = document.createElement('button');
+        tile.className = 'movie-tile';
+        tile.setAttribute('aria-label', `${clip.title || clip.path.split('/').pop()}, ${formatWhen(clip)}`);
+        tile.onclick = () => dropIn(index);
+
+        const image = document.createElement('img');
+        image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = posterUrl(clip);
+        image.onerror = () => image.remove();
+
+        const label = document.createElement('span');
+        label.className = 'movie-tile-label';
+        label.textContent = clip.title || (clip.precision === 'time' ? formatClock(clip) : '');
+        const length = document.createElement('span');
+        length.className = 'movie-tile-length';
+        length.textContent = formatDuration(clip.duration);
+        tile.append(image, label, length);
+        return tile;
+      }
+
+      function renderClips() {
+        const list = byId('clips');
+        shownTiles = new Map();
+        list.replaceChildren();
+        const month = months.get(browsedMonth);
+        if (!month) {
+          return;
+        }
+        const heading = document.createElement('h2');
+        heading.className = 'movie-clips-heading';
+        const count = month.count;
+        heading.textContent = `${formatMonth(month.key)} · ${count.toLocaleString()} movie${count === 1 ? '' : 's'} · ${formatLength(month.seconds)}`;
+        list.append(heading);
+
+        let grid = null;
+        let day;
+        for (let index = month.first; index <= month.last; index++) {
+          const clip = clips[index];
+          if (gone(clip)) {
+            continue;
+          }
+          const clipDay = clip.taken && clip.precision !== 'month' ? formatDay(clip) : null;
+          if (!grid || clipDay !== day) {
+            day = clipDay;
+            const section = document.createElement('section');
+            section.className = 'movie-day';
+            if (day) {
+              const dayHeading = document.createElement('h2');
+              dayHeading.textContent = day;
+              section.append(dayHeading);
+            }
+            grid = document.createElement('div');
+            grid.className = 'movie-grid';
+            section.append(grid);
+            list.append(section);
+          }
+          const tile = renderTile(index);
+          tile.classList.toggle('playing', index === current);
+          shownTiles.set(index, tile);
+          grid.append(tile);
+        }
+      }
+
+      function browseMonth(key) {
+        browsedMonth = key;
+        browsedYear = key === UNDATED ? UNDATED : key.slice(0, 4);
+        renderYears();
+        renderMonths();
+        renderClips();
+      }
+
+      // looking through a year doesn't interrupt what's playing; choosing a month or movie does
+      function browseYear(year) {
+        browseMonth(year.months[0].key);
+      }
+
+      // ---- the scrubber, which covers the month being played
+
+      function layoutScrubber(key) {
+        scrubMonth = key;
+        const month = months.get(key);
+        const weighed = [];
+        for (let index = month.first; index <= month.last; index++) {
+          if (!gone(clips[index])) {
+            weighed.push({index, weight: Math.max(clips[index].duration, month.seconds * MIN_SEGMENT_SHARE)});
+          }
+        }
+        const total = weighed.reduce((sum, entry) => sum + entry.weight, 0);
+        let start = 0;
+        segments = weighed.map(({index, weight}) => {
+          const segment = {index, start, width: weight / total};
+          start += segment.width;
+          return segment;
+        });
+        const ticks = segments.length > MAX_TICKS ? [] : segments.slice(1).map(segment => {
+          const tick = document.createElement('span');
+          tick.style.left = `${segment.start * 100}%`;
+          return tick;
+        });
+        byId('scrub-ticks').replaceChildren(...ticks);
+      }
+
+      function setScrubPosition(fraction) {
+        const percent = `${Math.min(Math.max(fraction, 0), 1) * 100}%`;
+        byId('scrub-fill').style.width = percent;
+        byId('scrub-handle').style.left = percent;
+      }
+
+      function renderTime() {
+        if (current < 0 || scrubbing) {
+          return;
+        }
+        const segment = segments.find(entry => entry.index === current);
+        const clip = clips[current];
+        const seconds = active.currentTime || 0;
+        const length = Number.isFinite(active.duration) ? active.duration : clip.duration;
+        setScrubPosition(segment.start + segment.width * Math.min(seconds / (length || 1), 1));
+        byId('time').textContent = `${formatDuration(seconds)} / ${formatDuration(length)}`;
+      }
+
+      function scrubAt(event) {
+        const track = byId('scrubber').getBoundingClientRect();
+        const fraction = Math.min(Math.max((event.clientX - track.left) / track.width, 0), 1);
+        const segment = segments.find(entry => fraction < entry.start + entry.width) || segments[segments.length - 1];
+        const clip = clips[segment.index];
+        const within = Math.min((fraction - segment.start) / segment.width, 1);
+        return {fraction, index: segment.index, offset: within * clip.duration, clip, x: event.clientX - track.left, width: track.width};
+      }
+
+      function showScrubPreview(at) {
+        const preview = byId('scrub-preview');
+        const image = preview.querySelector('img');
+        const url = posterUrl(at.clip);
+        if (image.dataset.url !== url) {
+          image.dataset.url = url;
+          image.hidden = false;
+          image.src = url;
+        }
+        preview.querySelector('span').textContent =
+          [at.clip.title, at.clip.precision === 'month' ? '' : formatWhen(at.clip)].filter(Boolean).join(' · ') || formatMonth(scrubMonth);
+        preview.hidden = false;
+        // kept on screen near the ends of the track
+        const half = preview.offsetWidth / 2;
+        preview.style.left = `${Math.min(Math.max(at.x, half), at.width - half)}px`;
+      }
+
+      // ---- what's playing
+
+      function renderClip() {
+        const clip = clips[current];
+        const key = monthKey(clip);
+        disarmButton(byId('delete'));
+        if (key !== scrubMonth) {
+          layoutScrubber(key);
+          byId('month-label').textContent = formatMonth(key);
+          browseMonth(key);
+        } else {
+          renderYears();
+          renderMonths();
+        }
+        for (const [index, tile] of shownTiles) {
+          tile.classList.toggle('playing', index === current);
+        }
+        byId('caption-title').textContent = clip.title;
+        byId('caption-date').textContent = formatWhen(clip);
+        const position = monthKeys.indexOf(key);
+        byId('earlier-month').disabled = position === 0;
+        byId('later-month').disabled = position === monthKeys.length - 1;
+        byId('previous-clip').disabled = current === 0;
+        byId('next-clip').disabled = current === clips.length - 1;
+        document.title = `${clip.title || formatMonth(key)} · Home movies`;
+
+        const caption = byId('caption');
+        caption.classList.add('announcing');
+        clearTimeout(captionTimer);
+        captionTimer = setTimeout(() => caption.classList.remove('announcing'), CAPTION_MS);
+        renderTime();
+      }
+
+      function renderPlayState() {
+        byId('big-play').hidden = wantsPlay;
+        const icon = byId('play').querySelector('i');
+        icon.className = wantsPlay ? 'fa fa-pause' : 'fa fa-play';
+        byId('play').setAttribute('aria-label', wantsPlay ? 'Pause' : 'Play');
+        wake();
+      }
+
+      function setSource(video, index, offset = 0) {
+        video.clipIndex = index;
+        video.startOffset = offset;
+        // a media fragment rather than setting the time, which needs the movie's details first
+        video.src = `${movieUrl(clips[index])}${offset > 0 ? `#t=${offset.toFixed(2)}` : ''}`;
+      }
+
+      function playActive() {
+        const video = active;
+        video.play().catch(error => {
+          if (video !== active || error.name !== 'NotAllowedError') {
+            // replaced by another movie before it could start, or reported by the error event
+            return;
+          }
+          if (!singleVideo && standby.blessed) {
+            // from here on the video that's allowed to play takes every movie in turn
+            singleVideo = true;
+            [active, standby] = [standby, active];
+            prepared = -1;
+            active.style.zIndex = 2;
+            standby.style.zIndex = 1;
+            setSource(active, current, video.startOffset);
+            playActive();
+          } else {
+            wantsPlay = false;
+            renderPlayState();
+          }
+        });
+      }
+
+      // one video stays on screen while the next one gets going, so that there's never a gap
+      function promote(offset) {
+        const previous = active;
+        previous.pause();
+        [active, standby] = [standby, previous];
+        prepared = -1;
+        active.startOffset = offset;
+        if (offset > 0) {
+          active.currentTime = offset;
+        }
+        active.removeAttribute('poster');
+        active.style.zIndex = 2;
+        standby.style.zIndex = 1;
+      }
+
+      function start(index, offset = 0, play = true) {
+        wantsPlay = play;
+        if (index === current && active.getAttribute('src')) {
+          active.currentTime = offset;
+        } else {
+          current = index;
+          if (prepared === index) {
+            promote(offset);
+            if (active.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+              showActive();
+            }
+          } else {
+            active.preload = play ? 'auto' : 'metadata';
+            active.poster = posterUrl(clips[index], 'XL');
+            setSource(active, index, offset);
+            // what was coming next may no longer be, and would carry on downloading
+            if (prepared !== -1 && prepared !== usable(index + 1, 1)) {
+              prepared = -1;
+              standby.removeAttribute('src');
+              standby.load();
+            }
+          }
+          renderClip();
+          savePosition(true);
+        }
+        if (play) {
+          playActive();
+        } else {
+          active.pause();
+        }
+        renderPlayState();
+      }
+
+      function dropIn(index) {
+        start(index);
+        unlockStandby();
+      }
+
+      function usable(from, direction) {
+        for (let index = from; index >= 0 && index < clips.length; index += direction) {
+          if (!clips[index].broken && !gone(clips[index])) {
+            return index;
+          }
+        }
+        return -1;
+      }
+
+      function advance() {
+        const next = usable(current + 1, 1);
+        if (next === -1) {
+          wantsPlay = false;
+          renderPlayState();
+        } else {
+          start(next);
+        }
+      }
+
+      function showActive() {
+        if (active.classList.contains('shown')) {
+          return;
+        }
+        const previous = standby;
+        active.classList.add('shown');
+        fading = true;
+        setTimeout(() => {
+          fading = false;
+          if (previous !== active) {
+            previous.classList.remove('shown');
+          }
+        }, FADE_MS);
+      }
+
+      function prepareNext() {
+        if (singleVideo || fading || !wantsPlay) {
+          return;
+        }
+        const next = usable(current + 1, 1);
+        if (next === -1 || next === prepared) {
+          return;
+        }
+        prepared = next;
+        standby.preload = 'auto';
+        standby.removeAttribute('poster');
+        setSource(standby, next);
+      }
+
+      function handleFailure(video) {
+        const index = video.clipIndex;
+        // the standby video can still be holding a movie that's just been deleted
+        if (index === undefined || (video !== active && index !== prepared)) {
+          return;
+        }
+        const clip = clips[index];
+        if (!clip.useCopy) {
+          // the browser may not be able to play the original after all
+          clip.useCopy = true;
+          setSource(video, index, video.startOffset);
+          if (video === active && wantsPlay) {
+            playActive();
+          }
+          return;
+        }
+        clip.broken = true;
+        if (video !== active) {
+          prepared = -1;
+          video.removeAttribute('src');
+          video.clipIndex = undefined;
+          prepareNext();
+          return;
+        }
+        failures++;
+        if (failures >= MAX_FAILURES) {
+          wantsPlay = false;
+          renderPlayState();
+          showToast("Couldn't play the last few movies. Check the connection, then press play.");
+          clips.forEach(entry => { entry.broken = false; entry.useCopy = false; });
+          failures = 0;
+          return;
+        }
+        showToast(`Skipped ${clip.title || clip.path.split('/').pop()}: it can't be played here`);
+        advance();
+      }
+
+      function savePosition(force = false) {
+        const now = Date.now();
+        if (current < 0 || (!force && now - lastSaved < SAVE_MS)) {
+          return;
+        }
+        lastSaved = now;
+        try {
+          localStorage.setItem(STORED_POSITION, JSON.stringify({
+            path: clips[current].path,
+            offset: active.currentTime || 0
+          }));
+        } catch (error) {
+          console.log(error);
+        }
+      }
+
+      function restoredPosition() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORED_POSITION));
+          const index = clips.findIndex(clip => clip.path === saved?.path && !gone(clip));
+          if (index >= 0) {
+            return {index, offset: saved.offset || 0};
+          }
+        } catch (error) {
+          console.log(error);
+        }
+        // the latest month has the movies that haven't been seen yet
+        return {index: months.get(monthKeys.filter(key => key !== UNDATED).pop() ?? monthKeys[0]).first, offset: 0};
+      }
+
+      // ---- controls
+
+      function togglePlay() {
+        if (wantsPlay) {
+          wantsPlay = false;
+          active.pause();
+        } else {
+          wantsPlay = true;
+          playActive();
+          unlockStandby();
+        }
+        renderPlayState();
+      }
+
+      // a video is usually only allowed to start itself once it's been touched during a tap
+      function unlockStandby() {
+        if (!standby.getAttribute('src') && !standby.unlocked) {
+          standby.unlocked = true;
+          standby.load();
+        }
+      }
+
+      function stepClip(direction) {
+        if (direction < 0 && active.currentTime > RESTART_SECS) {
+          dropIn(current);
+          return;
+        }
+        const index = usable(current + direction, direction);
+        if (index >= 0) {
+          dropIn(index);
+        }
+      }
+
+      function seekBy(seconds) {
+        const clip = clips[current];
+        const target = active.currentTime + seconds;
+        const length = Number.isFinite(active.duration) ? active.duration : clip.duration;
+        if (target < 0) {
+          const previous = usable(current - 1, -1);
+          if (previous >= 0) {
+            start(previous, Math.max(clips[previous].duration + target, 0), wantsPlay);
+          } else {
+            active.currentTime = 0;
+          }
+        } else if (target >= length) {
+          const next = usable(current + 1, 1);
+          if (next >= 0) {
+            start(next, Math.min(target - length, clips[next].duration), wantsPlay);
+          }
+        } else {
+          active.currentTime = target;
+        }
+        wake();
+      }
+
+      function stepMonth(direction) {
+        const key = monthKeys[monthKeys.indexOf(monthKey(clips[current])) + direction];
+        if (key) {
+          dropIn(months.get(key).first);
+        }
+      }
+
+      // ---- hiding and deleting
+
+      function renderSummary() {
+        const visible = clips.filter(clip => !gone(clip));
+        const total = visible.reduce((sum, clip) => sum + clip.duration, 0);
+        const count = visible.length;
+        byId('summary').textContent =
+          `Home movies · ${count.toLocaleString()} movie${count === 1 ? '' : 's'} · ${formatLength(total)}`;
+      }
+
+      function renderHidden() {
+        const hidden = clips.flatMap((clip, index) => clip.hidden ? [index] : []);
+        byId('hidden').hidden = !hidden.length;
+        byId('hidden-count').textContent = `${hidden.length.toLocaleString()} hidden movie${hidden.length === 1 ? '' : 's'}`;
+        byId('hidden-grid').replaceChildren(...hidden.map(index => {
+          const tile = renderTile(index);
+          tile.title = 'Bring back';
+          tile.onclick = () => unhide(clips[index]);
+          return tile;
+        }));
+      }
+
+      function renderRemaining() {
+        organize();
+        renderSummary();
+        renderHidden();
+        // the same month can have different movies in it now
+        scrubMonth = null;
+      }
+
+      // what's playing is what gets removed, so the stream carries on with the movie after it
+      function removed() {
+        renderRemaining();
+        const next = usable(current + 1, 1);
+        const other = next >= 0 ? next : usable(current - 1, -1);
+        if (other >= 0) {
+          start(other, 0, wantsPlay);
+        } else {
+          wantsPlay = false;
+          active.pause();
+          byId('player').hidden = true;
+          byId('empty').hidden = false;
+        }
+      }
+
+      function returned() {
+        renderRemaining();
+        byId('player').hidden = false;
+        byId('empty').hidden = true;
+        renderClip();
+      }
+
+      // gone straight away, so that watching carries on while the NAS catches up
+      async function removeWithUndo(clip, flag, doneMessage, failure, request, undo) {
+        clip[flag] = true;
+        removed();
+        try {
+          const result = await request();
+          showToast(doneMessage(result), async () => {
+            try {
+              await undo(result);
+              clip[flag] = false;
+              returned();
+            } catch (error) {
+              console.log(error);
+              showToast(`Couldn't undo: ${error.message}`);
+            }
+          });
+        } catch (error) {
+          console.log(error);
+          clip[flag] = false;
+          returned();
+          showToast(`${failure}: ${error.message}`);
+        }
+      }
+
+      function hideCurrent() {
+        const clip = clips[current];
+        removeWithUndo(
+          clip,
+          'hidden',
+          () => 'Movie hidden',
+          "Couldn't hide",
+          () => postJson('/api/movies/hidden', {id: clip.id, hidden: true}),
+          () => postJson('/api/movies/hidden', {id: clip.id, hidden: false})
+        );
+      }
+
+      function deleteCurrent() {
+        if (!pressedTwice(byId('delete'))) {
+          return;
+        }
+        const clip = clips[current];
+        removeWithUndo(
+          clip,
+          'deleted',
+          ({files}) => {
+            const others = files.length - 1;
+            return others ? `Movie deleted, with ${others} other cop${others === 1 ? 'y' : 'ies'} of it` : 'Movie deleted';
+          },
+          "Couldn't delete",
+          async () => {
+            // keepalive so that it still completes if the page is left straight after
+            const response = await fetch(`/api/movie${encodePath(clip.path)}`, {method: 'DELETE', keepalive: true});
+            if (!response.ok) {
+              throw new Error('Status: ' + response.status);
+            }
+            return response.json();
+          },
+          ({files}) => postJson('/api/restore', {files})
+        );
+      }
+
+      async function unhide(clip) {
+        try {
+          await postJson('/api/movies/hidden', {id: clip.id, hidden: false});
+          clip.hidden = false;
+          returned();
+          showToast('Movie back in the stream');
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't bring it back: ${error.message}`);
+        }
+      }
+
+      function applySound(muted, volume) {
+        for (const video of [active, standby]) {
+          video.muted = muted;
+          video.volume = volume;
+        }
+        byId('mute').querySelector('i').className = muted || !volume ? 'fa fa-volume-off' : 'fa fa-volume-up';
+        byId('volume').value = muted ? 0 : volume;
+        try {
+          localStorage.setItem(STORED_SOUND, JSON.stringify({muted, volume}));
+        } catch (error) {
+          console.log(error);
+        }
+      }
+
+      function toggleMute() {
+        const volume = active.volume || 1;
+        applySound(!active.muted, volume);
+      }
+
+      function restoreSound() {
+        let sound = null;
+        try {
+          sound = JSON.parse(localStorage.getItem(STORED_SOUND));
+        } catch (error) {
+          console.log(error);
+        }
+        applySound(!!sound?.muted, sound?.volume ?? 1);
+      }
+
+      const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+
+      function toggleFullscreen() {
+        const player = byId('player');
+        if (fullscreenElement()) {
+          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        } else if (player.classList.contains('filling-window')) {
+          player.classList.remove('filling-window');
+          document.body.classList.remove('viewing');
+        } else if (player.requestFullscreen || player.webkitRequestFullscreen) {
+          (player.requestFullscreen || player.webkitRequestFullscreen).call(player);
+        } else {
+          // iPhones only have fullscreen for one video at a time, which would end at each movie
+          player.classList.add('filling-window');
+          document.body.classList.add('viewing');
+        }
+      }
+
+      function wake() {
+        const player = byId('player');
+        player.classList.remove('idle');
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          if (wantsPlay && !scrubbing) {
+            player.classList.add('idle');
+          }
+        }, IDLE_MS);
+      }
+
+      function watchVideo(video) {
+        video.addEventListener('loadedmetadata', () => {
+          // a browser with no decoder for the picture can still play the sound
+          if (!video.videoWidth) {
+            handleFailure(video);
+          } else if (Number.isFinite(video.duration) && video.duration > 0) {
+            clips[video.clipIndex].duration = video.duration;
+          }
+        });
+        video.addEventListener('loadeddata', () => {
+          if (video === active) {
+            showActive();
+          }
+        });
+        video.addEventListener('playing', () => {
+          video.blessed = true;
+          if (video === active) {
+            failures = 0;
+            byId('spinner').hidden = true;
+            showActive();
+          }
+        });
+        video.addEventListener('waiting', () => {
+          if (video === active) {
+            byId('spinner').hidden = false;
+          }
+        });
+        video.addEventListener('canplay', () => {
+          if (video === active) {
+            byId('spinner').hidden = true;
+          }
+        });
+        video.addEventListener('timeupdate', () => {
+          if (video !== active) {
+            return;
+          }
+          renderTime();
+          savePosition();
+          const length = Number.isFinite(video.duration) ? video.duration : clips[current].duration;
+          if (length - video.currentTime < PREPARE_SECS) {
+            prepareNext();
+          }
+        });
+        // pausing is also how a video reaches its end, which isn't someone pausing it
+        video.addEventListener('pause', () => {
+          if (video === active && !video.ended && wantsPlay && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            wantsPlay = false;
+            renderPlayState();
+          }
+        });
+        video.addEventListener('ended', () => {
+          if (video === active) {
+            // a browser might only get this far having skipped its chance to get ready
+            prepareNext();
+            advance();
+          }
+        });
+        video.addEventListener('error', () => handleFailure(video));
+      }
+
+      function setUpControls() {
+        const player = byId('player');
+        const stage = byId('stage');
+        player.addEventListener('pointerdown', () => { wasIdle = player.classList.contains('idle'); wake(); }, true);
+        player.addEventListener('pointermove', wake);
+        stage.addEventListener('click', event => {
+          if (event.target.closest('.movie-controls')) {
+            return;
+          }
+          // the first tap on a touch screen is for bringing back the controls
+          if (!wasIdle || event.pointerType === 'mouse') {
+            togglePlay();
+          }
+        });
+        stage.addEventListener('dblclick', event => {
+          if (!event.target.closest('.movie-controls')) {
+            toggleFullscreen();
+          }
+        });
+
+        const scrubber = byId('scrubber');
+        scrubber.addEventListener('pointerdown', event => {
+          scrubber.setPointerCapture(event.pointerId);
+          scrubbing = scrubAt(event);
+          setScrubPosition(scrubbing.fraction);
+          showScrubPreview(scrubbing);
+        });
+        scrubber.addEventListener('pointermove', event => {
+          const at = scrubAt(event);
+          if (scrubbing) {
+            scrubbing = at;
+            setScrubPosition(at.fraction);
+            showScrubPreview(at);
+          } else if (event.pointerType === 'mouse') {
+            showScrubPreview(at);
+          }
+        });
+        scrubber.addEventListener('pointerleave', () => {
+          if (!scrubbing) {
+            byId('scrub-preview').hidden = true;
+          }
+        });
+        const finishScrub = () => {
+          if (!scrubbing) {
+            return;
+          }
+          const {index, offset} = scrubbing;
+          scrubbing = null;
+          byId('scrub-preview').hidden = true;
+          start(index, offset, wantsPlay);
+          unlockStandby();
+        };
+        scrubber.addEventListener('pointerup', finishScrub);
+        scrubber.addEventListener('pointercancel', () => {
+          scrubbing = null;
+          byId('scrub-preview').hidden = true;
+          renderTime();
+        });
+        byId('scrub-preview').querySelector('img').onerror = event => { event.target.hidden = true; };
+
+        byId('volume').addEventListener('input', event => {
+          const volume = Number(event.target.value);
+          applySound(!volume, volume || active.volume);
+        });
+
+        window.addEventListener('keydown', event => {
+          if (event.target.tagName === 'INPUT' || event.metaKey || event.ctrlKey || event.altKey || current < 0) {
+            return;
+          }
+          const keys = {
+            ' ': togglePlay,
+            k: togglePlay,
+            f: toggleFullscreen,
+            m: toggleMute,
+            ArrowLeft: () => event.shiftKey ? stepClip(-1) : seekBy(-SEEK_SECS),
+            ArrowRight: () => event.shiftKey ? stepClip(1) : seekBy(SEEK_SECS),
+            ArrowUp: () => stepMonth(1),
+            ArrowDown: () => stepMonth(-1)
+          };
+          const action = keys[event.key];
+          if (action) {
+            event.preventDefault();
+            action();
+            wake();
+          }
+        });
+        window.addEventListener('pagehide', () => savePosition(true));
+      }
+
+      window.addEventListener('DOMContentLoaded', async () => {
+        const response = await fetch('/api/movies').catch(() => null);
+        clips = response?.ok ? await response.json() : [];
+        if (!clips.length) {
+          byId('player').hidden = true;
+          byId('empty').hidden = false;
+          return;
+        }
+        organize();
+        renderSummary();
+
+        active = byId('video-a');
+        standby = byId('video-b');
+        active.style.zIndex = 2;
+        standby.style.zIndex = 1;
+        watchVideo(active);
+        watchVideo(standby);
+        restoreSound();
+        setUpControls();
+        const {index, offset} = restoredPosition();
+        start(index, offset, false);
+        renderHidden();
+      });
+    </script>
+  </head>
+  <body class="library-page">
+    <div class="library-month-header">
+      <a href="/library" aria-label="Back to library">‹ Library</a>
+      <span id="summary">Home movies</span>
+    </div>
+    <div id="empty" class="no-images" hidden>
+      No movies yet. They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
+    </div>
+    <div id="player" class="movie-player">
+      <div id="stage" class="movie-stage">
+        <video id="video-a" class="movie-video" playsinline></video>
+        <video id="video-b" class="movie-video" playsinline></video>
+        <i id="spinner" class="fa fa-spinner fa-pulse movie-spinner" aria-hidden="true" hidden></i>
+        <button id="big-play" class="movie-big-play" aria-label="Play">
+          <i class="fa fa-play" aria-hidden="true"></i>
+        </button>
+        <div id="caption" class="movie-caption">
+          <div id="caption-title"></div>
+          <div id="caption-date"></div>
+        </div>
+        <div class="movie-controls">
+          <div id="scrubber" class="movie-scrubber">
+            <div class="movie-scrub-track">
+              <div id="scrub-fill" class="movie-scrub-fill"></div>
+              <div id="scrub-ticks" class="movie-scrub-ticks"></div>
+            </div>
+            <div id="scrub-handle" class="movie-scrub-handle"></div>
+            <div id="scrub-preview" class="movie-scrub-preview" hidden>
+              <img alt="" />
+              <span></span>
+            </div>
+          </div>
+          <div class="movie-buttons">
+            <button id="previous-clip" onclick="stepClip(-1)" title="Previous movie (Shift+←)" aria-label="Previous movie">
+              <i class="fa fa-step-backward" aria-hidden="true"></i>
+            </button>
+            <button id="play" onclick="togglePlay()" title="Play or pause (Space)" aria-label="Play">
+              <i class="fa fa-play" aria-hidden="true"></i>
+            </button>
+            <button id="next-clip" onclick="stepClip(1)" title="Next movie (Shift+→)" aria-label="Next movie">
+              <i class="fa fa-step-forward" aria-hidden="true"></i>
+            </button>
+            <span id="time" class="movie-time"></span>
+            <span class="movie-month-steps">
+              <button id="earlier-month" onclick="stepMonth(-1)" title="Earlier month (↓)" aria-label="Earlier month">
+                <i class="fa fa-chevron-left" aria-hidden="true"></i>
+              </button>
+              <span id="month-label"></span>
+              <button id="later-month" onclick="stepMonth(1)" title="Later month (↑)" aria-label="Later month">
+                <i class="fa fa-chevron-right" aria-hidden="true"></i>
+              </button>
+            </span>
+            <button id="hide" onclick="hideCurrent()" title="Hide from the stream" aria-label="Hide">
+              <i class="fa fa-eye-slash" aria-hidden="true"></i>
+            </button>
+            <button id="delete" onclick="deleteCurrent()" title="Delete" aria-label="Delete">
+              <i class="fa fa-trash-o" aria-hidden="true"></i>
+            </button>
+            <button id="mute" onclick="toggleMute()" title="Mute (M)" aria-label="Mute">
+              <i class="fa fa-volume-up" aria-hidden="true"></i>
+            </button>
+            <input id="volume" class="movie-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume" />
+            <button onclick="toggleFullscreen()" title="Full screen (F)" aria-label="Full screen">
+              <i class="fa fa-expand" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <nav class="movie-rails" aria-label="Choose a time">
+        <div id="years" class="movie-years"></div>
+        <div id="months" class="movie-months"></div>
+      </nav>
+    </div>
+    <div id="clips" class="library-days"></div>
+    <details id="hidden" class="movie-hidden" hidden>
+      <summary id="hidden-count"></summary>
+      <p>Select one to bring it back.</p>
+      <div id="hidden-grid" class="movie-grid"></div>
+    </details>
+  </body>
+</html>

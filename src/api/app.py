@@ -8,12 +8,13 @@ from typing import Literal
 from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, Query, Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from api import exif, faces, scans, thumbs, trash
+from api import exif, faces, movies, scans, thumbs, trash
 
 
 app = FastAPI()
@@ -165,7 +166,12 @@ async def _reload():
 
 @app.get("/api/scan")
 async def _scan_status():
-    return {**scans.status(), 'indexed_photos': exif.count(), 'reviews': exif.review_counts()}
+    return {
+        **scans.status(),
+        'indexed_photos': exif.count(),
+        'indexed_movies': len(movies.clips()),
+        'reviews': exif.review_counts()
+    }
 
 
 @app.post("/api/scan")
@@ -631,6 +637,57 @@ async def _stop_faces():
     if not faces.cancel():
         raise HTTPException(status_code=409, detail="Not checking for faces")
     return "stopping"
+
+
+@app.get("/movies")
+async def _movies_page(request: Request):
+    return templates.TemplateResponse(request=request, name="movies.html")
+
+
+@app.get("/api/movies")
+async def _movies():
+    return movies.clips()
+
+
+class MovieHidden(BaseModel):
+    id: str
+    hidden: bool
+
+
+@app.post("/api/movies/hidden")
+async def _set_movie_hidden(change: MovieHidden):
+    exif.set_movie_hidden(change.id, change.hidden)
+    return "saved"
+
+
+@app.delete("/api/movie{path:path}")
+async def _delete_movie(path: str):
+    files = movies.files_of(library_path(path))
+    if files is None:
+        raise HTTPException(status_code=404)
+    # only these files: a photo with the same name as a video isn't part of it, unlike a Live
+    # Photo's clip, and a large movie takes minutes to copy to the trash on another volume
+    moved = await run_in_threadpool(trash.discard_files, files)
+    if not moved:
+        raise HTTPException(status_code=404)
+    exif.record_deleted(moved)
+    return {'files': moved}
+
+
+@app.get("/api/poster{path:path}")
+def _poster(path: str, size: Literal['M', 'XL'] = 'M'):
+    return cached_image(lambda video, _: thumbs.video_poster(video, size), path, 0)
+
+
+# declared after /api/movies, which this would otherwise also match
+@app.get("/api/movie{path:path}")
+def _movie(path: str, hevc: bool = True, copy: bool = False):
+    file = movies.playable_file(library_path(path), hevc, copy)
+    if file is None:
+        raise HTTPException(status_code=404)
+    # browsers play .mov files they've been told are .mp4, which is the same format underneath,
+    # and some won't try them otherwise
+    return FileResponse(file, media_type='video/mp4', headers=IMAGE_CACHE_HEADERS)
 
 
 def slides(df):

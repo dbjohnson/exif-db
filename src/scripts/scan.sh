@@ -60,3 +60,6 @@ else
 fi
 
 mv "${LAST_SCAN}.tmp" "${LAST_SCAN}"
+
+# the photo index is good by this point, so trouble with movies doesn't fail the scan
+python3 "$(dirname "$(realpath "$0")")/index_movies.py" || echo "Couldn't index movies" >&2

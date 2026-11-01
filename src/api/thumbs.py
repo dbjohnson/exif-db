@@ -76,17 +76,21 @@ def _rotate(im, rotation):
     return im.transpose(CLOCKWISE[rotation]) if rotation else im
 
 
-def _synology_copy(path, name):
+def synology_file(path, name):
     """
-    The path to a copy Synology made of a photo, unless there isn't one yet or the photo
-    has changed since it was made
+    The path to a file Synology made from a photo or video, unless there isn't one yet or the
+    original has changed since it was made
     """
     folder, filename = os.path.split(path)
-    copy = os.path.join(folder, '@eaDir', filename, f"SYNOPHOTO_THUMB_{name}.jpg")
+    copy = os.path.join(folder, '@eaDir', filename, name)
     try:
         return copy if os.stat(copy).st_mtime_ns >= os.stat(path).st_mtime_ns else None
     except OSError:
         return None
+
+
+def _synology_copy(path, name):
+    return synology_file(path, f"SYNOPHOTO_THUMB_{name}.jpg")
 
 
 def _cached(path, variant, quality, make):
@@ -122,6 +126,14 @@ def thumbnail(path, rotation=0):
         return _rotate(im, rotation)
 
     return _cached(path, f":{rotation}" if rotation else '', 80, make)
+
+
+def video_poster(path, size):
+    # there's nothing here that can read a video, so without Synology's there's no picture
+    poster = _synology_copy(path, size)
+    if not poster:
+        raise FileNotFoundError(path)
+    return poster
 
 
 def display(path, rotation=0):

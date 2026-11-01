@@ -16,11 +16,21 @@ def discard(path):
     Move a photo to the trash, along with any files differing only by extension.
     Returns the files that were moved
     """
-    files = glob.glob(f"{glob.escape(os.path.splitext(path)[0])}.*")
+    return discard_files(glob.glob(f"{glob.escape(os.path.splitext(path)[0])}.*"))
+
+
+def discard_files(files):
+    """
+    Move exactly these files to the trash, skipping any that have already gone.  Returns the
+    files that were moved
+    """
+    moved = []
     for f in files:
-        os.makedirs(os.path.dirname(_trashed(f)), exist_ok=True)
-        shutil.move(f, _trashed(f))
-    return files
+        if os.path.exists(f):
+            os.makedirs(os.path.dirname(_trashed(f)), exist_ok=True)
+            shutil.move(f, _trashed(f))
+            moved.append(f)
+    return moved
 
 
 def restore(files):

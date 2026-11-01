@@ -40,3 +40,31 @@ async function postJson(url, body) {
   }
   return response.json();
 }
+
+// a delete that asks with a second press rather than stopping the page with an alert
+const SECOND_PRESS_MS = 4000;
+const armedButtons = new Map();
+
+function disarmButton(button) {
+  const armed = armedButtons.get(button);
+  if (armed) {
+    clearTimeout(armed.timeout);
+    button.innerHTML = armed.content;
+    button.classList.remove('confirming');
+    armedButtons.delete(button);
+  }
+}
+
+function pressedTwice(button, prompt = 'Delete?') {
+  if (armedButtons.has(button)) {
+    disarmButton(button);
+    return true;
+  }
+  armedButtons.set(button, {
+    content: button.innerHTML,
+    timeout: setTimeout(() => disarmButton(button), SECOND_PRESS_MS)
+  });
+  button.classList.add('confirming');
+  button.textContent = prompt;
+  return false;
+}
