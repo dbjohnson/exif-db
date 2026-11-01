@@ -15,6 +15,9 @@ FAVORITES_CSV = '/storage/favorites.csv'
 ROTATIONS_CSV = '/storage/rotations.csv'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
+# where the faces are in each photo, written by scripts/find_faces.py
+FACES_CSV = '/storage/faces.csv'
+NO_FACES = 'none'
 APPROVED = 'approved'
 REJECTED = 'rejected'
 UNREVIEWED = 'unreviewed'
@@ -310,7 +313,14 @@ def review_counts(datestring=''):
     return {APPROVED: 0, REJECTED: 0, UNREVIEWED: 0, **dict(rows)}
 
 
-def library_months():
+def _library_filter(with_faces):
+    if not with_faces:
+        return ''
+    _load_log('faces', FACES_CSV)
+    return f"AND photo_id IN (SELECT photo_id FROM faces WHERE value <> '{NO_FACES}')"
+
+
+def library_months(with_faces=False):
     """
     Every month with photos to browse, newest first and undated photos last.  Unlike the gallery
     this includes unreviewed photos, which are most of a library, but not hidden ones.  A month's
@@ -331,7 +341,7 @@ def library_months():
                 hash(photo_id)
             )
         FROM {_with_status()}
-        WHERE review_status <> ?
+        WHERE review_status <> ? {_library_filter(with_faces)}
         GROUP BY month
         ORDER BY month DESC NULLS LAST
         """,
@@ -340,13 +350,13 @@ def library_months():
     return [{'month': month, 'photos': photos, 'cover': cover} for month, photos, cover in rows]
 
 
-def library_photos(month):
+def library_photos(month, with_faces=False):
     # month as in library_months, where None is the undated photos
     rows = db.execute(
         f"""
         SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation
         FROM {_with_status()}
-        WHERE ({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND review_status <> ?
+        WHERE ({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND review_status <> ? {_library_filter(with_faces)}
         ORDER BY DateTimeOriginal, photo_id
         """,
         [month, REJECTED]
@@ -362,6 +372,35 @@ def library_photos(month):
         }
         for photo_id, path, taken, status, favorite, rotation in rows
     ]
+
+
+def face_counts():
+    # among photos in the index, how many have been checked for faces and how many have some
+    table = _with_status()
+    _load_log('faces', FACES_CSV)
+    checked, with_faces = db.execute(
+        f"""
+        SELECT COUNT(*), COUNT(*) FILTER (WHERE value <> ?)
+        FROM {table} JOIN faces USING (photo_id)
+        """,
+        [NO_FACES]
+    ).fetchone()
+    return {'checked': checked, 'with_faces': with_faces}
+
+
+def photos_to_check_for_faces():
+    # newest first, as those are the ones most likely to be looked at while this runs
+    table = _with_status()
+    _load_log('faces', FACES_CSV)
+    rows = db.execute(
+        f"""
+        SELECT photo_id, SourceFile, rotation
+        FROM {table}
+        WHERE photo_id NOT IN (SELECT photo_id FROM faces)
+        ORDER BY DateTimeOriginal DESC
+        """
+    ).fetchall()
+    return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
 
 
 def _review_item(photo_id, path, taken, review_status, rotation, no_camera=False):

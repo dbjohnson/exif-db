@@ -361,9 +361,10 @@
   </head>
   <body class="library-page">
     <div class="library-month-header">
-      <a href="/library" aria-label="Back to library">‹ Library</a>
+      <a href="{{ library_url }}" aria-label="Back to library">‹ Library</a>
       <span id="summary">{{ title }}</span>
       <span class="month-steps">
+        {% if faces_checked %}<a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
         {% if newer_url %}<a href="{{ newer_url }}" title="Newer month">Newer ›</a>{% endif %}
       </span>

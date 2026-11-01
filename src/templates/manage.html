@@ -161,10 +161,52 @@
         }
       }
 
+      function renderFaces(status) {
+        const {progress} = status;
+        const state = document.getElementById('faces-state');
+        const count = number => number.toLocaleString();
+        state.textContent = `${count(status.checked)} of ${count(status.indexed_photos)} photos checked, ` +
+          `${count(status.with_faces)} with faces`;
+        const bar = document.getElementById('faces-progress');
+        bar.hidden = !status.running || !progress;
+        if (status.running && progress) {
+          bar.max = progress.total || 1;
+          bar.value = progress.done;
+        }
+        const note = document.getElementById('faces-note');
+        note.textContent = '';
+        if (progress && progress.state !== 'running' && progress.failed) {
+          note.textContent = `${count(progress.failed)} couldn't be read last time, and will be tried again next time.`;
+        } else if (progress && progress.state === 'interrupted') {
+          note.textContent = 'The last check was interrupted. Starting again carries on from where it got to.';
+        }
+        document.getElementById('faces-start').disabled = status.running;
+        document.getElementById('faces-stop').disabled = !status.running;
+      }
+
+      async function refreshFaces() {
+        try {
+          const response = await fetch('/api/faces');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          renderFaces(await response.json());
+        } catch (error) {
+          showError(`Couldn't load the check for faces: ${error.message}`);
+        }
+      }
+
+      async function sendFaces(method) {
+        await send('/api/faces', method);
+        refreshFaces();
+      }
+
       window.addEventListener('DOMContentLoaded', () => {
         refresh();
         refreshTrash();
+        refreshFaces();
         setInterval(refresh, 2000);
+        setInterval(refreshFaces, 5000);
       });
     </script>
   </head>
@@ -220,6 +262,16 @@
         <button id="empty-trash" onclick="emptyTrash()" disabled>Empty trash</button>
       </div>
       <p class="hint">Deleted files are kept here, in the deleted folder of the storage volume, until the trash is emptied.</p>
+
+      <h2>Faces</h2>
+      <div class="actions">
+        <span id="faces-state" class="trash-summary">Loading…</span>
+        <button id="faces-start" onclick="sendFaces('POST')" disabled>Check for faces</button>
+        <button id="faces-stop" onclick="sendFaces('DELETE')" disabled>Stop</button>
+      </div>
+      <progress id="faces-progress" hidden></progress>
+      <p id="faces-note" class="hint"></p>
+      <p class="hint">Checks photos that haven't been checked yet, on the NAS, without sending them anywhere. Stopping keeps what's been found so far. The results add a filter to the library.</p>
 
       <h2>Run</h2>
       <div class="actions">

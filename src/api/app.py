@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from api import exif, scans, thumbs, trash
+from api import exif, faces, scans, thumbs, trash
 
 
 app = FastAPI()
@@ -400,18 +400,22 @@ async def _review(
     )
 
 
-def library_url(month):
-    return '/library/' + (month.replace(':', '/') if month else 'undated')
+def library_query(with_faces):
+    return '?with_faces=true' if with_faces else ''
 
 
-def library_tile(entry):
+def library_url(month, with_faces):
+    return '/library/' + (month.replace(':', '/') if month else 'undated') + library_query(with_faces)
+
+
+def library_tile(entry, with_faces):
     # an entry from exif.library_months, with what the page shows for it
     year, number = entry['month'].split(':') if entry['month'] else (None, None)
     return {
         **entry,
         'year': year,
         'name': datetime.date(2000, int(number), 1).strftime('%B') if number else 'Undated',
-        'url': library_url(entry['month'])
+        'url': library_url(entry['month'], with_faces)
     }
 
 
@@ -437,11 +441,11 @@ def library_photo(photo, dated):
     return {**photo, 'day': day, 'time': time}
 
 
-def library_month_page(request, month, title):
-    months = [entry['month'] for entry in exif.library_months()]
+def library_month_page(request, month, title, with_faces):
+    months = [entry['month'] for entry in exif.library_months(with_faces)]
     # a month can empty out while its page is open, such as by deleting everything in it
     if month not in months:
-        return RedirectResponse(url='/library')
+        return RedirectResponse(url=f"/library{library_query(with_faces)}")
     position = months.index(month)
     return templates.TemplateResponse(
         request=request,
@@ -449,21 +453,31 @@ def library_month_page(request, month, title):
         context={
             "title": title,
             "dated": month is not None,
-            "photos": [library_photo(photo, month is not None) for photo in exif.library_photos(month)],
-            "newer_url": library_url(months[position - 1]) if position else None,
-            "older_url": library_url(months[position + 1]) if position + 1 < len(months) else None
+            "with_faces": with_faces,
+            "faces_checked": exif.face_counts()['checked'],
+            "library_url": f"/library{library_query(with_faces)}",
+            "other_filter_url": library_url(month, not with_faces),
+            "photos": [
+                library_photo(photo, month is not None)
+                for photo in exif.library_photos(month, with_faces)
+            ],
+            "newer_url": library_url(months[position - 1], with_faces) if position else None,
+            "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None
         }
     )
 
 
 @app.get("/library")
-async def _library(request: Request):
-    tiles = [library_tile(entry) for entry in exif.library_months()]
+async def _library(request: Request, with_faces: bool = False):
+    tiles = [library_tile(entry, with_faces) for entry in exif.library_months(with_faces)]
     return templates.TemplateResponse(
         request=request,
         name="library.html",
         context={
             "total": sum(tile['photos'] for tile in tiles),
+            "with_faces": with_faces,
+            "faces_checked": exif.face_counts()['checked'],
+            "other_filter_url": f"/library{library_query(not with_faces)}",
             "years": library_years(tiles),
             "undated": next((tile for tile in tiles if not tile['year']), None)
         }
@@ -471,17 +485,36 @@ async def _library(request: Request):
 
 
 @app.get("/library/undated")
-async def _library_undated(request: Request):
-    return library_month_page(request, None, "Undated")
+async def _library_undated(request: Request, with_faces: bool = False):
+    return library_month_page(request, None, "Undated", with_faces)
 
 
 @app.get("/library/{year}/{month}")
-async def _library_month(request: Request, year: int, month: int):
+async def _library_month(request: Request, year: int, month: int, with_faces: bool = False):
     try:
         title = f"{datetime.date(year, month, 1):%B} {year}"
     except ValueError:
-        return RedirectResponse(url='/library')
-    return library_month_page(request, f"{year:04d}:{month:02d}", title)
+        return RedirectResponse(url=f"/library{library_query(with_faces)}")
+    return library_month_page(request, f"{year:04d}:{month:02d}", title, with_faces)
+
+
+@app.get("/api/faces")
+async def _faces_status():
+    return {**faces.status(), **exif.face_counts(), 'indexed_photos': exif.count()}
+
+
+@app.post("/api/faces")
+async def _start_faces():
+    if not faces.start(exif.photos_to_check_for_faces(), exif.FACES_CSV):
+        raise HTTPException(status_code=409, detail="Already checking for faces")
+    return "started"
+
+
+@app.delete("/api/faces")
+async def _stop_faces():
+    if not faces.cancel():
+        raise HTTPException(status_code=409, detail="Not checking for faces")
+    return "stopping"
 
 
 def slides(df):

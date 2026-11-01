@@ -13,9 +13,12 @@
       <a href="/random">Random photos</a>
       <a href="/onthisday">Photos from this date</a>
       <a href="/manage">Manage</a>
+      {% if faces_checked %}
+      <a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Only photos with faces' }}</a>
+      {% endif %}
     </div>
     {% if not total %}
-    <div class="no-images">No photos yet</div>
+    <div class="no-images">No photos {{ 'with faces ' if with_faces }}yet</div>
     {% endif %}
     <nav class="year-rail" aria-label="Years">
       {% for year in years %}
