@@ -1860,3 +1860,65 @@ button.confirming:hover {
   }
 }
 
+
+.duplicate-group {
+  margin: 0 0 16px;
+  padding: 10px;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+
+.duplicate-copies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.duplicate-tile {
+  width: 170px;
+  margin: 0;
+}
+
+.duplicate-tile img {
+  display: block;
+  width: 100%;
+  height: 170px;
+  object-fit: contain;
+  border-radius: 3px;
+  background: #151515;
+}
+
+.duplicate-tile.hidden-copy img {
+  opacity: 0.55;
+}
+
+.duplicate-tile.kept img {
+  outline: 2px solid #2a7de1;
+}
+
+.duplicate-tile figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  color: #aaa;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.duplicate-badge {
+  color: #ddd;
+}
+
+.duplicate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.duplicate-actions button {
+  padding: 4px 8px;
+  border: 1px solid #555;
+  font-size: 12px;
+}

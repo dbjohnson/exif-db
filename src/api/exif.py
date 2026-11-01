@@ -1,10 +1,10 @@
-import csv
-import fcntl
 import os
 import datetime
-import time
 
 import duckdb
+
+from api.copies import HIDDEN as HIDDEN_DUPLICATE
+from api.worklog import append_log as _append_log
 
 
 LIBRARY_ROOT = '/photo'
@@ -18,6 +18,8 @@ DATES_CSV = '/storage/dates.csv'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
 MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
+# which photos have been dealt with as duplicates, as in api/copies.py
+DUPLICATES_CSV = '/storage/duplicates.csv'
 # where the faces are in each photo, written by scripts/find_faces.py
 FACES_CSV = '/storage/faces.csv'
 NO_FACES = 'none'
@@ -83,7 +85,9 @@ def load_csv(force_reload=False):
                     WHEN 'PNG'  THEN 2
                     WHEN 'HEIC' THEN 3
                     ELSE 4
-                END
+                END,
+                -- the same file each time, as different photos can share an identity
+                SourceFile
             ) = 1;
             """,
             [
@@ -198,15 +202,6 @@ def _left_out_path_returned():
     return bool(_left_out_of_index - _deleted_paths())
 
 
-def _append_log(path, rows):
-    with open(path, 'a', newline='', encoding='utf-8', errors='surrogateescape') as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        # taken under the lock, so timestamps follow the order rows were written
-        now = time.time_ns()
-        writer = csv.writer(fh, lineterminator='\n')
-        writer.writerows((photo_id, value, now) for photo_id, value in rows)
-
-
 def record_deleted(paths):
     # after the files have moved, since a path whose file is still there doesn't count
     _append_log(DELETIONS_CSV, [(path, DELETED) for path in paths])
@@ -243,13 +238,16 @@ def reset_reviews(datestring=''):
     decision if their files do
     """
     table = _with_status()
+    _load_log('duplicates', DUPLICATES_CSV)
     rows = db.execute(
         f"""
         SELECT photo_id
         FROM reviews LEFT JOIN {table} USING (photo_id)
         WHERE value <> ? AND (? OR DateTimeOriginal LIKE ?)
+        -- those weren't a decision about the photo, and starting over would bring them all back
+        AND NOT (value = ? AND photo_id IN (SELECT photo_id FROM duplicates WHERE value = ?))
         """,
-        [UNREVIEWED, not datestring, f"{datestring}%"]
+        [UNREVIEWED, not datestring, f"{datestring}%", REJECTED, HIDDEN_DUPLICATE]
     ).fetchall()
     _append_log(REVIEWS_CSV, [(photo_id, UNREVIEWED) for photo_id, in rows])
     return len(rows)
@@ -481,6 +479,55 @@ def photos_to_check_for_faces():
         """
     ).fetchall()
     return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
+
+
+def duplicate_photos(photo_ids=None):
+    # what deciding between copies of a photo goes on, for these photos or all of them
+    table = _with_status()
+    rows = db.execute(
+        f"""
+        SELECT
+            photo_id, SourceFile, FileName, FileType,
+            TRY_CAST(FileSize AS BIGINT), TRY_CAST(ImageWidth AS BIGINT), TRY_CAST(ImageHeight AS BIGINT),
+            Make IS NOT NULL OR Model IS NOT NULL,
+            ({LIBRARY_MONTH}) IS NOT NULL,
+            date_assigned,
+            DateTimeOriginal, review_status, favorite, rotation
+        FROM {table}
+        WHERE ? OR photo_id IN (SELECT UNNEST(?::VARCHAR[]))
+        """,
+        [photo_ids is None, list(photo_ids or ())]
+    ).fetchall()
+    return [
+        {
+            'id': photo_id,
+            'path': path,
+            'name': name,
+            'type': file_type,
+            'size': size,
+            'width': width,
+            'height': height,
+            'camera': camera,
+            'dated': dated,
+            # when it was taken, by its own account
+            'taken': taken if dated and not assigned else None,
+            'date': taken,
+            'status': status,
+            'favorite': favorite,
+            'rotation': rotation
+        }
+        for photo_id, path, name, file_type, size, width, height, camera, dated, assigned, taken, status, favorite, rotation
+        in rows
+    ]
+
+
+def handled_duplicates():
+    _load_log('duplicates', DUPLICATES_CSV)
+    return dict(db.execute("SELECT photo_id, value FROM duplicates").fetchall())
+
+
+def record_duplicates(rows):
+    _append_log(DUPLICATES_CSV, rows)
 
 
 def _review_item(photo_id, path, taken, review_status, rotation, no_camera=False):

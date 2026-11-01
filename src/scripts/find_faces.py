@@ -4,8 +4,6 @@ safe to stop at any time: what's been found is kept, and the next run carries on
 
 Usage: find_faces.py <queue> <results> <progress> <lock>
 """
-import csv
-import fcntl
 import json
 import os
 import signal
@@ -14,6 +12,10 @@ import time
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL = os.path.join(APP_DIR, 'models', 'face_detection_yunet_2023mar.onnx')
+# only these: importing the api package would also start a web app
+sys.path.insert(0, os.path.join(APP_DIR, 'api'))
+import worklog  # noqa: E402
+
 # the same as in exif.py
 NO_FACES = 'none'
 MIN_SCORE = 0.6
@@ -56,35 +58,19 @@ def encode(faces):
 
 
 def save_results(path, rows):
-    # the same format as the other logs in exif.py, whose worker may be reading this
-    with open(path, 'a', newline='', encoding='utf-8', errors='surrogateescape') as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        now = time.time_ns()
-        writer = csv.writer(fh, lineterminator='\n')
-        writer.writerows((photo_id, encode(faces), now) for photo_id, faces in rows)
-
-
-def save_progress(path, progress):
-    tmp = f"{path}.{os.getpid()}"
-    with open(tmp, 'w') as fh:
-        json.dump(progress, fh)
-    os.replace(tmp, path)
+    worklog.append_log(path, [(photo_id, encode(faces)) for photo_id, faces in rows])
 
 
 def main(queue_path, results_path, progress_path, lock_path):
-    # only one at a time; the lock goes with this process, however it ends
-    lock = open(lock_path, 'a')
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    # only one at a time
+    lock = worklog.hold_lock(lock_path)
+    if lock is None:
         return
 
     stopping = []
     signal.signal(signal.SIGTERM, lambda *_: stopping.append(True))
     # only now, so that the lock shows this is running during these slow imports
     import cv2
-    # only thumbs itself: importing the api package would also start a web app
-    sys.path.insert(0, os.path.join(APP_DIR, 'api'))
     import thumbs
 
     os.nice(10)
@@ -103,7 +89,7 @@ def main(queue_path, results_path, progress_path, lock_path):
         'with_faces': 0,
         'failed': 0
     }
-    save_progress(progress_path, progress)
+    worklog.save_json(progress_path, progress)
 
     rows = []
     for photo in queue:
@@ -120,11 +106,11 @@ def main(queue_path, results_path, progress_path, lock_path):
         if progress['done'] % SAVE_EVERY == 0:
             save_results(results_path, rows)
             rows = []
-            save_progress(progress_path, progress)
+            worklog.save_json(progress_path, progress)
 
     save_results(results_path, rows)
     progress.update(state='stopped' if stopping else 'finished', finished=int(time.time()))
-    save_progress(progress_path, progress)
+    worklog.save_json(progress_path, progress)
 
 
 if __name__ == '__main__':

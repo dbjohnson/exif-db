@@ -219,12 +219,56 @@
         refreshFaces();
       }
 
+      function renderDuplicates(status) {
+        const {progress} = status;
+        const count = number => number.toLocaleString();
+        const link = document.getElementById('duplicates-link');
+        const counts = [`${count(status.hidden)} hidden`];
+        if (status.possible) {
+          counts.push(`${count(status.possible)} to look at`);
+        }
+        link.textContent = counts.join(', ');
+        link.hidden = !status.hidden && !status.possible;
+        const state = document.getElementById('duplicates-state');
+        const comparing = progress && progress.phase === 'comparing';
+        state.textContent = status.running && progress
+          ? `${comparing ? 'Comparing' : 'Checking'} ${count(progress.done)} of ${count(progress.total)} ${comparing ? 'similar photos' : 'photos'}, ${formatRemaining(progress.remaining_secs)}`
+          : progress && progress.finished ? `Last checked ${formatTime(progress.finished)}` : 'Not checked yet';
+        const bar = document.getElementById('duplicates-progress');
+        bar.hidden = !status.running || !progress;
+        if (status.running && progress) {
+          bar.max = progress.total || 1;
+          bar.value = progress.done;
+        }
+        document.getElementById('duplicates-start').disabled = status.running;
+        document.getElementById('duplicates-stop').disabled = !status.running;
+      }
+
+      async function refreshDuplicates() {
+        try {
+          const response = await fetch('/api/duplicates');
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          renderDuplicates(await response.json());
+        } catch (error) {
+          showError(`Couldn't load the check for duplicates: ${error.message}`);
+        }
+      }
+
+      async function sendDuplicates(method) {
+        await send('/api/duplicates', method);
+        refreshDuplicates();
+      }
+
       window.addEventListener('DOMContentLoaded', () => {
         refresh();
         refreshTrash();
         refreshFaces();
+        refreshDuplicates();
         setInterval(refresh, 2000);
         setInterval(refreshFaces, 5000);
+        setInterval(refreshDuplicates, 5000);
       });
     </script>
   </head>
@@ -298,6 +342,16 @@
       <progress id="faces-progress" hidden></progress>
       <p id="faces-note" class="hint"></p>
       <p class="hint">Checks photos that haven't been checked yet, on the NAS, without sending them anywhere. This also starts by itself after each successful scan. Stopping keeps what's been found so far, and the next scan carries on from there. The results add a filter to the library.</p>
+
+      <h2>Duplicates</h2>
+      <div class="actions">
+        <a id="duplicates-link" class="link-button" href="/duplicates" hidden></a>
+        <span id="duplicates-state" class="trash-summary">Loading…</span>
+        <button id="duplicates-start" onclick="sendDuplicates('POST')" disabled>Check now</button>
+        <button id="duplicates-stop" onclick="sendDuplicates('DELETE')" disabled>Stop</button>
+      </div>
+      <progress id="duplicates-progress" hidden></progress>
+      <p class="hint">Runs by itself after a scan finds new photos. Copies it's sure about are hidden, keeping the best one, and can be brought back. Nothing is deleted.</p>
 
       <h2>Run</h2>
       <div class="actions">

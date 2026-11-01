@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Duplicates</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="favicon" rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/toast.js"></script>
+    <script>
+      async function act(url, body) {
+        try {
+          await postJson(url, body);
+          window.location.reload();
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      const groupIds = button => JSON.parse(button.closest('.duplicate-group').dataset.photos);
+
+      function keep(button) {
+        act('/api/duplicates/keep', {keep: button.dataset.photo, photo_ids: groupIds(button)});
+      }
+
+      function show(button) {
+        act('/api/duplicates/show', {photo_ids: [button.dataset.photo]});
+      }
+
+      // only those showing: any hidden here are copies of something else, whatever these turn out to be
+      function notDuplicates(button) {
+        act('/api/duplicates/show', {photo_ids: JSON.parse(button.dataset.photos)});
+      }
+    </script>
+  </head>
+  <body class="library-page">
+    <div class="library-nav">
+      <a href="/library">Library</a>
+      <a href="/manage">Manage</a>
+    </div>
+    {% macro tile(photo) %}
+    <figure class="duplicate-tile{{ ' kept' if photo.best }}{{ ' hidden-copy' if not photo.showing }}">
+      <a href="/api/image{{ photo.path | urlencode }}{% if photo.rotation %}?rotate={{ photo.rotation }}{% endif %}" target="_blank" rel="noopener">
+        <img
+          src="/api/thumb{{ photo.path | urlencode }}{% if photo.rotation %}?rotate={{ photo.rotation }}{% endif %}"
+          loading="lazy"
+          decoding="async"
+          alt="{{ photo.name }}"
+          onerror="this.remove()"
+        />
+      </a>
+      <figcaption>
+        {% if photo.best %}
+        <strong class="duplicate-badge">Best copy</strong>
+        {% elif not photo.showing %}
+        <span class="duplicate-badge">Hidden</span>
+        {% endif %}
+        <span>{{ photo.name }}</span>
+        <span>{{ photo.folder }}</span>
+        <span>
+          {% if photo.width and photo.height %}{{ photo.width }} × {{ photo.height }} · {% endif %}{{ photo.type }}{% if photo.kind %} · {{ photo.kind }}{% endif %}
+        </span>
+        {% if not (photo.best and photo.showing) %}
+        <span class="duplicate-actions">
+          <button data-photo="{{ photo.id }}" onclick="keep(this)">Keep this instead</button>
+          {% if not photo.showing %}
+          <button data-photo="{{ photo.id }}" onclick="show(this)">Show this too</button>
+          {% endif %}
+        </span>
+        {% endif %}
+      </figcaption>
+    </figure>
+    {% endmacro %}
+    {% if possible %}
+    <section class="library-year">
+      <h2>Might be duplicates <span>{{ "{:,}".format(possible | length) }} to look at</span></h2>
+      <p class="library-hint">These look alike, but not enough to be sure, so nothing has been hidden. They may be edited copies or a similar screen.</p>
+      {% for group in possible %}
+      <div class="duplicate-group" data-photos="{{ group.photo_ids | tojson | forceescape }}">
+        <div class="duplicate-copies">
+          {% for photo in group.photos %}
+          {{ tile(photo) }}
+          {% endfor %}
+        </div>
+        <div class="duplicate-actions">
+          <button data-photo="{{ group.best }}" onclick="keep(this)">Keep the best copy</button>
+          <button data-photos="{{ group.showing_ids | tojson | forceescape }}" onclick="notDuplicates(this)">Not duplicates</button>
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+    {% if hidden %}
+    <section class="library-year">
+      <h2>Hidden automatically <span>{{ "{:,}".format(hidden | length) }} photo{{ '' if hidden | length == 1 else 's' }} with copies</span></h2>
+      <p class="library-hint">Each of these was the same photo more than once, so only the best copy still shows. Nothing was deleted.</p>
+      {% for group in hidden %}
+      <div class="duplicate-group" data-photos="{{ group.photo_ids | tojson | forceescape }}">
+        <div class="duplicate-copies">
+          {% for photo in group.photos %}
+          {{ tile(photo) }}
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+    {% if not possible and not hidden %}
+    <div class="no-images">No duplicates found</div>
+    {% endif %}
+  </body>
+</html>

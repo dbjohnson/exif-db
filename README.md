@@ -71,6 +71,14 @@ Hiding takes a movie out of the stream (stored in `movies_hidden.csv`) and can b
 
 Browsers get the original where they can play it, which is any H.264 and also HEVC if the browser has it.  Otherwise they get a copy Synology made in `@eaDir`, such as for old MPEG-4 and AVI files, and nothing is converted here.  A movie with neither is skipped with a message.
 
+## Duplicates
+
+After a scan changes the index, the server looks for photos that are copies of each other, such as a screenshot of a photo that was then texted around.  Copies it's sure about are hidden automatically, keeping the best one: the most detail first, then one from a camera, one that isn't a screenshot, and one with a date.  The copy that stays takes on any approval or favorite the others had, so nothing drops out of the gallery or kiosk.  Nothing is deleted.
+
+`/duplicates` shows what was hidden, where another copy can be kept instead or a hidden one brought back, which sticks through later checks.  Photos that may be copies but aren't certain, like annotated or brighter versions, wait there for a decision.  Shots from a camera's burst or timer are never treated as copies, and a copy is only hidden if it matches the one that's kept.
+
+Each photo's fingerprint comes from its thumbnail, and only photos with similar fingerprints get compared, by lining them up and comparing them block by block.  Results are kept in `duplicate_fingerprints.csv` and `duplicate_pairs.csv` in the storage volume, so later checks only do what's new.  What's been dealt with is in `duplicates.csv`.  The first check takes a little over an hour per 60,000 photos on a Celeron J4125.
+
 ## The kiosk
 
 `/kiosk` is meant to run unattended for days.  It keeps showing photos through server outages and picks up again by itself, updates when photos change or a new version is deployed, and reloads at midnight.  Once it has loaded over HTTPS, a service worker turns any failed page load in that browser into a screen that keeps retrying, including after a restart where the frame comes up before the server does.

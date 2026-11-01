@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from api import exif, faces, movies, people, scans, thumbs, trash
+from api import duplicates, exif, faces, movies, people, scans, thumbs, trash
 
 
 @asynccontextmanager
@@ -613,12 +613,12 @@ def check_photos_after_scan():
     result = scans.last_result()
     if not result or result.get('exit_code') != 0 or result['finished'] <= faces.last_scan_checked():
         return
-    if scans.running() or faces.running():
+    if scans.running() or faces.job.running():
         return
     photos = exif.photos_to_check_for_faces()
     # with multiple workers, the worker's own lock lets only one of these run
     if photos:
-        faces.start(photos, exif.FACES_CSV)
+        faces.job.start(photos, exif.FACES_CSV)
     faces.set_last_scan_checked(result['finished'])
 
 
@@ -630,6 +630,10 @@ async def check_photos_after_scans():
             check_photos_after_scan()
         except Exception as e:
             logger.warning(f"Can't start checking new photos for faces: {e}")
+        try:
+            duplicates.check()
+        except Exception as e:
+            logger.warning(f"Can't check for duplicates: {e}")
 
 
 def face_status():
@@ -794,19 +798,19 @@ async def _restore_dates(restore: DateRestore):
 
 @app.get("/api/faces")
 async def _faces_status():
-    return {**faces.status(), **exif.face_counts(), 'indexed_photos': exif.count()}
+    return {**faces.job.status(), **exif.face_counts(), 'indexed_photos': exif.count()}
 
 
 @app.post("/api/faces")
 async def _start_faces():
-    if not faces.start(exif.photos_to_check_for_faces(), exif.FACES_CSV):
+    if not faces.job.start(exif.photos_to_check_for_faces(), exif.FACES_CSV):
         raise HTTPException(status_code=409, detail="Already checking for faces")
     return "started"
 
 
 @app.delete("/api/faces")
 async def _stop_faces():
-    if not faces.cancel():
+    if not faces.job.cancel():
         raise HTTPException(status_code=409, detail="Not checking for faces")
     return "stopping"
 
@@ -860,6 +864,55 @@ def _movie(path: str, hevc: bool = True, copy: bool = False):
     # browsers play .mov files they've been told are .mp4, which is the same format underneath,
     # and some won't try them otherwise
     return FileResponse(file, media_type='video/mp4', headers=IMAGE_CACHE_HEADERS)
+
+
+class DuplicateChoice(BaseModel):
+    keep: str
+    photo_ids: list[str]
+
+
+class DuplicatesShown(BaseModel):
+    photo_ids: list[str]
+
+
+@app.get("/duplicates")
+async def _duplicates_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="duplicates.html",
+        context=duplicates.page()
+    )
+
+
+@app.get("/api/duplicates")
+async def _duplicates_status():
+    return duplicates.status()
+
+
+@app.post("/api/duplicates")
+async def _start_duplicates():
+    if not duplicates.start():
+        raise HTTPException(status_code=409, detail="Already looking for duplicates")
+    return "started"
+
+
+@app.delete("/api/duplicates")
+async def _stop_duplicates():
+    if not duplicates.job.cancel():
+        raise HTTPException(status_code=409, detail="Not looking for duplicates")
+    return "stopping"
+
+
+@app.post("/api/duplicates/keep")
+async def _keep_duplicate(choice: DuplicateChoice):
+    duplicates.keep(choice.keep, choice.photo_ids)
+    return "saved"
+
+
+@app.post("/api/duplicates/show")
+async def _show_duplicates(shown: DuplicatesShown):
+    duplicates.show(shown.photo_ids)
+    return "saved"
 
 
 def slides(df):
