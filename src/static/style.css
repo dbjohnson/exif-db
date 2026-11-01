@@ -1687,6 +1687,14 @@ button:disabled {
   cursor: default;
 }
 
+.movie-airplay-icon {
+  display: block;
+  width: 17px;
+  height: 17px;
+  margin: auto;
+  fill: currentColor;
+}
+
 .movie-time {
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
@@ -2183,6 +2191,14 @@ button:disabled {
   }
   .movie-volume {
     display: none;
+  }
+  /* full screen moves up beside the time, or AirPlay would push it onto a row of its own */
+  .movie-month-steps,
+  .movie-buttons #hide,
+  .movie-buttons #delete,
+  .movie-buttons #mute,
+  .movie-buttons #airplay {
+    order: 1;
   }
   /* there's no hovering to show a photo's controls, so they go under it instead of over it */
   .image-container {

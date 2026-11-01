@@ -522,7 +522,8 @@
       }
 
       function prepareNext() {
-        if (singleVideo || fading || !wantsPlay) {
+        // AirPlay belongs to one video, so the other can't take over from it
+        if (singleVideo || fading || !wantsPlay || active.webkitCurrentPlaybackTargetIsWireless) {
           return;
         }
         const next = usable(current + 1, 1);
@@ -849,8 +850,9 @@
 
       function watchVideo(video) {
         video.addEventListener('loadedmetadata', () => {
-          // a browser with no decoder for the picture can still play the sound
-          if (!video.videoWidth) {
+          // a browser with no decoder for the picture can still play the sound, but during AirPlay
+          // the picture is the receiver's and the size may not be known here
+          if (!video.videoWidth && !video.webkitCurrentPlaybackTargetIsWireless) {
             handleFailure(video);
           } else if (Number.isFinite(video.duration) && video.duration > 0) {
             clips[video.clipIndex].duration = video.duration;
@@ -905,6 +907,26 @@
           }
         });
         video.addEventListener('error', () => handleFailure(video));
+        watchAirPlay(video);
+      }
+
+      // only Safari has these, and it only reports a receiver once something is listening
+      function watchAirPlay(video) {
+        video.addEventListener('webkitplaybacktargetavailabilitychanged', event => {
+          byId('airplay').hidden = event.availability !== 'available';
+        });
+        video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+          // what was coming next would otherwise carry on downloading to the phone
+          if (video === active && video.webkitCurrentPlaybackTargetIsWireless && prepared !== -1) {
+            prepared = -1;
+            standby.removeAttribute('src');
+            standby.load();
+          }
+        });
+      }
+
+      function chooseAirPlayReceiver() {
+        active.webkitShowPlaybackTargetPicker();
       }
 
       function setUpControls() {
@@ -1079,6 +1101,12 @@
               <i class="fa fa-volume-up" aria-hidden="true"></i>
             </button>
             <input id="volume" class="movie-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume" />
+            <button id="airplay" onclick="chooseAirPlayReceiver()" title="AirPlay" aria-label="AirPlay" hidden>
+              <svg class="movie-airplay-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V5h18v12h-4v2h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+                <path d="M12 14l-6 7h12z" />
+              </svg>
+            </button>
             <button onclick="toggleFullscreen()" title="Full screen (F)" aria-label="Full screen">
               <i class="fa fa-expand" aria-hidden="true"></i>
             </button>
