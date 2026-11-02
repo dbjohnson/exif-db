@@ -64,6 +64,30 @@
 
       window.addEventListener('DOMContentLoaded', watchForMoreGroups);
 
+      // comparing groups with named faces goes on in the background.  Reloading would lose a name
+      // being typed and where someone had got to, so if they've started they get the note instead
+      async function waitForComparing() {
+        try {
+          const response = await fetch('/api/people/comparing?kind=groups&name=');
+          if (response.ok && !(await response.json()).working) {
+            const note = document.getElementById('reload-note');
+            if (note.hidden && ![...document.querySelectorAll('.person-group input')].some(input => input.value)) {
+              location.reload();
+              return;
+            }
+            note.hidden = false;
+            document.getElementById('comparing-note').hidden = true;
+            return;
+          }
+        } catch (error) {
+          // the next try may do better
+        }
+        setTimeout(waitForComparing, 2000);
+      }
+      {% if comparing %}
+      window.addEventListener('DOMContentLoaded', waitForComparing);
+      {% endif %}
+
       function nameTyped(element) {
         const row = element.closest('.person-group');
         const name = row.querySelector('input').value.trim();
@@ -79,6 +103,11 @@
       <p class="people-hint">
         {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status.running %}, still finding more{% endif %}.
       </p>
+      {% if comparing %}
+      <p id="comparing-note" class="people-hint">Comparing these groups with named faces, which can take a minute or two. Those closest to someone will then come first.</p>
+      {% elif comparing_failed %}
+      <p class="people-hint">Couldn't compare these groups with named faces. The server's log says why.</p>
+      {% endif %}
       <p id="reload-note" class="people-hint" hidden><a href="/people">Reload</a> to see names added here and the groups that changed.</p>
 
       {% if people %}
@@ -103,7 +132,7 @@
       </datalist>
 
       {% if groups %}
-      <h2>Who is this? <span>{{ "{:,}".format(group_count) }} groups of faces that look alike, largest first; a group can mix people, so open it to name only some</span></h2>
+      <h2>Who is this? <span>{{ "{:,}".format(group_count) }} groups of faces that look alike, those closest to someone named first, then largest first; a group can mix people, so open it to name only some</span></h2>
       {% include '_person_groups.html' %}
       {% elif not people %}
       <div class="no-images">No faces yet</div>

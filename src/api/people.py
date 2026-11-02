@@ -25,11 +25,10 @@ NOBODY = ''
 MIN_SCORE = people_db.MIN_SCORE
 MIN_PIXELS = people_db.MIN_PIXELS
 USABLE = f"(score >= {MIN_SCORE} AND pixels >= {MIN_PIXELS})"
-# how alike a group's faces have to be to a named person's, out of 1, to suggest that name
+# how alike a face has to be to a named one, out of 1, to count towards being that person
 SUGGEST_SIMILARITY = 0.45
-# of each person's faces to compare with: their best, as a person can have tens of thousands
-SUGGEST_FACES_PER_PERSON = 200
-SUGGEST_NEIGHBOURS = 5
+# how many of a group's best faces its row shows, and get compared with named faces
+GROUP_FACES = 8
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -54,6 +53,7 @@ _comparisons = {}
 _comparisons_lock = threading.Lock()
 DOUBTS = 'doubts'
 LIKE = 'like'
+GROUPS = 'groups'
 
 
 def _db():
@@ -297,51 +297,10 @@ def face_details(face_ids):
     ]
 
 
-def _gallery():
-    """
-    The best faces of everyone with a name, to compare a group with
-    """
-    stamp = _stamp()[1]
-    if _cache.get('gallery_stamp') != stamp:
-        rows = _db().execute(
-            f"""
-            SELECT name, embedding FROM (
-                SELECT names.name, faces.embedding, ROW_NUMBER() OVER (PARTITION BY names.name ORDER BY pixels * score DESC) AS place
-                FROM names JOIN faces ON faces.id = names.face_id
-                WHERE names.name <> ? AND {USABLE}
-            )
-            WHERE place <= ?
-            """,
-            (NOBODY, SUGGEST_FACES_PER_PERSON)
-        ).fetchall()
-        _cache.update(
-            gallery_stamp=stamp,
-            gallery_names=[row[0] for row in rows],
-            gallery=np.array([people_db.embedding_from_db(row[1]) for row in rows], dtype=np.float32).reshape(-1, people_db.EMBEDDING_SIZE)
-        )
-    return _cache['gallery_names'], _cache['gallery']
-
-
-def _suggested_name(cluster_faces):
-    """
-    Who a group's faces most look like, among faces that have a name
-    """
-    gallery_names, gallery = _gallery()
-    if not gallery_names or not cluster_faces:
-        return None
-    similar = np.array([people_db.embedding_from_db(value) for value in cluster_faces]) @ gallery.T
-    votes = Counter()
-    for row in similar:
-        for place in np.argsort(-row)[:SUGGEST_NEIGHBOURS]:
-            if row[place] >= SUGGEST_SIMILARITY:
-                votes[gallery_names[place]] += float(row[place])
-    return votes.most_common(1)[0][0] if votes else None
-
-
 def _undecided_groups():
     """
-    Groups of faces that haven't been decided on, largest first, as (group, faces, photos).  Going
-    through undecided faces only means naming some of a mixed group leaves the rest of it
+    Groups of faces that haven't been decided on, as (group, faces, photos).  Going through undecided
+    faces only means naming some of a mixed group leaves the rest of it
     """
     return _db().execute(
         f"""
@@ -349,47 +308,119 @@ def _undecided_groups():
         FROM faces
         WHERE cluster IS NOT NULL AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
         GROUP BY cluster
-        ORDER BY COUNT(*) DESC, cluster
         """
     ).fetchall()
 
 
-def _group_details(rows, preview_faces=8):
+def _group_place(closeness, faces, group):
+    # those that look like someone named come first, closest first, then the rest, largest first
+    return (-closeness, -faces, group)
+
+
+def _closeness(matches, group):
+    return matches[group][1] if group in matches else 0
+
+
+def _ordered_groups(matches):
+    return sorted(_undecided_groups(), key=lambda row: _group_place(_closeness(matches, row[0]), row[1], row[0]))
+
+
+def _group_details(rows, matches):
     db = _db()
+    known = set(known_names())
     groups = []
     for cluster, count, group_photos in rows:
         best = db.execute(
             f"""
-            SELECT id, embedding FROM faces
+            SELECT id FROM faces
             WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
             ORDER BY pixels * score DESC
             LIMIT ?
             """,
-            (cluster, preview_faces)
+            (cluster, GROUP_FACES)
         ).fetchall()
+        name = matches[cluster][0] if cluster in matches else None
         groups.append({
             'id': cluster,
             'faces': count,
             'photos': group_photos,
             'preview': [row[0] for row in best],
-            'suggested': _suggested_name([row[1] for row in best])
+            # matches can be from before a rename, and offering the old name would bring it back
+            'suggested': name if name in known else None,
+            'closeness': _closeness(matches, cluster)
         })
     return groups
 
 
-def groups_after(faces, group):
+def _compare_groups(_name):
     """
-    The next groups after one with this many faces, and whether there are more.  Going by where the
-    last one was, not by page, as naming a group takes it out from before the ones still to come
+    Who each undecided group looks like, as {group: (name, closeness)}, going by the closest faces
+    with a name in other photos of its best faces.  Closeness is the similarity of those that are
+    that person and alike enough to count, averaged over every closest face, so it's out of 1 and
+    goes up as more of them agree.  Groups that nothing named is close to aren't included.  Keeps the
+    result for the page to go on using while the next one is worked out
     """
-    rows = [row for row in _undecided_groups() if (-row[1], row[0]) > (-faces, group)]
-    return _group_details(rows[:GROUPS_PAGE]), len(rows) > GROUPS_PAGE
+    ids, who, photos, embeddings = _comparable_faces()
+    named = np.flatnonzero(who != '')
+    matches = {}
+    if len(named) > 1:
+        places = {face: place for place, face in enumerate(ids)}
+        best = [(group, places[face]) for group, face in _db().execute(
+            f"""
+            SELECT cluster, id FROM (
+                SELECT cluster, id, ROW_NUMBER() OVER (PARTITION BY cluster ORDER BY pixels * score DESC) AS place
+                FROM faces
+                WHERE cluster IS NOT NULL AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
+            )
+            WHERE place <= ?
+            """,
+            (GROUP_FACES,)
+        ) if face in places]
+        compared = Counter(group for group, _ in best)
+        votes = {}
+        for start in range(0, len(best), DOUBT_BATCH):
+            batch = best[start:start + DOUBT_BATCH]
+            closest, weights = _closest_named(np.array([place for _, place in batch]), embeddings, photos, named)
+            for row, column in zip(*np.nonzero(weights)):
+                votes.setdefault(batch[row][0], Counter())[str(who[closest[row, column]])] += float(weights[row, column])
+        for group, counted in votes.items():
+            name, weight = counted.most_common(1)[0]
+            matches[group] = (name, weight / (compared[group] * DOUBT_NEIGHBOURS))
+    _cache['group_matches'] = matches
+    return matches
+
+
+def _group_comparison():
+    """
+    Who groups look like as of the last time that finished, or None before it first has, and how
+    working out the latest is going.  Comparing with every named face can take the NAS a minute or
+    two, so the page doesn't wait.  Going by only some of each person's faces misses most of them
+    """
+    entry = _comparison(GROUPS, '', _compare_groups)
+    return _cache.get('group_matches'), entry
+
+
+def groups_after(closeness, faces, group):
+    """
+    The next groups after one this close with this many faces, and whether there are more.  Going by
+    where the last one was, not by page, as naming a group takes it out from before the ones still
+    to come
+    """
+    matches = _group_comparison()[0] or {}
+    rows = [
+        row for row in _ordered_groups(matches)
+        if _group_place(_closeness(matches, row[0]), row[1], row[0]) > _group_place(closeness, faces, group)
+    ]
+    return _group_details(rows[:GROUPS_PAGE], matches), len(rows) > GROUPS_PAGE
 
 
 def overview():
+    matches, comparison = _group_comparison()
     stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
-    if _cache.get('overview_stamp') == stamp:
-        return _cache['overview']
+    # those still comparing for the first time are the only ones with no idea who a group looks like
+    comparing = {'comparing': matches is None and comparison['working'], 'comparing_failed': comparison['failed']}
+    if _cache.get('overview_stamp') == stamp and _cache.get('overview_matches') is matches:
+        return {**_cache['overview'], **comparing}
     db = _db()
     faces, photos = db.execute(
         f'SELECT COUNT(*), COUNT(DISTINCT photo_id) FROM faces WHERE {USABLE} AND {SHOWN}'
@@ -409,7 +440,7 @@ def overview():
         """,
         (NOBODY,)
     ).fetchall()
-    undecided = _undecided_groups()
+    undecided = _ordered_groups(matches or {})
     result = {
         'faces': faces,
         'photos': photos,
@@ -418,12 +449,12 @@ def overview():
             {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
             for name, count, person_photos, _, best_face in people
         ],
-        'groups': _group_details(undecided[:GROUPS_PAGE]),
+        'groups': _group_details(undecided[:GROUPS_PAGE], matches or {}),
         'group_count': len(undecided),
         'more_groups': len(undecided) > GROUPS_PAGE
     }
-    _cache.update(overview_stamp=stamp, overview=result)
-    return result
+    _cache.update(overview_stamp=stamp, overview_matches=matches, overview=result)
+    return {**result, **comparing}
 
 
 def group_faces(group_id):
@@ -552,7 +583,7 @@ def _work_out_comparison(key, entry, work):
         try:
             entry['faces'] = work(key[1])
         except Exception:
-            logger.exception(f"Can't compare {key[1]}'s faces")
+            logger.exception(f"Can't work out {key}")
             entry['failed'] = True
         entry['working'] = False
 

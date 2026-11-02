@@ -807,13 +807,14 @@ def people_faces_page(request, title, faces, url, year=None, photos_url=None, na
 
 def more_groups_url(groups):
     # where to carry on from the last of these
-    return f"/api/people/groups?faces={groups[-1]['faces']}&after={groups[-1]['id']}"
+    last = groups[-1]
+    return f"/api/people/groups?closeness={last['closeness']}&faces={last['faces']}&after={last['id']}"
 
 
 @app.get("/api/people/groups")
-async def _more_groups(request: Request, faces: int, after: int):
+async def _more_groups(request: Request, closeness: float, faces: int, after: int):
     update_hidden_faces()
-    groups, more = people.groups_after(faces, after)
+    groups, more = people.groups_after(closeness, faces, after)
     return templates.TemplateResponse(
         request=request,
         name="_person_groups.html",

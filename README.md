@@ -66,7 +66,7 @@ python scripts/cluster_people.py people.db
 
 Copy `people.db` into the storage volume before starting the app with it.  Faces, names and covers are all kept in that file.  Faces too small or too poor to compare are kept but not offered for naming, as they're mostly blurs and the backs of heads.
 
-`/people` shows every group of faces that look alike, largest first, loading more as you scroll, with faces that look like no others at the end.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
+`/people` shows every group of faces that look alike, loading more as you scroll.  Groups that look like someone already named come first, closest first, each with that name as a suggestion.  The rest follow, largest first, with faces that look like no others at the end.  Comparing every group with every named face runs in the background and can take a minute or two, so after you name someone the order and suggestions catch up on a later reload.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
 
 Edit on a person's page renames them, or removes them, which sends their faces back to "Who is this?" and leaves the photos alone.  Using a name someone already has joins the two together.  All of these can be undone straight afterwards.
 
