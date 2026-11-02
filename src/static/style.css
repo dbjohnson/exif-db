@@ -2287,10 +2287,67 @@ a.movie-tile {
 
 /* the tab or toggle that's on, like the page's own place in the menu */
 .people-tabs a[aria-current="page"],
-.people-map-bar button[aria-pressed="true"] {
+.people-map-bar button[aria-pressed="true"],
+.people-filter button[aria-pressed="true"],
+.person-edit button[aria-pressed="true"] {
   border-color: var(--border-strong);
   background: var(--selected);
   color: var(--text-strong);
+}
+
+.people-faces-views {
+  margin: 0 var(--page-margin) 8px;
+}
+
+.people-map-section {
+  padding-bottom: 8px;
+}
+
+.people-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 20px 0 8px;
+}
+
+.people .people-head h2 {
+  margin: 0;
+}
+
+.people-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* choosing who's family: those who aren't are dimmed, and those who are get a ring */
+.people-grid.choosing-family .person-tile:not(.is-family) {
+  opacity: 0.4;
+}
+
+.people-grid.choosing-family .person-tile.is-family {
+  outline: 3px solid var(--highlight);
+  outline-offset: -3px;
+}
+
+.people-map-threshold {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.people-map-threshold output {
+  min-width: 3ch;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.people-map-threshold input {
+  width: 180px;
+  accent-color: var(--accent);
 }
 
 .people-sort .control {
@@ -2316,7 +2373,8 @@ a.movie-tile {
   margin-left: auto;
 }
 
-.people .people-map-zoom button {
+.people #map-zoom-in,
+.people #map-zoom-out {
   width: var(--control-height);
   padding: 0;
   font-size: 18px;
@@ -2324,6 +2382,33 @@ a.movie-tile {
 
 .people-map-frame {
   position: relative;
+}
+
+/* the map over the whole window, from its Full page button */
+.people-map-area.full {
+  position: fixed;
+  inset: 0;
+  /* under toasts, at 20 */
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 8px var(--page-margin) var(--page-margin);
+  background: var(--bg);
+}
+
+.people-map-area.full .people-map-frame {
+  flex: 1;
+  min-height: 0;
+}
+
+.people-map-area.full .people-map {
+  height: 100%;
+  min-height: 0;
+}
+
+body.map-full {
+  overflow: hidden;
 }
 
 .people-map-loading {
@@ -2373,6 +2458,11 @@ a.movie-tile {
   stroke-width: 3;
 }
 
+.people-map .map-dot.mine circle {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
 @media (hover: hover) {
   .people-map .map-dot:hover circle {
     stroke: var(--text-strong);
@@ -2391,7 +2481,8 @@ a.movie-tile {
 
 .people-map-tip {
   position: fixed;
-  z-index: 10;
+  /* over the map when it's full page */
+  z-index: 19;
   display: flex;
   flex-direction: column;
   gap: 2px;

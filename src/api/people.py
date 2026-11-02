@@ -215,7 +215,26 @@ def rename(old, new):
     if cover_face and not joining_with_cover:
         with _db() as db:
             db.execute('INSERT OR REPLACE INTO covers (name, face_id) VALUES (?, ?)', (new, cover_face))
+    # being family goes along too.  The old name stays marked, so undoing this brings that back
+    if old in family():
+        set_family(new, True)
     return {face_id: old for face_id in members}
+
+
+def family():
+    """
+    The names of everyone marked as family.  Removing someone leaves their mark, so that undoing it
+    brings it back, so this can include names nobody has any more
+    """
+    return {row[0] for row in _db().execute('SELECT name FROM family')}
+
+
+def set_family(name, is_family):
+    with _db() as db:
+        if is_family:
+            db.execute('INSERT OR IGNORE INTO family (name) VALUES (?)', (name,))
+        else:
+            db.execute('DELETE FROM family WHERE name = ?', (name,))
 
 
 def remove(name):
@@ -490,6 +509,13 @@ def _group_comparison():
 NOTHING_COMPARED = {'matches': {}, 'tightness': {}}
 
 
+def _covers():
+    # the covers people have chosen, as long as the face is still theirs
+    return dict(_db().execute(
+        'SELECT covers.name, covers.face_id FROM covers JOIN names ON names.face_id = covers.face_id AND names.name = covers.name'
+    ))
+
+
 def _summary():
     """
     What every view of /people goes on: how many faces and photos there are, the people, and the
@@ -498,7 +524,12 @@ def _summary():
     how working out the latest comparison is going
     """
     comparison, entry = _group_comparison()
-    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
+    db = _db()
+    stamp = (
+        _stamp(),
+        db.execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone(),
+        db.execute('SELECT GROUP_CONCAT(name, char(0)) FROM family').fetchone()
+    )
     with _summary_lock:
         summary = _cache.get('summary')
         if summary and summary['stamp'] == stamp and summary['comparison'] is comparison:
@@ -507,9 +538,8 @@ def _summary():
         faces, photos = db.execute(
             f'SELECT COUNT(*), COUNT(DISTINCT photo_id) FROM faces WHERE {USABLE} AND {SHOWN}'
         ).fetchone()
-        covers = dict(db.execute(
-            'SELECT covers.name, covers.face_id FROM covers JOIN names ON names.face_id = covers.face_id AND names.name = covers.name'
-        ))
+        covers = _covers()
+        marked = family()
         people = db.execute(
             f"""
             SELECT name, COUNT(*), COUNT(DISTINCT photo_id), MAX(pixels * score), id FROM (
@@ -531,7 +561,7 @@ def _summary():
             'photos': photos,
             'people': [
                 # SQLite gives best_face from the row with the largest value when a query has one MAX
-                {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
+                {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face), 'family': name in marked}
                 for name, count, person_photos, _, best_face in people
             ],
             'views': _views(compared)
@@ -585,14 +615,16 @@ def warm_up():
 def _map_nodes(places_by_key, ids, embeddings):
     """
     A dot for each set of faces with enough of them, placed so that those that look alike are
-    close together, as a list of {x, y, name, group, faces, tight, face}
+    close together, as a list of {x, y, name, group, faces, tight, face}, and each one's average
+    face, made 1 long
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
-        return []
+        return [], np.zeros((0, people_db.EMBEDDING_SIZE), dtype=np.float32)
     averages = np.array([embeddings[places].mean(axis=0) for _, places in kept])
     tight = np.linalg.norm(averages, axis=1)
-    spots = _spread(averages / tight[:, None])
+    centres = averages / tight[:, None]
+    spots = _spread(centres)
     return [
         {
             'x': round(float(x), 2),
@@ -604,7 +636,7 @@ def _map_nodes(places_by_key, ids, embeddings):
             'face': ids[places[0]]
         }
         for ((name, group), places), (x, y), tightness in zip(kept, spots, tight)
-    ]
+    ], centres
 
 
 def _spread(points):
@@ -644,18 +676,34 @@ def _work_out_map(_name):
         name = str(who[place])
         by_group.setdefault((name, cluster), []).append(place)
         by_person.setdefault((name, None) if name else (name, cluster), []).append(place)
-    result = {'groups': _map_nodes(by_group, ids, embeddings), 'people': _map_nodes(by_person, ids, embeddings)}
-    _cache['map'] = result
+    groups, centres = _map_nodes(by_group, ids, embeddings)
+    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings)[0]}
+    # together, so that what's near someone always goes with the map it was worked out on
+    _cache['map'] = (result, centres)
     return result
 
 
-def cluster_map():
+def cluster_map(near=None):
     """
     The last map worked out, or None before the first has been, and whether a newer one is being
-    worked out, which can take the NAS a minute or two
+    worked out, which can take the NAS a minute or two.  Each person shows with their chosen cover
+    when they're one dot.  Given a name, also how alike each dot with a dot for each group is to the
+    closest of that person's, out of 1, in 'near'
     """
     entry = _comparison(MAP, '', _work_out_map)
-    return {'working': entry['working'], 'failed': entry['failed'], 'map': _cache.get('map')}
+    result, centres = _cache.get('map') or (None, None)
+    found = {'working': entry['working'], 'failed': entry['failed'], 'map': result}
+    if result:
+        covers = _covers()
+        found['map'] = {**result, 'people': [
+            {**node, 'face': covers.get(node['name'], node['face'])} if node['name'] else node
+            for node in result['people']
+        ]}
+        if near is not None:
+            mine = [place for place, node in enumerate(result['groups']) if node['name'] == near]
+            alike = (centres @ centres[mine].T).max(axis=1) if mine else np.zeros(len(centres))
+            found['near'] = [round(float(value), 3) for value in alike]
+    return found
 
 
 def group_faces(group_id):

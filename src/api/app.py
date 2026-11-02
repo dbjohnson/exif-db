@@ -37,6 +37,8 @@ STATIC_DIR = os.path.join(APP_DIR, "static")
 TEMPLATES_DIR = os.path.join(APP_DIR, "templates")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+# for a person's Edit panel, which is on more than one page
+templates.env.globals['is_family'] = lambda name: name in people.family()
 
 
 @app.middleware("http")
@@ -847,10 +849,7 @@ class PersonCover(BaseModel):
 @app.get("/people")
 async def _people(request: Request, tab: Literal['suggested', 'groups', 'map'] = None, sort: Literal['biggest', 'tightest'] = 'biggest'):
     update_hidden_faces()
-    # suggested groups come first while there are any, as they're the quickest to name
-    if tab is None:
-        overview = people.overview(people.SUGGESTED)
-        tab = 'suggested' if overview['counts'][people.SUGGESTED] else 'groups'
+    tab = tab or 'map'
     view = {'suggested': people.SUGGESTED, 'groups': sort, 'map': people.MAP}[tab]
     overview = people.overview(view)
     return templates.TemplateResponse(
@@ -883,7 +882,7 @@ def years_newest_first(by_year):
     return years + [UNDATED_YEAR] if UNDATED_YEAR in by_year else years
 
 
-def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, comparing=None):
+def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, comparing=None, show_map=False):
     by_year = faces_by_year(faces)
     # a year whose faces have all gone by now leaves all of them
     shown_year = year if year in by_year and not comparing else None
@@ -892,13 +891,14 @@ def people_faces_page(request, title, faces, url, year=None, photos_url=None, na
     comparison = None
     if comparing == people.DOUBTS:
         comparison = people.doubtful_faces(name)
-    elif comparing == people.LIKE:
+    elif comparing == people.LIKE and not show_map:
         comparison = people.faces_like(name)
     rows = {}
     if comparison:
         rows = {face['id']: face['row'] for face in comparison['faces']}
         face_ids = list(rows)
-    details = people.face_details(face_ids[(page - 1) * people.PAGE_FACES:page * people.PAGE_FACES])
+    # the map fetches what it shows itself
+    details = [] if show_map else people.face_details(face_ids[(page - 1) * people.PAGE_FACES:page * people.PAGE_FACES])
     sections = {}
     for face in details if comparison else []:
         if comparing == people.LIKE:
@@ -933,6 +933,8 @@ def people_faces_page(request, title, faces, url, year=None, photos_url=None, na
                 for key, value in sections.items()
             ],
             "comparing": comparing,
+            "show_map": show_map,
+            "similar_url": f"{url}?similar=1",
             "working": working,
             "failed": bool(comparison and comparison['failed']),
             "total": len(faces) if working else len(face_ids),
@@ -967,9 +969,20 @@ async def _more_groups(request: Request, view: Literal['suggested', 'biggest', '
 
 
 @app.get("/api/people/map")
-async def _people_map():
+async def _people_map(near: str = None):
     update_hidden_faces()
-    return people.cluster_map()
+    return people.cluster_map(near)
+
+
+class PersonFamily(BaseModel):
+    name: str
+    family: bool
+
+
+@app.post("/api/people/family")
+async def _set_family(choice: PersonFamily):
+    people.set_family(choice.name, choice.family)
+    return "saved"
 
 
 @app.get("/people/group/{group_id}")
@@ -994,7 +1007,7 @@ async def _people_group_ids(group_id: int, year: str = None):
 
 
 @app.get("/people/{name}/faces")
-async def _person_faces(request: Request, name: str, year: str = None, page: int = 1, check: bool = False, similar: bool = False):
+async def _person_faces(request: Request, name: str, year: str = None, page: int = 1, check: bool = False, similar: bool = False, map: bool = False):
     update_hidden_faces()
     faces = people.person_faces(name)
     if not faces:
@@ -1008,7 +1021,8 @@ async def _person_faces(request: Request, name: str, year: str = None, page: int
         photos_url=f"/people/{quote(name)}",
         name=name,
         page=max(page, 1),
-        comparing=people.DOUBTS if check else people.LIKE if similar else None
+        comparing=people.DOUBTS if check else people.LIKE if similar else None,
+        show_map=similar and map
     )
 
 

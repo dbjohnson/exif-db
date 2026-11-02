@@ -1,9 +1,13 @@
 // the map on /people: a dot for each group of faces and each named person's faces, placed by the
 // server so that those that look alike are close together.  Dots are pushed apart here, as their
-// size depends on the screen
+// size depends on the screen.  On a person's "Looks like" page, the same map shows only their groups
+// and those that look enough like them
 const MAP_MERGE = 'people-map-merge';
 const SVG_NS = 'http://www.w3.org/2000/svg';
+let mapPerson = null;
 let mapResult = null;
+// on a person's page, how alike each of mapResult.groups is to the closest of theirs, out of 1
+let mapNear = null;
 let mapView = null;
 // whether someone has zoomed or moved the map since it was drawn, so a newer one shouldn't replace it
 let mapMoved = false;
@@ -32,14 +36,15 @@ function setMapLoading(text, spinning = true) {
 async function loadMap() {
   let wait = 3000;
   try {
-    const response = await fetch('/api/people/map');
+    const response = await fetch(mapPerson === null ? '/api/people/map' : `/api/people/map?near=${encodeURIComponent(mapPerson)}`);
     if (!response.ok) {
       throw new Error('Status: ' + response.status);
     }
-    const {map, working, failed} = await response.json();
+    const {map, near, working, failed} = await response.json();
     if (!mapResult) {
       if (map) {
         mapResult = map;
+        mapNear = near;
         drawMap();
       } else if (failed) {
         setMapLoading("Couldn't work out the map. The server's log says why.", false);
@@ -57,11 +62,13 @@ async function loadMap() {
         refresh.onclick = () => {
           refresh.hidden = true;
           mapResult = map;
+          mapNear = near;
           drawMap();
         };
       } else {
         setMapNote('');
         mapResult = map;
+        mapNear = near;
         drawMap();
       }
       return;
@@ -124,13 +131,38 @@ function setView(svg, view) {
   svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
 }
 
+// the dots to show: on a person's page their groups and those at least as alike as asked for
+function mapNodes() {
+  if (mapPerson === null) {
+    const merged = document.getElementById('map-merge').getAttribute('aria-pressed') === 'true';
+    return mapResult[merged ? 'people' : 'groups'];
+  }
+  const threshold = Number(document.getElementById('map-threshold').value);
+  return mapResult.groups
+    .map((node, place) => ({...node, alike: mapNear[place], mine: node.name === mapPerson}))
+    .filter(node => node.mine || node.alike >= threshold);
+}
+
+// where x or y goes across the space, spread over the dots shown, but no more than 4 times as much
+// as the whole map is, so a few dots close together stay close together
+function across(values, everything, size) {
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const range = Math.max(high - low, (Math.max(...everything) - Math.min(...everything)) / 4) || 1;
+  const middle = (low + high) / 2;
+  return value => ((value - middle) / range + 0.5) * size;
+}
+
 function drawMap() {
   const svg = document.getElementById('people-map');
   const layer = document.getElementById('map-dots');
-  const merged = document.getElementById('map-merge').getAttribute('aria-pressed') === 'true';
-  const nodes = mapResult[merged ? 'people' : 'groups'];
+  const nodes = mapNodes();
   layer.replaceChildren();
   mapMoved = false;
+  if (mapPerson !== null && !nodes.some(node => node.mine)) {
+    setMapLoading(`${mapPerson} has no group of 5 or more faces on the map yet`, false);
+    return;
+  }
   if (!nodes.length) {
     setMapLoading('No groups big enough to show yet', false);
     return;
@@ -139,13 +171,12 @@ function drawMap() {
   const width = svg.clientWidth;
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
-  const xs = nodes.map(node => node.x);
-  const ys = nodes.map(node => node.y);
-  const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const toX = across(nodes.map(node => node.x), mapResult.groups.map(node => node.x), width);
+  const toY = across(nodes.map(node => node.y), mapResult.groups.map(node => node.y), height);
   const dots = nodes.map(node => ({
     ...node,
-    cx: (node.x - left) / (right - left || 1) * width,
-    cy: (node.y - top) / (bottom - top || 1) * height,
+    cx: toX(node.x),
+    cy: toY(node.y),
     r: dotRadius(node.faces, scale)
   }));
   separate(dots);
@@ -156,7 +187,7 @@ function drawMap() {
   dots.sort((a, b) => b.faces - a.faces).forEach(dot => {
     const link = svgElement('a', {
       href: dot.name ? `/people/${encodeURIComponent(dot.name)}` : `/people/group/${dot.group}`,
-      class: dot.name ? 'map-dot named' : 'map-dot'
+      class: dot.mine ? 'map-dot mine' : dot.name ? 'map-dot named' : 'map-dot'
     });
     link.append(
       svgElement('image', {
@@ -212,6 +243,11 @@ function showMapTip(event, dot) {
   const count = `${dot.faces.toLocaleString()} face${dot.faces === 1 ? '' : 's'}`;
   faces.textContent = dot.name && dot.group !== null ? `${count} in this group` : count;
   tip.replaceChildren(image, name, faces);
+  if (dot.alike !== undefined && !dot.mine) {
+    const alike = document.createElement('span');
+    alike.textContent = `${Math.round(dot.alike * 100)}% like ${mapPerson}`;
+    tip.append(alike);
+  }
   tip.hidden = false;
   moveMapTip(event);
 }
@@ -321,16 +357,49 @@ window.addEventListener('DOMContentLoaded', () => {
   if (!svg) {
     return;
   }
+  mapPerson = svg.dataset.person ?? null;
   const merge = document.getElementById('map-merge');
-  merge.setAttribute('aria-pressed', localStorage.getItem(MAP_MERGE) === '1' ? 'true' : 'false');
-  merge.addEventListener('click', () => {
-    const merged = merge.getAttribute('aria-pressed') !== 'true';
-    merge.setAttribute('aria-pressed', merged ? 'true' : 'false');
-    localStorage.setItem(MAP_MERGE, merged ? '1' : '0');
+  if (merge) {
+    // one dot per person unless someone has asked otherwise
+    merge.setAttribute('aria-pressed', localStorage.getItem(MAP_MERGE) === '0' ? 'false' : 'true');
+    merge.addEventListener('click', () => {
+      const merged = merge.getAttribute('aria-pressed') !== 'true';
+      merge.setAttribute('aria-pressed', merged ? 'true' : 'false');
+      localStorage.setItem(MAP_MERGE, merged ? '1' : '0');
+      if (mapResult) {
+        drawMap();
+      }
+    });
+  }
+  // the map over the whole window, and back.  Not the browser's own full screen, which iPhones only
+  // allow for videos
+  const full = document.getElementById('map-full');
+  const area = document.getElementById('map-area');
+  const setFull = on => {
+    area.classList.toggle('full', on);
+    document.body.classList.toggle('map-full', on);
+    full.setAttribute('aria-pressed', on ? 'true' : 'false');
+    full.textContent = on ? 'Exit full page' : 'Full page';
+    hideMapTip();
     if (mapResult) {
       drawMap();
     }
+  };
+  full.addEventListener('click', () => setFull(!area.classList.contains('full')));
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && area.classList.contains('full')) {
+      setFull(false);
+    }
   });
+  const threshold = document.getElementById('map-threshold');
+  if (threshold) {
+    let drawing = null;
+    threshold.addEventListener('input', () => {
+      document.getElementById('map-threshold-value').textContent = `${Math.round(threshold.value * 100)}%`;
+      cancelAnimationFrame(drawing);
+      drawing = requestAnimationFrame(() => mapResult && drawMap());
+    });
+  }
   watchMapGestures(svg);
   let resizing = null;
   window.addEventListener('resize', () => {

@@ -43,6 +43,22 @@ async function removePerson(button, name) {
   }
 }
 
+// marking someone as family, or not, from their Edit panel or from People
+async function setFamily(name, family) {
+  await postJson('/api/people/family', {name, family});
+}
+
+async function toggleFamily(button, name) {
+  const family = button.getAttribute('aria-pressed') !== 'true';
+  try {
+    await setFamily(name, family);
+    button.setAttribute('aria-pressed', family ? 'true' : 'false');
+    showToast(family ? `${name} is family` : `${name} isn't family`);
+  } catch (error) {
+    showToast(`Couldn't save: ${error.message}`);
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   const pending = sessionStorage.getItem(PEOPLE_UNDO);
   if (!pending) {

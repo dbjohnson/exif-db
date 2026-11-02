@@ -67,6 +67,63 @@
 
       window.addEventListener('DOMContentLoaded', watchForMoreGroups);
 
+      // People shows only family once there is some, unless someone asks for everyone.  Choosing who's
+      // family shows everyone, and clicking a person marks or unmarks them instead of opening them
+      const PEOPLE_SHOWN = 'people-shown';
+      let choosingFamily = false;
+
+      function showPeople() {
+        const grid = document.getElementById('people-grid');
+        if (!grid) {
+          return;
+        }
+        const tiles = [...grid.querySelectorAll('.person-tile')];
+        const anyFamily = tiles.some(tile => tile.classList.contains('is-family'));
+        const shown = anyFamily && localStorage.getItem(PEOPLE_SHOWN) !== 'everyone' ? 'family' : 'everyone';
+        document.querySelectorAll('.people-filter [data-show]').forEach(button => {
+          button.hidden = !anyFamily || choosingFamily;
+          button.setAttribute('aria-pressed', button.dataset.show === shown ? 'true' : 'false');
+        });
+        tiles.forEach(tile => {
+          tile.hidden = !choosingFamily && shown === 'family' && !tile.classList.contains('is-family');
+        });
+        grid.classList.toggle('choosing-family', choosingFamily);
+        document.getElementById('choose-family-hint').hidden = !choosingFamily;
+        const choose = document.getElementById('choose-family');
+        choose.textContent = choosingFamily ? 'Done' : 'Choose family';
+        choose.setAttribute('aria-pressed', choosingFamily ? 'true' : 'false');
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        const grid = document.getElementById('people-grid');
+        if (!grid) {
+          return;
+        }
+        document.querySelectorAll('.people-filter [data-show]').forEach(button => button.addEventListener('click', () => {
+          localStorage.setItem(PEOPLE_SHOWN, button.dataset.show);
+          showPeople();
+        }));
+        document.getElementById('choose-family').addEventListener('click', () => {
+          choosingFamily = !choosingFamily;
+          showPeople();
+        });
+        grid.addEventListener('click', async event => {
+          const tile = event.target.closest('.person-tile');
+          if (!choosingFamily || !tile) {
+            return;
+          }
+          event.preventDefault();
+          const family = !tile.classList.contains('is-family');
+          try {
+            await setFamily(tile.dataset.name, family);
+            tile.classList.toggle('is-family', family);
+          } catch (error) {
+            showToast(`Couldn't save: ${error.message}`);
+          }
+        });
+        showPeople();
+      });
+
       // comparing groups with named faces goes on in the background.  Reloading would lose a name
       // being typed and where someone had got to, so if they've started they get the note instead
       async function waitForComparing() {
@@ -114,10 +171,18 @@
       <p id="reload-note" class="people-hint" hidden><a href="/people?{{ request.url.query }}#who">Reload</a> to see names added here and the groups that changed.</p>
 
       {% if people %}
-      <h2>People</h2>
-      <div class="people-grid">
+      <div class="people-head">
+        <h2>People</h2>
+        <span class="people-filter">
+          <button type="button" data-show="family" aria-pressed="false" hidden>Family</button>
+          <button type="button" data-show="everyone" aria-pressed="false" hidden>Everyone</button>
+          <button type="button" id="choose-family">Choose family</button>
+        </span>
+      </div>
+      <p id="choose-family-hint" class="people-hint" hidden>Click people to mark them as family, or click again to unmark them. Showing only family leaves everyone else out of this list.</p>
+      <div id="people-grid" class="people-grid">
         {% for person in people %}
-        <a class="person-tile month-tile" href="/people/{{ person.name | urlencode }}">
+        <a class="person-tile month-tile{{ ' is-family' if person.family }}" href="/people/{{ person.name | urlencode }}" data-name="{{ person.name }}">
           <img src="/api/face/{{ person.cover }}" loading="lazy" decoding="async" alt="" />
           <span class="month-label">
             <span>{{ person.name }}</span>
@@ -137,9 +202,9 @@
       {% if counts.suggested or counts.biggest or people %}
       <h2 id="who">Who is this?</h2>
       <nav class="people-tabs" aria-label="Who is this?">
+        <a class="control" href="/people?tab=map#who"{% if tab == 'map' %} aria-current="page"{% endif %}>Map</a>
         <a class="control" href="/people?tab=suggested#who"{% if tab == 'suggested' %} aria-current="page"{% endif %}>Suggested <span>{{ "{:,}".format(counts.suggested) }}</span></a>
         <a class="control" href="/people?tab=groups&amp;sort={{ sort }}#who"{% if tab == 'groups' %} aria-current="page"{% endif %}>Groups <span>{{ "{:,}".format(counts.biggest) }}</span></a>
-        <a class="control" href="/people?tab=map#who"{% if tab == 'map' %} aria-current="page"{% endif %}>Map</a>
       </nav>
       {% if tab == 'suggested' %}
       <p class="people-hint">Groups of faces that look like someone already named, closest first. A group can mix people, so open it to name only some.</p>
@@ -157,23 +222,26 @@
       </p>
       {% endif %}
       {% if tab == 'map' %}
-      <div class="people-map-bar">
-        <button type="button" id="map-merge" aria-pressed="false">One dot per person</button>
-        <span id="map-note" class="people-hint" hidden></span>
-        <button type="button" id="map-refresh" hidden>Show the updated map</button>
-        <span class="people-map-zoom">
-          <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
-          <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
-        </span>
-      </div>
-      <div class="people-map-frame">
-        <svg id="people-map" class="people-map" role="img" aria-label="Groups of faces placed by how alike they are">
-          <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
-          <g id="map-dots"></g>
-        </svg>
-        <div id="map-loading" class="people-map-loading">
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="map-loading-text">Loading the map</span>
+      <div id="map-area" class="people-map-area">
+        <div class="people-map-bar">
+          <button type="button" id="map-merge" aria-pressed="false">One dot per person</button>
+          <span id="map-note" class="people-hint" hidden></span>
+          <button type="button" id="map-refresh" hidden>Show the updated map</button>
+          <span class="people-map-zoom">
+            <button type="button" id="map-full" aria-pressed="false">Full page</button>
+            <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+          </span>
+        </div>
+        <div class="people-map-frame">
+          <svg id="people-map" class="people-map" role="img" aria-label="Groups of faces placed by how alike they are">
+            <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
+            <g id="map-dots"></g>
+          </svg>
+          <div id="map-loading" class="people-map-loading">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="map-loading-text">Loading the map</span>
+          </div>
         </div>
       </div>
       <div id="map-tip" class="people-map-tip" hidden></div>

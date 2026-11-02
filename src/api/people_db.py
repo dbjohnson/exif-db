@@ -70,6 +70,8 @@ SCHEMA = """
     -- unnamed faces someone has said aren't this person, though they look like them
     CREATE TABLE IF NOT EXISTS not_person (face_id TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (face_id, name));
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    -- people marked as family, so /people can show only them and leave friends out
+    CREATE TABLE IF NOT EXISTS family (name TEXT PRIMARY KEY);
     -- photos not to show faces from, as hidden and deleted ones are only known to the main index
     CREATE TABLE IF NOT EXISTS hidden_photos (photo_id BLOB PRIMARY KEY);
     -- dogs and cats found in photos, as fractions of the copy looked at, described by DINOv2.  Cats

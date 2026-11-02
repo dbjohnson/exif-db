@@ -7,6 +7,7 @@
     <script src="/static/toast.js"></script>
     <script src="/static/faces.js"></script>
     {% if name %}<script src="/static/people.js"></script>{% endif %}
+    {% if show_map %}<script src="/static/people_map.js"></script>{% endif %}
     <script>
       // a page of faces that all get a name, or just the ones picked out
       const CURRENT_NAME = {{ name | tojson }};
@@ -279,7 +280,43 @@
       {% endfor %}
     </nav>
     {% endif %}
-    {% if working %}
+    {% if comparing == 'like' %}
+    <nav class="people-tabs people-sort people-faces-views" aria-label="Show as">
+      <a class="control" href="{{ similar_url }}"{% if not show_map %} aria-current="page"{% endif %}>List of faces</a>
+      <a class="control" href="{{ similar_url }}&amp;map=1"{% if show_map %} aria-current="page"{% endif %}>Map of groups</a>
+    </nav>
+    {% endif %}
+    {% if show_map %}
+    <div class="people people-map-section">
+      <p class="people-hint">{{ name }}'s groups, with a blue ring, and the groups that look most like the closest of them. Gold rings are other people. Click a group to open it.</p>
+      <div id="map-area" class="people-map-area">
+        <div class="people-map-bar">
+          <label class="people-map-threshold">
+            At least <output id="map-threshold-value">30%</output> alike
+            <input id="map-threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.3" />
+          </label>
+          <span id="map-note" class="people-hint" hidden></span>
+          <button type="button" id="map-refresh" hidden>Show the updated map</button>
+          <span class="people-map-zoom">
+            <button type="button" id="map-full" aria-pressed="false">Full page</button>
+            <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+          </span>
+        </div>
+        <div class="people-map-frame">
+          <svg id="people-map" class="people-map" data-person="{{ name }}" role="img" aria-label="{{ name }}'s groups and those that look like them">
+            <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
+            <g id="map-dots"></g>
+          </svg>
+          <div id="map-loading" class="people-map-loading">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="map-loading-text">Loading the map</span>
+          </div>
+        </div>
+      </div>
+      <div id="map-tip" class="people-map-tip" hidden></div>
+    </div>
+    {% elif working %}
     <p class="library-hint"><span class="spinner" aria-hidden="true"></span> Comparing with everyone else's faces. A person with thousands of faces can take a minute or two.</p>
     {% elif failed %}
     <p class="library-hint">Couldn't compare these faces. The server's log says why.</p>
@@ -321,7 +358,7 @@
       <option value="{{ known }}"></option>
       {% endfor %}
     </datalist>
-    <div class="select-bar"{% if working or failed %} style="display: none"{% endif %}>
+    <div class="select-bar"{% if working or failed or show_map %} style="display: none"{% endif %}>
       <span id="select-count"></span>
       <label>
         Name
