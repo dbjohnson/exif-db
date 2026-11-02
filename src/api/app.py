@@ -47,6 +47,10 @@ IMAGE_CACHE_HEADERS = {'Cache-Control': 'private, max-age=86400'}
 Rotation = Literal[0, 90, 180, 270]
 # how many photos from other dates fill in a frame with too few from around today
 KIOSK_STAND_INS = 200
+# how many days before today count as recent.  The kiosk shows photos from then without waiting
+# for them to be approved, up to a limit for the odd day with hundreds of photos
+KIOSK_RECENT_DAYS = 3
+KIOSK_RECENT_PHOTOS = 200
 # how often to see whether a scan has finished, leaving photos to check for faces
 SCAN_RESULT_POLL_SECS = 60
 
@@ -120,10 +124,22 @@ def date_filter(date, all_years):
     return f"{date.year:04d}:{date.month:02d}:{date.day:02d} "
 
 
-def review_url(date, all_years, status='unreviewed', kiosk=None):
+def recent_range(days):
+    # today and the days before it, as exif.RECENT_FILTER takes them
+    if not days:
+        return None
+    today = datetime.date.today()
+    first = today - datetime.timedelta(days=days)
+    after = today + datetime.timedelta(days=1)
+    return first.strftime('%Y:%m:%d'), after.strftime('%Y:%m:%d')
+
+
+def review_url(date, all_years, status='unreviewed', kiosk=None, recent_days=0):
     params = {'status': status}
     if date:
         params.update(date=date.isoformat(), all_years=str(all_years).lower())
+    if recent_days:
+        params['recent_days'] = recent_days
     # the kiosk's own query string, so that reviewing can return to the same slideshow
     if kiosk is not None:
         params['kiosk'] = kiosk
@@ -374,9 +390,15 @@ async def _review_page(
     all_years: bool = True,
     status: ReviewStatus = 'unreviewed',
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=24, ge=1, le=200)
+    limit: int = Query(default=24, ge=1, le=200),
+    recent_days: int = Query(default=0, ge=0, le=31)
 ):
-    return exif.review_page(date_filter(date, all_years), status, offset, limit)
+    return exif.review_page(date_filter(date, all_years), status, offset, limit, recent_range(recent_days))
+
+
+def kiosk_to_review(date):
+    # the same photos the kiosk's link to the review queue goes through
+    return exif.review_counts(date_filter(date, True), recent_range(KIOSK_RECENT_DAYS))[exif.UNREVIEWED]
 
 
 @app.get("/api/review/today")
@@ -384,7 +406,7 @@ async def _review_today():
     date = datetime.date.today()
     return {
         'date': date.isoformat(),
-        'unreviewed': exif.review_counts(date_filter(date, True))[exif.UNREVIEWED],
+        'unreviewed': kiosk_to_review(date),
         'photos': exif.photos_version(),
         'build': PAGE_BUILD
     }
@@ -407,13 +429,16 @@ async def _review(
     date: datetime.date = None,
     all_years: bool = True,
     status: ReviewStatus = 'unreviewed',
-    kiosk: str = None
+    kiosk: str = None,
+    recent_days: int = Query(default=0, ge=0, le=31)
 ):
     if date is None:
         scope = "All dates"
         done_url = "/library" if status == 'unreviewed' else "/manage"
     else:
         scope = f"{date:%B} {date.day}" + ("" if all_years else f", {date.year}")
+        if recent_days:
+            scope += f" and the past {recent_days} days"
         done_url = "/onthisday?" + urlencode({
             'year': date.year,
             'month': date.month,
@@ -433,7 +458,8 @@ async def _review(
             "query": {
                 'status': status,
                 'all_years': all_years,
-                **({'date': date.isoformat()} if date else {})
+                **({'date': date.isoformat()} if date else {}),
+                **({'recent_days': recent_days} if recent_days else {})
             }
         }
     )
@@ -1265,18 +1291,21 @@ async def _show_duplicates(shown: DuplicatesShown):
     return "saved"
 
 
-def slides(df):
+def slides(df, bursts=None):
     return df.assign(
         date=df['DateTimeOriginal'].map(
             lambda d: d.split(' ')[0].replace(':', '/')
-        )
+        ),
+        burst=df['photo_id'].map(lambda photo_id: (bursts or {}).get(photo_id, []))
     )[[
-        'SourceFile', 'date', 'photo_id', 'favorite', 'rotation'
+        'SourceFile', 'date', 'photo_id', 'favorite', 'rotation', 'review_status', 'burst'
     ]].to_dict(orient='records')
 
 
 def kiosk_photos(min_pics):
     date = datetime.date.today()
+    recent = slides(*exif.recent_photos(recent_range(KIOSK_RECENT_DAYS), KIOSK_RECENT_PHOTOS))
+    recent_ids = {pic['photo_id'] for pic in recent}
     pics = []
     offs = 0
     # search up to +/- 10 days for images until we get to the minimum
@@ -1291,11 +1320,13 @@ def kiosk_photos(min_pics):
     # a frame should always have something to show
     if len(pics) < min_pics:
         pics.extend(slides(exif.stand_in_photos(
-            [pic['photo_id'] for pic in pics],
+            [*recent_ids, *(pic['photo_id'] for pic in pics)],
             KIOSK_STAND_INS,
             date.isoformat()
         )))
-    return pics
+    others = (pic for pic in pics if pic['photo_id'] not in recent_ids)
+    # taking turns, so that neither has to wait for the other, which can be a long list, to finish
+    return [pic for pic in itertools.chain(*itertools.zip_longest(recent, others)) if pic]
 
 
 @app.get("/api/kiosk/photos")
@@ -1312,9 +1343,9 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
         context={
             "refresh_secs": refresh_secs,
             "min_pics": min_pics,
-            "review_url": review_url(date, True, kiosk=request.url.query),
+            "review_url": review_url(date, True, kiosk=request.url.query, recent_days=KIOSK_RECENT_DAYS),
             "today": date.isoformat(),
-            "to_review": exif.review_counts(date_filter(date, True))[exif.UNREVIEWED],
+            "to_review": kiosk_to_review(date),
             "photos_version": exif.photos_version(),
             "build": PAGE_BUILD,
             "images": kiosk_photos(min_pics)

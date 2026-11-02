@@ -46,6 +46,8 @@ BURST_MAX_DIFFERENCE = 20
 NO_DATE = '0000:00:00 00:00:00'
 # cameras with unset clocks give dates like 1901:01:01, which shouldn't appear as years of photos
 LIBRARY_EARLIEST_YEAR = 1902
+# photos in a range of days, given as the first day and the day after the last, each "YYYY:MM:DD"
+RECENT_FILTER = "DateTimeOriginal >= ? AND DateTimeOriginal < ?"
 # a photo's "YYYY:MM" in the library, or NULL if its date can't be trusted
 LIBRARY_MONTH = f"""
     CASE WHEN regexp_matches(DateTimeOriginal, '^\\d{{4}}:(0[1-9]|1[0-2]):')
@@ -220,7 +222,8 @@ def photos_version():
     """
     Changes whenever the photos to show might have, so that a page can tell without fetching them
     """
-    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, DATES_CSV, DELETIONS_CSV)
+    # fingerprints decide which recent photos count as one burst
+    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, DATES_CSV, DELETIONS_CSV, FINGERPRINTS_CSV)
     stats = [os.stat(path) if os.path.exists(path) else None for path in files]
     return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
 
@@ -329,6 +332,30 @@ def stand_in_photos(exclude, limit, seed):
     ).df()
 
 
+def recent_photos(recent, limit):
+    """
+    Photos taken in a recent range, newest first, without waiting for a review: those approved, and
+    of the unreviewed ones, those the review queue starts out checked.  Also returns the rest of
+    each one's burst, by photo id, since reviewing a burst's photo decides those as well
+    """
+    tiles = _review_queue_page(RECENT_FILTER, list(recent), 0, limit)['items']
+    bursts = {
+        tile['id']: [other['id'] for other in tile['burst']]
+        for tile in tiles
+        if not tile['no_camera']
+    }
+    photos = db.execute(
+        f"""
+        SELECT * FROM {_with_status()}
+        WHERE {RECENT_FILTER} AND (review_status = ? OR list_contains(?::VARCHAR[], photo_id))
+        ORDER BY DateTimeOriginal DESC, photo_id
+        LIMIT ?
+        """,
+        [*recent, APPROVED, list(bursts), limit]
+    ).df()
+    return photos, bursts
+
+
 def select_photos(datestring='', status=APPROVED):
     return db.execute(
         f"""
@@ -339,14 +366,24 @@ def select_photos(datestring='', status=APPROVED):
     ).df()
 
 
-def review_counts(datestring=''):
+def _taken_filter(datestring, recent=None):
+    # SQL and its parameters for photos on a date and, if there's one, in a recent range
+    where = "DateTimeOriginal LIKE ?"
+    params = [f"{datestring}%"]
+    if recent:
+        return f"({where} OR ({RECENT_FILTER}))", [*params, *recent]
+    return where, params
+
+
+def review_counts(datestring='', recent=None):
+    where, params = _taken_filter(datestring, recent)
     rows = db.execute(
         f"""
         SELECT review_status, COUNT(*) FROM {_with_status()}
-        WHERE DateTimeOriginal LIKE ?
+        WHERE {where}
         GROUP BY review_status
         """,
-        [f"{datestring}%"]
+        params
     ).fetchall()
     return {APPROVED: 0, REJECTED: 0, UNREVIEWED: 0, **dict(rows)}
 
@@ -598,14 +635,15 @@ def _review_item(photo_id, path, taken, review_status, rotation, no_camera=False
     }
 
 
-def review_page(datestring, status, offset, limit):
+def review_page(datestring, status, offset, limit, recent=None):
+    where, params = _taken_filter(datestring, recent)
     if status == UNREVIEWED:
-        return _review_queue_page(datestring, offset, limit)
+        return _review_queue_page(where, params, offset, limit)
     table = _with_status()
     statuses = [APPROVED, REJECTED] if status == REVIEWED else [status]
-    filters = [f"{datestring}%", statuses]
+    filters = [*params, statuses]
     total = db.execute(
-        f"SELECT COUNT(*) FROM {table} WHERE DateTimeOriginal LIKE ? AND list_contains(?, review_status)",
+        f"SELECT COUNT(*) FROM {table} WHERE {where} AND list_contains(?, review_status)",
         filters
     ).fetchone()[0]
     # reviewing shrinks the queue, which can leave the offset past its end
@@ -613,7 +651,7 @@ def review_page(datestring, status, offset, limit):
     rows = db.execute(
         f"""
         SELECT photo_id, SourceFile, DateTimeOriginal, review_status, rotation FROM {table}
-        WHERE DateTimeOriginal LIKE ? AND list_contains(?, review_status)
+        WHERE {where} AND list_contains(?, review_status)
         ORDER BY DateTimeOriginal DESC, photo_id
         LIMIT ? OFFSET ?
         """,
@@ -627,7 +665,7 @@ def review_page(datestring, status, offset, limit):
     }
 
 
-def _review_queue_page(datestring, offset, limit):
+def _review_queue_page(where, params, offset, limit):
     """
     A page of the queue, which counts bursts of photos as one tile each.  Each tile's item is
     the middle photo of its burst, with the others listed in its 'burst'
@@ -643,7 +681,7 @@ def _review_queue_page(datestring, offset, limit):
                 TRY_CAST('0x' || LEFT(fingerprints.value, 16) AS UBIGINT) AS fingerprint
             FROM {table} AS photos
             LEFT JOIN fingerprints ON fingerprints.photo_id = SourceFile
-            WHERE DateTimeOriginal LIKE ? AND review_status = '{UNREVIEWED}'
+            WHERE {where} AND review_status = '{UNREVIEWED}'
         ), bursts AS (
             -- with no camera, time or fingerprint to go on, a photo is on its own
             SELECT *, SUM((
@@ -688,7 +726,7 @@ def _review_queue_page(datestring, offset, limit):
             WHERE tile > ? AND tile <= ?
             ORDER BY tile, position DESC
             """,
-            [f"{datestring}%", start, start + limit]
+            [*params, start, start + limit]
         ).fetchall()
 
     rows = fetch(offset)
@@ -697,7 +735,7 @@ def _review_queue_page(datestring, offset, limit):
     else:
         total, photos = db.execute(
             f"{tiles} SELECT COALESCE(MAX(tile), 0), COUNT(*) FROM numbered",
-            [f"{datestring}%"]
+            params
         ).fetchone()
     # reviewing shrinks the queue, which can leave the offset past its end
     fitted = min(offset, max(total - limit, 0))

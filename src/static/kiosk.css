@@ -71,7 +71,8 @@ button {
   text-decoration: none;
 }
 
-.to-review[hidden] {
+.to-review[hidden],
+#approve[hidden] {
   display: none;
 }
 

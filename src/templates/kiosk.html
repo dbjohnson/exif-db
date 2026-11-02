@@ -112,6 +112,7 @@
         try {
           await request();
           returnToShow(image);
+          refreshStatus();
         } catch (error) {
           console.log(error);
           showToast(`Couldn't undo: ${error.message}`);
@@ -162,22 +163,57 @@
         scheduleNext();
       }
 
+      // the rest of a burst goes with its photo, or the next of them would take its place.  It only
+      // has any while unreviewed, so undoing puts them all back to the photo's own status
       async function hideImage() {
         const image = shown;
         if (!image) {
           return;
         }
+        const decided = [image.photo_id, ...image.burst];
+        const status = image.review_status;
         try {
-          await postJson('/api/review', {rejected: [image.photo_id]});
+          await postJson('/api/review', {rejected: decided});
           removeFromShow(image);
-          showToast('Photo hidden', () => undo(
-            () => postJson('/api/review', {approved: [image.photo_id]}),
+          showToast(decided.length > 1 ? `Burst of ${decided.length} hidden` : 'Photo hidden', () => undo(
+            () => postJson('/api/review', {[status]: decided}),
             image
           ));
+          refreshStatus();
         } catch (error) {
           console.log(error);
           showToast(`Couldn't hide: ${error.message}`);
         }
+      }
+
+      // decides a burst as the review queue does: this photo stays, and the rest are hidden
+      async function approveImage(image = shown) {
+        if (!image) {
+          return;
+        }
+        const others = image.burst;
+        try {
+          await postJson('/api/review', {approved: [image.photo_id], rejected: others});
+          Object.assign(image, {review_status: 'approved', burst: []});
+          if (image === shown) {
+            renderApproval();
+          }
+          showToast(others.length ? `Approved, and ${others.length} more of the burst hidden` : 'Photo approved', () => undo(
+            async () => {
+              await postJson('/api/review', {unreviewed: [image.photo_id, ...others]});
+              Object.assign(image, {review_status: 'unreviewed', burst: others});
+            },
+            image
+          ));
+          refreshStatus();
+        } catch (error) {
+          console.log(error);
+          showToast(`Couldn't approve: ${error.message}`);
+        }
+      }
+
+      function renderApproval() {
+        document.getElementById('approve').hidden = shown.review_status !== 'unreviewed';
       }
 
       function renderFavorite() {
@@ -204,6 +240,10 @@
           image.favorite = favorite;
           if (image === shown) {
             renderFavorite();
+          }
+          // a favorite would otherwise leave the frame once it's no longer recent
+          if (favorite && image.review_status === 'unreviewed') {
+            approveImage(image);
           }
         })
         .catch((error) => {
@@ -236,6 +276,7 @@
         currentIndex = position;
         if (shown) {
           renderFavorite();
+          renderApproval();
         }
         keepPreloaded();
       }
@@ -412,6 +453,7 @@
             shown = image;
             disarmDelete();
             renderFavorite();
+            renderApproval();
           }, 200)
         }, () => {
           // try it again next time around
@@ -447,8 +489,8 @@
   <body style="background-color:#000">
     {% if not images %}
     <div class="no-images">
-      <p>No approved photos yet</p>
-      <a href="{{ review_url }}">Review today's photos</a>
+      <p>No photos to show yet</p>
+      <a href="{{ review_url }}">Review photos</a>
     </div>
     {% else %}
     <div class="image-container">
@@ -460,6 +502,14 @@
         <span id="date"></span>
         <a id="to-review" class="to-review" href="{{ review_url }}"{% if not to_review %} hidden{% endif %}>{{ '{:,}'.format(to_review) }} to review</a>
         <span class="controls">
+        <button
+          id="approve"
+          onclick="approveImage()"
+          title="Approve"
+          hidden
+        >
+          <i class="fa fa-check fa-2x" aria-hidden="true"></i>
+        </button>
         <button
           id="favorite"
           class="favorite-toggle"
@@ -477,7 +527,7 @@
         </button>
         <button
           onclick="hideImage()"
-          title="Hide (remove approval)"
+          title="Hide"
         >
           <i class="fa fa-eye-slash fa-2x" aria-hidden="true"></i>
         </button>

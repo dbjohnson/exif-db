@@ -27,7 +27,7 @@ docker compose up -d
 
 ## Reviewing photos
 
-Only approved photos appear in the gallery and kiosk.  New photos start unreviewed: a date with some shows a link to review them, and `/manage` links to everything awaiting review.  Photos left unchecked in the review grid are hidden, not deleted.  Each date also links to an editor for changing the approvals already made there, and approvals can be reset to unreviewed for a date or, from `/manage`, for the whole library.
+Only approved photos appear in the gallery.  The kiosk shows them too, along with recent photos that haven't been reviewed yet (see [The kiosk](#the-kiosk)).  New photos start unreviewed: a date with some shows a link to review them, and `/manage` links to everything awaiting review.  Photos left unchecked in the review grid are hidden, not deleted.  Each date also links to an editor for changing the approvals already made there, and approvals can be reset to unreviewed for a date or, from `/manage`, for the whole library.
 
 The review queue shows photos taken within 5 seconds of each other on one camera as a single tile (up to 12) if each one also looks like the one before it, with a button to open it up.  Only that tile's photo starts checked.  How alike they look comes from the duplicate check's fingerprints, so a new photo has its own tile until that check has run.  Photos with no camera make or model, like screenshots, also start unchecked.
 
@@ -111,6 +111,10 @@ After a scan changes the index, the server looks for photos that are copies of e
 Each photo's fingerprint comes from its thumbnail, and only photos with similar fingerprints get compared, by lining them up and comparing them block by block.  Results are kept in `duplicate_fingerprints.csv` and `duplicate_pairs.csv` in the storage volume, so later checks only do what's new.  What's been dealt with is in `duplicates.csv`.  The first check takes a little over an hour per 60,000 photos on a Celeron J4125.
 
 ## The kiosk
+
+`/kiosk` shows approved photos from around today's date in any year, taking turns with photos from today and the 3 days before it.  A recent photo doesn't need approving first: it shows unless it's hidden, and of the unreviewed ones the frame shows what the review queue would start checked, so one photo from each burst and no screenshots.  An unreviewed photo leaves the frame once it's no longer recent, unless someone approves or favorites it.
+
+The photo's controls have an approve button while it's unreviewed.  Approving or hiding decides the rest of its burst the way the review queue does, and both can be undone.  The "to review" link counts unreviewed photos from today's date in any year and from the recent days, including the screenshots and burst photos the frame leaves out.  It opens a review queue of those same photos, which goes back to the slideshow when they've all been decided.
 
 `/kiosk` is meant to run unattended for days.  It keeps showing photos through server outages and picks up again by itself, updates when photos change or a new version is deployed, and reloads at midnight.  Once it has loaded over HTTPS, a service worker turns any failed page load in that browser into a screen that keeps retrying, including after a restart where the frame comes up before the server does.
 
