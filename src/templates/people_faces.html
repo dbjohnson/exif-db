@@ -292,8 +292,12 @@
       <div id="map-area" class="people-map-area">
         <div class="people-map-bar">
           <label class="people-map-threshold">
-            At least <output id="map-threshold-value">30%</output> alike
+            <span>At least <output id="map-threshold-value">30%</output> alike</span>
             <input id="map-threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.3" />
+          </label>
+          <label class="people-map-threshold">
+            <span>Unnamed groups of <output id="map-size-value">5</output>+ faces</span>
+            <input id="map-size" type="range" min="0" max="9" step="1" value="0" />
           </label>
           <span id="map-layout" class="people-map-layout" role="group" aria-label="Layout" hidden>
             <button type="button" data-layout="alike" aria-pressed="true" title="Groups near those they look like">Look-alikes</button>

@@ -225,6 +225,10 @@
       <div id="map-area" class="people-map-area">
         <div class="people-map-bar">
           <button type="button" id="map-merge" aria-pressed="false">One dot per person</button>
+          <label class="people-map-threshold">
+            <span>Unnamed groups of <output id="map-size-value">5</output>+ faces</span>
+            <input id="map-size" type="range" min="0" max="9" step="1" value="0" />
+          </label>
           <span id="map-layout" class="people-map-layout" role="group" aria-label="Layout" hidden>
             <button type="button" data-layout="alike" aria-pressed="true" title="Groups near those they look like">Look-alikes</button>
             <button type="button" data-layout="axes" aria-pressed="false" title="Groups along two directions that tell named people apart">Axes</button>

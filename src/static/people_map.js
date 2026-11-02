@@ -10,6 +10,14 @@ const MAP_LAYOUT = 'people-map-layout';
 // over half of the groups have nothing at 40% or more, so their 5 most alike were strangers, which
 // Look-alikes had no reason to put nearby.  Those that are this alike were almost always side by side
 const MAP_LINK_ALIKE = 0.4;
+// the smallest unnamed group shown, chosen with a slider.  Most groups are small: of about 900 with
+// 5 or more faces, 330 have 10 or more and 45 have 50 or more
+const MAP_SIZES = [5, 8, 10, 15, 20, 30, 50, 75, 100, 200];
+const MAP_MIN_FACES = 'people-map-min-faces';
+
+function minFaces() {
+  return MAP_SIZES[Number(document.getElementById('map-size').value)];
+}
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let mapPerson = null;
 let mapResult = null;
@@ -172,8 +180,12 @@ function spot(node) {
 }
 
 function mapNodes() {
-  // each keeps its place in the list, which is what its closest dots are given by
-  const source = mapSource().map((node, index) => ({...node, index}));
+  // each keeps its place in the list, which is what its closest dots are given by.  Named people
+  // are never too small to show
+  const smallest = minFaces();
+  const source = mapSource()
+    .map((node, index) => ({...node, index}))
+    .filter(node => node.name || node.faces >= smallest);
   if (mapPerson === null) {
     return source;
   }
@@ -264,7 +276,8 @@ function drawMap() {
   const width = svg.clientWidth;
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
-  const everything = mapSource().map((node, index) => ({...node, index}));
+  // on Axes, ordered among those shown, so that they spread over the whole space
+  const everything = onAxes() ? nodes : mapSource().map((node, index) => ({...node, index}));
   axisOrder = onAxes() ? orderOnAxes(everything) : null;
   const toX = across(nodes.map(node => spot(node)[0]), everything.map(node => spot(node)[0]), width);
   const toY = across(nodes.map(node => spot(node)[1]), everything.map(node => spot(node)[1]), height);
@@ -509,6 +522,20 @@ window.addEventListener('DOMContentLoaded', () => {
       drawMap();
     }
   }));
+  const size = document.getElementById('map-size');
+  const sizeShown = () => {
+    document.getElementById('map-size-value').textContent = minFaces();
+  };
+  const stored = MAP_SIZES.indexOf(Number(localStorage.getItem(MAP_MIN_FACES)));
+  size.value = stored >= 0 ? stored : 0;
+  sizeShown();
+  let filtering = null;
+  size.addEventListener('input', () => {
+    sizeShown();
+    localStorage.setItem(MAP_MIN_FACES, minFaces());
+    cancelAnimationFrame(filtering);
+    filtering = requestAnimationFrame(() => mapResult && drawMap());
+  });
   const threshold = document.getElementById('map-threshold');
   if (threshold) {
     let drawing = null;
