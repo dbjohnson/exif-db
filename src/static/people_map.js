@@ -6,6 +6,10 @@ const MAP_MERGE = 'people-map-merge';
 // Look-alikes places dots near those they look like; Axes places them along two directions worked
 // out from the names, the same for every dot, so where a dot is says something about it
 const MAP_LAYOUT = 'people-map-layout';
+// lines only go to dots at least this alike.  Unrelated faces' averages are 10 to 25% alike, and
+// over half of the groups have nothing at 40% or more, so their 5 most alike were strangers, which
+// Look-alikes had no reason to put nearby.  Those that are this alike were almost always side by side
+const MAP_LINK_ALIKE = 0.4;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let mapPerson = null;
 let mapResult = null;
@@ -194,10 +198,19 @@ function drawLinks(links, dot, drawn, scale) {
   links.replaceChildren();
   dot.near.forEach(([index, alike]) => {
     const other = drawn.get(index);
-    if (!other) {
+    if (!other || alike < MAP_LINK_ALIKE) {
       return;
     }
-    links.append(svgElement('line', {x1: dot.cx, y1: dot.cy, x2: other.cx, y2: other.cy}));
+    // stronger for those more alike
+    const strength = (alike - MAP_LINK_ALIKE) / (1 - MAP_LINK_ALIKE);
+    links.append(svgElement('line', {
+      x1: dot.cx,
+      y1: dot.cy,
+      x2: other.cx,
+      y2: other.cy,
+      'stroke-width': 1.5 + 3 * strength,
+      'stroke-opacity': 0.5 + 0.5 * strength
+    }));
     const label = svgElement('text', {
       x: dot.cx + (other.cx - dot.cx) * 0.6,
       y: dot.cy + (other.cy - dot.cy) * 0.6 + 4 * scale,
@@ -337,6 +350,11 @@ function showMapTip(event, dot) {
   const count = `${dot.faces.toLocaleString()} face${dot.faces === 1 ? '' : 's'}`;
   faces.textContent = dot.name && dot.group !== null ? `${count} in this group` : count;
   tip.replaceChildren(image, name, faces);
+  if (dot.near.length && dot.near[0][1] < MAP_LINK_ALIKE) {
+    const alone = document.createElement('span');
+    alone.textContent = `Nothing else here is ${Math.round(MAP_LINK_ALIKE * 100)}% or more alike`;
+    tip.append(alone);
+  }
   if (dot.alike !== undefined && !dot.mine) {
     const alike = document.createElement('span');
     alike.textContent = `${Math.round(dot.alike * 100)}% like ${mapPerson}`;
