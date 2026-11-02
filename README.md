@@ -90,7 +90,7 @@ The info button on a photo, or `i` in the viewer, shows who's in it, where it wa
 
 ## Home movies
 
-`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  The years, months and movies are listed newest first, like the library, while the stream itself always plays forward in time.  Pick a year and month to drop in at the start of that month, or a movie in the month's list, and the scrubber covers the month being played.  It picks up where it left off on that device.
+`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  The years and movies are listed newest first, like the library, the months in a year run January to December from left to right, and the stream itself always plays forward in time.  Pick a year and month to drop in at the start of that month, or a movie in the month's list, and the scrubber covers the month being played.  It picks up where it left off on that device.
 
 Keyboard: Space plays and pauses, ←/→ moves 10 seconds and carries over into the next or previous movie, Shift+←/→ moves by movie, ↑/↓ moves by month, F is full screen and M mutes.
 

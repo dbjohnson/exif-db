@@ -189,7 +189,7 @@
         }
         const keys = browsedYear === UNDATED
           ? [UNDATED]
-          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(12 - number).padStart(2, '0')}`);
+          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(number + 1).padStart(2, '0')}`);
         const most = Math.max(...year.months.map(month => month.seconds));
         rail.replaceChildren(...keys.map(key => {
           const month = months.get(key);
