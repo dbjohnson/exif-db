@@ -66,13 +66,15 @@ python scripts/cluster_people.py people.db
 
 Copy `people.db` into the storage volume before starting the app with it.  Faces, names and covers are all kept in that file.  Faces too small or too poor to compare are kept but not offered for naming, as they're mostly blurs and the backs of heads.
 
-`/people` shows groups of faces that look alike, largest first.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
+`/people` shows every group of faces that look alike, largest first, loading more as you scroll, with faces that look like no others at the end.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
 
 Edit on a person's page renames them, or removes them, which sends their faces back to "Who is this?" and leaves the photos alone.  Using a name someone already has joins the two together.  All of these can be undone straight afterwards.
 
 The viewer's person button draws a box around each face found in a photo, and a person's page starts out showing them.  Pressing a box or a face in the row below it gives that face a different name, takes its name off, skips it, or makes it the person's cover.  A person's Faces page also shows any face in its photo, and selecting one there can make it their cover.  Faces pages, for people and for groups, can show one year at a time, and naming a whole group while looking at a year names only that year's faces.
 
-A person's Faces page also has "May be someone else", which lists faces whose closest named faces in other photos mostly have a different name, grouped by that name.  It only suggests: nothing changes until you say who a face is, and a face you've settled doesn't come up again.  New names change what it finds.  The comparison runs on the server when the page is opened, in about 40 seconds for 16,000 faces on a Celeron J4125.  A person's cover is otherwise their largest, clearest face.
+A person's Faces page also has "May be someone else", which lists faces whose closest named faces in other photos mostly have a different name, grouped by that name.  It only suggests: nothing changes until you say who a face is, and a face you've settled doesn't come up again.  New names change what it finds.
+
+"Looks like" is the same the other way round: faces not called this person, named or not, with at least 3 of their 10 closest named faces being this person and those making up most of them.  Relatives do come up: hiding every name of one person left about 5% of their faces matching someone else.  Saying a face without a name isn't this person doesn't stop it coming up for someone else.  Both comparisons run on the server when the page is opened, taking from a few seconds to a couple of minutes for someone with 16,000 faces on a Celeron J4125.  A person's cover is otherwise their largest, clearest face.
 
 ## Places
 

@@ -96,13 +96,18 @@ def _synology_copy(path, name):
     return synology_file(path, f"SYNOPHOTO_THUMB_{name}.jpg")
 
 
-def _cached(path, variant, quality, make):
-    """
-    Returns the path to a cached JPEG made from an image, creating it if needed
-    """
+def _cache_file(path, variant):
     source = f"{path}:{os.stat(path).st_mtime_ns}{variant}"
     name = hashlib.sha1(source.encode('utf-8', 'surrogateescape')).hexdigest()
-    cached = os.path.join(CACHE_DIR, name[:2], f"{name}.jpg")
+    return os.path.join(CACHE_DIR, name[:2], f"{name}.jpg")
+
+
+def _cached(path, variant, quality, make):
+    """
+    Returns the path to a cached JPEG made from an image, creating it if needed.  make runs holding
+    _decoding, so it mustn't get here again: two at once would each wait for the other for good
+    """
+    cached = _cache_file(path, variant)
     if os.path.exists(cached):
         return cached
     with _decoding:
@@ -160,8 +165,15 @@ def face(path, rotation, box, face_id):
     A picture of a face, given where it was found.  From the same copy of the photo it
     was found in, since the position is only right for that one
     """
+    variant = f":face:{face_id}"
+    cached = _cache_file(path, variant)
+    if os.path.exists(cached):
+        return cached
+    # first, as making this can itself need _decoding
+    copy = display(path, rotation)
+
     def make():
-        with Image.open(display(path, rotation)) as im:
+        with Image.open(copy) as im:
             width, height = im.size
             margin_x, margin_y = box['Width'] * FACE_MARGIN, box['Height'] * FACE_MARGIN
             # a face can run off the edge of a photo
@@ -174,4 +186,4 @@ def face(path, rotation, box, face_id):
             cropped.thumbnail((FACE_SIZE, FACE_SIZE))
             return cropped
 
-    return _cached(path, f":face:{face_id}", 85, make)
+    return _cached(path, variant, 85, make)

@@ -16,8 +16,9 @@
       const TOTAL = {{ total }};
       const GROUP = {{ (group if group is not none else none) | tojson }};
       const YEAR = {{ (shown_year or none) | tojson }};
-      // faces that seem to be someone else, which stay settled once they've been looked at
-      const CHECKING = {{ checking | tojson }};
+      // faces compared with everyone's, which stay settled once they've been looked at
+      const COMPARING = {{ (comparing or none) | tojson }};
+      const CHECKING = COMPARING !== null;
       const WORKING = {{ working | tojson }};
       const selected = new Set();
       let lastPicked = null;
@@ -55,25 +56,32 @@
       function renderSections() {
         document.querySelectorAll('.face-section').forEach(section => {
           const count = sectionFaces(section).length;
+          const {moveTo, stays} = section.dataset;
           const these = count === 1 ? 'This is' : `These ${count.toLocaleString()} are`;
-          section.querySelector('.face-section-move').textContent = `${these} ${section.dataset.looksLike}`;
-          section.querySelector('.face-section-keep').textContent = `${these} ${CURRENT_NAME}`;
+          const notThese = count === 1 ? "This isn't" : `These ${count.toLocaleString()} aren't`;
+          section.querySelector('.face-section-move').textContent = `${these} ${moveTo}`;
+          section.querySelector('.face-section-keep').textContent = stays ? `${these} ${stays}` : `${notThese} ${moveTo}`;
         });
       }
 
+      // saying a row's faces stay as they are, or that one without a name just isn't this person
       function keepFaces(section) {
         const chosen = sectionFaces(section);
         const faceIds = chosen.map(tile => tile.dataset.faceId);
-        postJson('/api/people/faces/checked', {face_ids: faceIds, checked: true}).then(() => {
+        const {moveTo, stays} = section.dataset;
+        const settle = settled => stays
+          ? postJson('/api/people/faces/checked', {face_ids: faceIds, checked: settled})
+          : postJson('/api/people/faces/not-person', {face_ids: faceIds, name: moveTo, not_person: settled});
+        settle(true).then(() => {
           hiddenSoFar += faceIds.length;
           chosen.forEach(tile => {
             setPicked(tile, false);
             tile.hidden = true;
           });
           render();
-          showToast(`Kept ${faceIds.length.toLocaleString()} as ${CURRENT_NAME}`, async () => {
+          showToast(stays ? `Kept ${faceIds.length.toLocaleString()} as ${stays}` : `Marked ${faceIds.length.toLocaleString()} as not ${moveTo}`, async () => {
             try {
-              await postJson('/api/people/faces/checked', {face_ids: faceIds, checked: false});
+              await settle(false);
               hiddenSoFar -= faceIds.length;
               chosen.forEach(tile => tile.hidden = false);
               render();
@@ -87,7 +95,7 @@
       // comparing a person's faces with everyone's goes on in the background
       async function waitForComparing() {
         try {
-          const response = await fetch(`/api/people/doubts?name=${encodeURIComponent(CURRENT_NAME)}`);
+          const response = await fetch(`/api/people/comparing?kind=${COMPARING}&name=${encodeURIComponent(CURRENT_NAME)}`);
           if (response.ok && !(await response.json()).working) {
             location.reload();
             return;
@@ -139,7 +147,7 @@
         document.body.classList.add('viewing');
         viewer.hidden = false;
         document.getElementById('face-photo-caption').textContent = face.path.split('/').pop();
-        const box = makeFaceBox(face.box, CURRENT_NAME);
+        const box = makeFaceBox(face.box, 'called' in face ? face.called : CURRENT_NAME);
         box.classList.add('chosen');
         boxes.replaceChildren(box);
         image.onload = () => coverPhoto(boxes, image);
@@ -272,17 +280,21 @@
     </nav>
     {% endif %}
     {% if working %}
-    <p class="library-hint">Comparing {{ "{:,}".format(total) }} faces with everyone else's. A person with thousands of faces can take a minute.</p>
+    <p class="library-hint">Comparing with everyone else's faces. A person with thousands of faces can take a minute or two.</p>
     {% elif failed %}
     <p class="library-hint">Couldn't compare these faces. The server's log says why.</p>
-    {% elif checking %}
-    <p class="library-hint">These look more like someone else than {{ name }}. Select any, or none for the whole row, then say who they are. Either way they won't come up here again.</p>
+    {% elif comparing %}
+    <p class="library-hint">
+      {% if comparing == 'doubts' %}These look more like someone else than {{ name }}.{% else %}These aren't called {{ name }} but look like them, closest first. Some will just be relatives.{% endif %}
+      Select any, or none for the whole row, then say who they are. Either way they won't come up here again.
+      {% if total > faces | length %}Showing {{ "{:,}".format(faces | length) }} of {{ "{:,}".format(total) }}: the rest come up as these are settled.{% endif %}
+    </p>
     <div class="face-sections">
       {% for section in sections %}
-      <section class="face-section" data-looks-like="{{ section.name }}">
+      <section class="face-section" data-move-to="{{ section.move_to }}" data-stays="{{ section.stays }}">
         <div class="face-section-head">
-          <h2>Look like {{ section.name }}</h2>
-          <button class="control face-section-move" onclick="apply(this.closest('.face-section').dataset.looksLike, sectionFaces(this.closest('.face-section')))"></button>
+          <h2>{{ section.heading }}</h2>
+          <button class="control face-section-move" onclick="apply(this.closest('.face-section').dataset.moveTo, sectionFaces(this.closest('.face-section')))"></button>
           <button class="control face-section-keep" onclick="keepFaces(this.closest('.face-section'))"></button>
         </div>
         <div class="face-grid">
@@ -290,7 +302,7 @@
         </div>
       </section>
       {% endfor %}
-      <p class="library-hint face-none">Nothing here seems to be someone else.</p>
+      <p class="library-hint face-none">Nothing to look at here.</p>
     </div>
     {% else %}
     <p class="library-hint">
@@ -317,7 +329,7 @@
       </label>
       <button onclick="applyTyped()">Save</button>
       <button onclick="apply('')" title="Not someone worth naming">Skip</button>
-      {% if name %}<button id="use-cover" onclick="useAsCover()" title="Show this face on {{ name }}'s folder" disabled>Use as cover</button>{% endif %}
+      {% if name and comparing != 'like' %}<button id="use-cover" onclick="useAsCover()" title="Show this face on {{ name }}'s folder" disabled>Use as cover</button>{% endif %}
     </div>
     <div id="face-photo" class="library-viewer" hidden>
       <img id="face-photo-image" alt="" />

@@ -687,6 +687,12 @@ class FacesChecked(BaseModel):
     checked: bool
 
 
+class FacesNotPerson(BaseModel):
+    face_ids: list[str]
+    name: str
+    not_person: bool
+
+
 class PersonRename(BaseModel):
     name: str
     new_name: str = Field(max_length=80)
@@ -705,10 +711,16 @@ class PersonCover(BaseModel):
 @app.get("/people")
 async def _people(request: Request):
     update_hidden_faces()
+    overview = people.overview()
     return templates.TemplateResponse(
         request=request,
         name="people.html",
-        context={**people.overview(), "known_names": people.known_names(), "status": people.job.status()}
+        context={
+            **overview,
+            "next_groups": more_groups_url(overview['groups']) if overview['more_groups'] else None,
+            "known_names": people.known_names(),
+            "status": people.job.status()
+        }
     )
 
 
@@ -727,40 +739,58 @@ def years_newest_first(by_year):
     return years + [UNDATED_YEAR] if UNDATED_YEAR in by_year else years
 
 
-def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, checking=False):
+def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, comparing=None):
     by_year = faces_by_year(faces)
     # a year whose faces have all gone by now leaves all of them
-    shown_year = year if year in by_year and not checking else None
+    shown_year = year if year in by_year and not comparing else None
     face_ids = by_year[shown_year] if shown_year else [face for face, _ in faces]
     year_query = {'year': shown_year} if shown_year else {}
-    doubts = people.doubtful_faces(name) if checking else None
-    looks_like = {}
-    if doubts:
-        looks_like = {face['id']: face['looks_like'] for face in doubts['faces']}
-        face_ids = list(looks_like)
+    comparison = None
+    if comparing == people.DOUBTS:
+        comparison = people.doubtful_faces(name)
+    elif comparing == people.LIKE:
+        comparison = people.faces_like(name)
+    rows = {}
+    if comparison:
+        rows = {face['id']: face['row'] for face in comparison['faces']}
+        face_ids = list(rows)
     details = people.face_details(face_ids[(page - 1) * people.PAGE_FACES:page * people.PAGE_FACES])
     sections = {}
-    for face in details if doubts else []:
-        sections.setdefault(looks_like[face['id']], []).append(face)
+    for face in details if comparison else []:
+        if comparing == people.LIKE:
+            face['called'] = rows[face['id']]
+        sections.setdefault(rows[face['id']], []).append(face)
     rail = [
-        {'label': 'All', 'faces': len(faces), 'url': url, 'current': not shown_year and not checking},
-        *([{'label': 'May be someone else', 'faces': None, 'url': f"{url}?check=1", 'current': checking}] if name else []),
+        {'label': 'All', 'faces': len(faces), 'url': url, 'current': not shown_year and not comparing},
+        *([
+            {'label': 'May be someone else', 'faces': None, 'url': f"{url}?check=1", 'current': comparing == people.DOUBTS},
+            {'label': f"Looks like {name}", 'faces': None, 'url': f"{url}?similar=1", 'current': comparing == people.LIKE}
+        ] if name else []),
         *(
             {'label': key, 'faces': len(by_year[key]), 'url': f"{url}?{urlencode({'year': key})}", 'current': key == shown_year}
             for key in years_newest_first(by_year)
         )
     ]
-    working = bool(doubts and doubts['working'])
+    working = bool(comparison and comparison['working'])
     return templates.TemplateResponse(
         request=request,
         name="people_faces.html",
         context={
             "title": title,
             "faces": details,
-            "sections": [{'name': key, 'faces': value} for key, value in sections.items()],
-            "checking": checking,
+            "sections": [
+                {
+                    'heading': f"Look like {key}" if comparing == people.DOUBTS else f"Called {key}" if key else "Not named yet",
+                    # what each of the row's two buttons says they are: stays is '' for no name
+                    'move_to': key if comparing == people.DOUBTS else name,
+                    'stays': name if comparing == people.DOUBTS else key or '',
+                    'faces': value
+                }
+                for key, value in sections.items()
+            ],
+            "comparing": comparing,
             "working": working,
-            "failed": bool(doubts and doubts['failed']),
+            "failed": bool(comparison and comparison['failed']),
             "total": len(faces) if working else len(face_ids),
             "photos_url": f"{photos_url}?{urlencode(year_query)}" if photos_url and shown_year else photos_url,
             "name": name,
@@ -768,10 +798,26 @@ def people_faces_page(request, title, faces, url, year=None, photos_url=None, na
             "years_rail": rail if name or len(by_year) > 1 else [],
             "shown_year": shown_year,
             # a group's are only ever the best ones, with the rest coming up as those get named
-            "next_url": f"{url}?{urlencode({**year_query, 'page': page + 1})}" if name and not checking and page * people.PAGE_FACES < len(face_ids) else None,
+            "next_url": f"{url}?{urlencode({**year_query, 'page': page + 1})}" if name and not comparing and page * people.PAGE_FACES < len(face_ids) else None,
             "cover": people.chosen_cover(name) if name else None,
             "known_names": people.known_names()
         }
+    )
+
+
+def more_groups_url(groups):
+    # where to carry on from the last of these
+    return f"/api/people/groups?faces={groups[-1]['faces']}&after={groups[-1]['id']}"
+
+
+@app.get("/api/people/groups")
+async def _more_groups(request: Request, faces: int, after: int):
+    update_hidden_faces()
+    groups, more = people.groups_after(faces, after)
+    return templates.TemplateResponse(
+        request=request,
+        name="_person_groups.html",
+        context={"groups": groups, "next_groups": more_groups_url(groups) if more else None}
     )
 
 
@@ -797,7 +843,7 @@ async def _people_group_ids(group_id: int, year: str = None):
 
 
 @app.get("/people/{name}/faces")
-async def _person_faces(request: Request, name: str, year: str = None, page: int = 1, check: bool = False):
+async def _person_faces(request: Request, name: str, year: str = None, page: int = 1, check: bool = False, similar: bool = False):
     update_hidden_faces()
     faces = people.person_faces(name)
     if not faces:
@@ -811,7 +857,7 @@ async def _person_faces(request: Request, name: str, year: str = None, page: int
         photos_url=f"/people/{quote(name)}",
         name=name,
         page=max(page, 1),
-        checking=check
+        comparing=people.DOUBTS if check else people.LIKE if similar else None
     )
 
 
@@ -1021,9 +1067,15 @@ async def _check_faces(faces_checked: FacesChecked):
     return "saved"
 
 
-@app.get("/api/people/doubts")
-async def _people_doubts(name: str):
-    return {'working': people.doubts_working(name)}
+@app.post("/api/people/faces/not-person")
+async def _faces_not_person(faces_not_person: FacesNotPerson):
+    people.set_not_person(faces_not_person.face_ids, faces_not_person.name, faces_not_person.not_person)
+    return "saved"
+
+
+@app.get("/api/people/comparing")
+async def _people_comparing(kind: str, name: str):
+    return {'working': people.comparison_working(kind, name)}
 
 
 @app.get("/api/people/status")

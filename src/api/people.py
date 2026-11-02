@@ -31,11 +31,15 @@ SUGGEST_SIMILARITY = 0.45
 SUGGEST_FACES_PER_PERSON = 200
 SUGGEST_NEIGHBOURS = 5
 PAGE_FACES = 500
+GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
 # aren't called what it is.  Comparing with only some of a person's faces isn't good enough: it made
 # 15 times as many of the person with the most faces look wrong
 DOUBT_NEIGHBOURS = 10
 DOUBT_BATCH = 1000
+# a face looks like someone only with at least this many of those being them, as one close face can
+# be a coincidence.  Hiding a whole person's names, 5% of their faces still pass for a relative
+LIKE_NEIGHBOURS = 3
 # what Rekognition's results left behind, for the names given then to be carried over
 OLD_FACES = '/storage/rekognition/indexed.jsonl'
 OLD_NAMES_CSV = '/storage/people.csv'
@@ -44,10 +48,12 @@ OLD_UNDECIDED = '\x7fundecided'
 OLD_MATCH_OVERLAP = 0.3
 _local = threading.local()
 _cache = {}
-# what's been worked out about each person's faces, as that can take the NAS most of a minute
-_doubts = {}
+# what's been worked out about each person's faces, as that can take the NAS a minute or two
+_comparisons = {}
 # one at a time, as each uses all the processor it can get
-_doubts_lock = threading.Lock()
+_comparisons_lock = threading.Lock()
+DOUBTS = 'doubts'
+LIKE = 'like'
 
 
 def _db():
@@ -149,6 +155,14 @@ def restore_names(previous, checked=False):
         set_checked(list(known), False)
 
 
+def set_not_person(face_ids, name, not_person):
+    with _db() as db:
+        if not_person:
+            db.executemany('INSERT OR REPLACE INTO not_person (face_id, name, at) VALUES (?, ?, ?)', [(face_id, name, time.time_ns()) for face_id in face_ids])
+        else:
+            db.executemany('DELETE FROM not_person WHERE face_id = ? AND name = ?', [(face_id, name) for face_id in face_ids])
+
+
 def set_checked(face_ids, checked):
     with _db() as db:
         if checked:
@@ -181,6 +195,8 @@ def rename(old, new):
     cover_face = chosen_cover(old)
     joining_with_cover = chosen_cover(new) is not None
     _record_names([(face_id, new) for face_id in members])
+    with _db() as db:
+        db.execute('UPDATE OR REPLACE not_person SET name = ? WHERE name = ?', (new, old))
     if cover_face and not joining_with_cover:
         with _db() as db:
             db.execute('INSERT OR REPLACE INTO covers (name, face_id) VALUES (?, ?)', (new, cover_face))
@@ -322,13 +338,12 @@ def _suggested_name(cluster_faces):
     return votes.most_common(1)[0][0] if votes else None
 
 
-def _undecided_groups(limit):
+def _undecided_groups():
     """
-    Groups of faces that haven't been decided on, largest first, with how many there are in all.
-    Going through undecided faces only means naming some of a mixed group leaves the rest of it
+    Groups of faces that haven't been decided on, largest first, as (group, faces, photos).  Going
+    through undecided faces only means naming some of a mixed group leaves the rest of it
     """
-    db = _db()
-    rows = db.execute(
+    return _db().execute(
         f"""
         SELECT cluster, COUNT(*), COUNT(DISTINCT photo_id)
         FROM faces
@@ -337,12 +352,42 @@ def _undecided_groups(limit):
         ORDER BY COUNT(*) DESC, cluster
         """
     ).fetchall()
-    several = [row for row in rows if row[1] > 1]
-    return several[:limit], len(several), sum(row[1] == 1 for row in rows)
 
 
-def overview(max_groups=100, preview_faces=8):
-    stamp = (_stamp(), max_groups, preview_faces, _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
+def _group_details(rows, preview_faces=8):
+    db = _db()
+    groups = []
+    for cluster, count, group_photos in rows:
+        best = db.execute(
+            f"""
+            SELECT id, embedding FROM faces
+            WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
+            ORDER BY pixels * score DESC
+            LIMIT ?
+            """,
+            (cluster, preview_faces)
+        ).fetchall()
+        groups.append({
+            'id': cluster,
+            'faces': count,
+            'photos': group_photos,
+            'preview': [row[0] for row in best],
+            'suggested': _suggested_name([row[1] for row in best])
+        })
+    return groups
+
+
+def groups_after(faces, group):
+    """
+    The next groups after one with this many faces, and whether there are more.  Going by where the
+    last one was, not by page, as naming a group takes it out from before the ones still to come
+    """
+    rows = [row for row in _undecided_groups() if (-row[1], row[0]) > (-faces, group)]
+    return _group_details(rows[:GROUPS_PAGE]), len(rows) > GROUPS_PAGE
+
+
+def overview():
+    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
     if _cache.get('overview_stamp') == stamp:
         return _cache['overview']
     db = _db()
@@ -364,25 +409,7 @@ def overview(max_groups=100, preview_faces=8):
         """,
         (NOBODY,)
     ).fetchall()
-    shown, more, singles = _undecided_groups(max_groups)
-    groups = []
-    for cluster, count, group_photos in shown:
-        best = db.execute(
-            f"""
-            SELECT id, embedding FROM faces
-            WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
-            ORDER BY pixels * score DESC
-            LIMIT ?
-            """,
-            (cluster, preview_faces)
-        ).fetchall()
-        groups.append({
-            'id': cluster,
-            'faces': count,
-            'photos': group_photos,
-            'preview': [row[0] for row in best],
-            'suggested': _suggested_name([row[1] for row in best])
-        })
+    undecided = _undecided_groups()
     result = {
         'faces': faces,
         'photos': photos,
@@ -391,9 +418,9 @@ def overview(max_groups=100, preview_faces=8):
             {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
             for name, count, person_photos, _, best_face in people
         ],
-        'groups': groups,
-        'more_groups': max(0, more - len(shown)),
-        'single_faces': singles
+        'groups': _group_details(undecided[:GROUPS_PAGE]),
+        'group_count': len(undecided),
+        'more_groups': len(undecided) > GROUPS_PAGE
     }
     _cache.update(overview_stamp=stamp, overview=result)
     return result
@@ -427,35 +454,57 @@ def person_faces(name):
     )]
 
 
-def _compare_with_everyone(name):
+def _closest_named(part, embeddings, photos, named):
     """
-    Which of a person's faces most look like someone else, going by the closest faces with a name in
-    other photos, as a list of {id, looks_like, share}.  Faces too poor to compare aren't included,
-    and those whose closest faces aren't much like them say nothing either way
+    For each of the faces at places part, the closest faces in other photos among those at places
+    named, and how alike each is, or 0 if they aren't alike enough to say anything
+    """
+    similar = embeddings[part] @ embeddings[named].T
+    # the face itself is in its own photo, and nobody is in a photo twice
+    similar[photos[part][:, None] == photos[named]] = -1
+    neighbours = min(DOUBT_NEIGHBOURS, len(named) - 1)
+    closest = np.argpartition(-similar, neighbours, axis=1)[:, :neighbours]
+    weights = np.take_along_axis(similar, closest, axis=1)
+    weights[weights < SUGGEST_SIMILARITY] = 0
+    return named[closest], weights
+
+
+def _comparable_faces():
+    """
+    Every face good enough to compare and not skipped, as ids, who they are ('' for undecided),
+    numbers for their photos, and embeddings
     """
     rows = _db().execute(
         f"""
-        SELECT faces.id, faces.photo_id, names.name, faces.embedding
-        FROM names JOIN faces ON faces.id = names.face_id
-        WHERE names.name <> ? AND {USABLE} AND {SHOWN}
+        SELECT faces.id, faces.photo_id, COALESCE(names.name, ''), faces.embedding
+        FROM faces LEFT JOIN names ON names.face_id = faces.id
+        WHERE (names.name IS NULL OR names.name <> ?) AND {USABLE} AND {SHOWN}
         """,
         (NOBODY,)
     ).fetchall()
-    embeddings = np.frombuffer(b''.join(row[3] for row in rows), dtype=np.float32).reshape(-1, people_db.EMBEDDING_SIZE)
-    who = np.array([row[2] for row in rows])
     photo_numbers = {}
-    photos = np.array([photo_numbers.setdefault(row[1], len(photo_numbers)) for row in rows])
+    return (
+        [row[0] for row in rows],
+        np.array([row[2] for row in rows]),
+        np.array([photo_numbers.setdefault(row[1], len(photo_numbers)) for row in rows]),
+        np.frombuffer(b''.join(row[3] for row in rows), dtype=np.float32).reshape(-1, people_db.EMBEDDING_SIZE)
+    )
+
+
+def _compare_with_everyone(name):
+    """
+    Which of a person's faces most look like someone else, going by the closest faces with a name in
+    other photos, as a list of {id, row, strength}, with row being who they look like.  Faces too
+    poor to compare aren't included, and those whose closest faces aren't much like them say nothing
+    either way
+    """
+    ids, who, photos, embeddings = _comparable_faces()
+    named = np.flatnonzero(who != '')
     mine = np.flatnonzero(who == name)
-    neighbours = min(DOUBT_NEIGHBOURS, len(rows) - 1)
     found = []
     for start in range(0, len(mine), DOUBT_BATCH):
         part = mine[start:start + DOUBT_BATCH]
-        similar = embeddings[part] @ embeddings.T
-        # the face itself is in its own photo, and nobody is in a photo twice
-        similar[photos[part][:, None] == photos] = -1
-        closest = np.argpartition(-similar, neighbours, axis=1)[:, :neighbours]
-        weights = np.take_along_axis(similar, closest, axis=1)
-        weights[weights < SUGGEST_SIMILARITY] = 0
+        closest, weights = _closest_named(part, embeddings, photos, named)
         mine_too = (weights * (who[closest] == name)).sum(axis=1)
         for row in np.flatnonzero(mine_too < weights.sum(axis=1) / 2):
             votes = Counter()
@@ -463,43 +512,97 @@ def _compare_with_everyone(name):
                 if neighbour != name and weight:
                     votes[str(neighbour)] += float(weight)
             looks_like, weight = votes.most_common(1)[0]
-            found.append({'id': rows[part[row]][0], 'looks_like': looks_like, 'share': weight / float(weights[row].sum())})
+            found.append({'id': ids[part[row]], 'row': looks_like, 'strength': weight})
     return found
 
 
-def _work_out_doubts(name, entry):
-    with _doubts_lock:
+def _faces_like(name):
+    """
+    The other way about: faces that aren't this person's but whose closest faces with a name mostly
+    are, as a list of {id, row, strength}, with row being who they're called now, or None
+    """
+    ids, who, photos, embeddings = _comparable_faces()
+    named = np.flatnonzero(who != '')
+    mine = np.flatnonzero(who == name)
+    # nobody is in a photo twice, so a photo they're already in has none of them left to find
+    others = np.flatnonzero((who != name) & ~np.isin(photos, photos[mine]))
+    # few faces have enough of this person's close to them, so the full comparison can go on those
+    close_to_mine = np.zeros(len(others), dtype=np.int32)
+    for start in range(0, len(mine), DOUBT_BATCH):
+        close_to_mine += (embeddings[others] @ embeddings[mine[start:start + DOUBT_BATCH]].T >= SUGGEST_SIMILARITY).sum(axis=1)
+    candidates = others[close_to_mine >= LIKE_NEIGHBOURS]
+    found = []
+    for start in range(0, len(candidates), DOUBT_BATCH):
+        part = candidates[start:start + DOUBT_BATCH]
+        closest, weights = _closest_named(part, embeddings, photos, named)
+        theirs = who[closest] == name
+        strength = (weights * theirs).sum(axis=1)
+        alike = ((weights > 0) & theirs).sum(axis=1)
+        for row in np.flatnonzero((alike >= LIKE_NEIGHBOURS) & (strength >= weights.sum(axis=1) / 2)):
+            called = str(who[part[row]])
+            found.append({'id': ids[part[row]], 'row': called or None, 'strength': float(strength[row])})
+    return found
+
+
+def _work_out_comparison(key, entry, work):
+    with _comparisons_lock:
         # the names may have changed again while this waited its turn
-        if _doubts.get(name) is not entry:
+        if _comparisons.get(key) is not entry:
             return
         try:
-            entry['faces'] = _compare_with_everyone(name)
+            entry['faces'] = work(key[1])
         except Exception:
-            logger.exception(f"Can't compare {name}'s faces")
+            logger.exception(f"Can't compare {key[1]}'s faces")
             entry['failed'] = True
         entry['working'] = False
 
 
-def doubtful_faces(name):
+def _comparison(kind, name, work):
     """
-    A person's faces that seem to be someone else, and nobody has settled yet, grouped by who they
-    look like with the most in common first.  Starts working them out if the names have changed, so
+    What's been worked out about these faces.  Starts working it out if the names have changed, so
     'faces' is empty while 'working' is true
     """
     stamp = _stamp()
-    entry = _doubts.get(name)
+    key = (kind, name)
+    entry = _comparisons.get(key)
     if not entry or entry['stamp'] != stamp:
-        entry = _doubts[name] = {'stamp': stamp, 'working': True, 'failed': False, 'faces': []}
-        threading.Thread(target=_work_out_doubts, args=(name, entry), daemon=True).start()
+        entry = _comparisons[key] = {'stamp': stamp, 'working': True, 'failed': False, 'faces': []}
+        threading.Thread(target=_work_out_comparison, args=(key, entry, work), daemon=True).start()
+    return entry
+
+
+def _biggest_rows_first(faces):
+    # those without a name come first, as they're what nobody has looked at yet, then closest first
+    how_many = Counter(face['row'] for face in faces)
+    return sorted(faces, key=lambda face: (face['row'] is not None, -how_many[face['row']], face['row'] or '', -face['strength']))
+
+
+def doubtful_faces(name):
+    """
+    A person's faces that seem to be someone else and nobody has settled yet, in rows by who they
+    look like
+    """
+    entry = _comparison(DOUBTS, name, _compare_with_everyone)
     settled = {row[0] for row in _db().execute('SELECT face_id FROM checked_faces')}
     faces = [face for face in entry['faces'] if face['id'] not in settled]
-    how_many = Counter(face['looks_like'] for face in faces)
-    faces.sort(key=lambda face: (-how_many[face['looks_like']], face['looks_like'], -face['share']))
-    return {'working': entry['working'], 'failed': entry['failed'], 'faces': faces}
+    return {'working': entry['working'], 'failed': entry['failed'], 'faces': _biggest_rows_first(faces)}
 
 
-def doubts_working(name):
-    entry = _doubts.get(name)
+def faces_like(name):
+    """
+    Faces not called this person that look like them and nobody has settled yet, in rows by who
+    they're called now, with those without a name first
+    """
+    entry = _comparison(LIKE, name, _faces_like)
+    db = _db()
+    settled = {row[0] for row in db.execute('SELECT face_id FROM checked_faces')}
+    settled.update(row[0] for row in db.execute('SELECT face_id FROM not_person WHERE name = ?', (name,)))
+    faces = [face for face in entry['faces'] if face['id'] not in settled]
+    return {'working': entry['working'], 'failed': entry['failed'], 'faces': _biggest_rows_first(faces)}
+
+
+def comparison_working(kind, name):
+    entry = _comparisons.get((kind, name))
     return bool(entry and entry['working'])
 
 

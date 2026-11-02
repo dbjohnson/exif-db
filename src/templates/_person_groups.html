@@ -1,0 +1,21 @@
+{% for group in groups %}
+<div class="person-group" data-group="{{ group.id }}">
+  <a class="person-group-faces" href="/people/group/{{ group.id }}" title="Open this group">
+    {% for face in group.preview %}
+    <img src="/api/face/{{ face }}" loading="lazy" decoding="async" alt="" />
+    {% endfor %}
+  </a>
+  <span class="person-group-actions">
+    <span>{{ "{:,}".format(group.photos) }} photo{{ '' if group.photos == 1 else 's' }}</span>
+    {% if group.suggested %}
+    <button class="suggested-name" data-name="{{ group.suggested }}" onclick="nameGroup(this.closest('.person-group'), this.dataset.name)">{{ group.suggested }}?</button>
+    {% endif %}
+    <input type="text" list="names" placeholder="Name" aria-label="Name for this group" maxlength="80" onkeydown="if (event.key === 'Enter') nameTyped(this);" />
+    <button onclick="nameTyped(this)">Save</button>
+    <button onclick="nameGroup(this.closest('.person-group'), '')" title="Not someone worth naming">Skip</button>
+  </span>
+</div>
+{% endfor %}
+{% if next_groups %}
+<div class="load-more" data-next="{{ next_groups }}"></div>
+{% endif %}

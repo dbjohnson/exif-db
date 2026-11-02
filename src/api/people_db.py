@@ -52,6 +52,8 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS covers (name TEXT PRIMARY KEY, face_id TEXT NOT NULL);
     -- faces someone has looked at because they seemed to be someone else, and settled
     CREATE TABLE IF NOT EXISTS checked_faces (face_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+    -- unnamed faces someone has said aren't this person, though they look like them
+    CREATE TABLE IF NOT EXISTS not_person (face_id TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (face_id, name));
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- photos not to show faces from, as hidden and deleted ones are only known to the main index
     CREATE TABLE IF NOT EXISTS hidden_photos (photo_id BLOB PRIMARY KEY);

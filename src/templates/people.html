@@ -31,6 +31,39 @@
         }
       }
 
+      // the next groups come along as the last ones get near the screen
+      function watchForMoreGroups() {
+        const sentinel = document.querySelector('.load-more');
+        if (!sentinel) {
+          return;
+        }
+        const observer = new IntersectionObserver(async entries => {
+          if (!entries.some(entry => entry.isIntersecting)) {
+            return;
+          }
+          observer.disconnect();
+          try {
+            const response = await fetch(sentinel.dataset.next);
+            if (!response.ok) {
+              throw new Error('Status: ' + response.status);
+            }
+            sentinel.outerHTML = await response.text();
+            watchForMoreGroups();
+          } catch (error) {
+            const retry = document.createElement('button');
+            retry.textContent = "Couldn't load more groups. Try again";
+            retry.onclick = () => {
+              retry.remove();
+              watchForMoreGroups();
+            };
+            sentinel.append(retry);
+          }
+        }, {rootMargin: '1000px'});
+        observer.observe(sentinel);
+      }
+
+      window.addEventListener('DOMContentLoaded', watchForMoreGroups);
+
       function nameTyped(element) {
         const row = element.closest('.person-group');
         const name = row.querySelector('input').value.trim();
@@ -70,33 +103,10 @@
       </datalist>
 
       {% if groups %}
-      <h2>Who is this? <span>faces that look alike; a group can mix people, so open it to name only some</span></h2>
-      {% for group in groups %}
-      <div class="person-group" data-group="{{ group.id }}">
-        <a class="person-group-faces" href="/people/group/{{ group.id }}" title="Open this group">
-          {% for face in group.preview %}
-          <img src="/api/face/{{ face }}" loading="lazy" decoding="async" alt="" />
-          {% endfor %}
-        </a>
-        <span class="person-group-actions">
-          <span>{{ "{:,}".format(group.photos) }} photo{{ '' if group.photos == 1 else 's' }}</span>
-          {% if group.suggested %}
-          <button class="suggested-name" data-name="{{ group.suggested }}" onclick="nameGroup(this.closest('.person-group'), this.dataset.name)">{{ group.suggested }}?</button>
-          {% endif %}
-          <input type="text" list="names" placeholder="Name" aria-label="Name for this group" maxlength="80" onkeydown="if (event.key === 'Enter') nameTyped(this);" />
-          <button onclick="nameTyped(this)">Save</button>
-          <button onclick="nameGroup(this.closest('.person-group'), '')" title="Not someone worth naming">Skip</button>
-        </span>
-      </div>
-      {% endfor %}
-      {% if more_groups %}
-      <p class="people-hint">{{ "{:,}".format(more_groups) }} smaller groups will show here as these get named.</p>
-      {% endif %}
+      <h2>Who is this? <span>{{ "{:,}".format(group_count) }} groups of faces that look alike, largest first; a group can mix people, so open it to name only some</span></h2>
+      {% include '_person_groups.html' %}
       {% elif not people %}
       <div class="no-images">No faces yet</div>
-      {% endif %}
-      {% if single_faces %}
-      <p class="people-hint">{{ "{:,}".format(single_faces) }} faces don't look like any others yet.</p>
       {% endif %}
     </div>
   </body>
