@@ -43,6 +43,13 @@ MAP_NEIGHBOURS = 5
 # most alike close by.  300 kept only 14% but got more of the order of far-apart groups right (77% of
 # clear cases against 70%); the user preferred 30, and 100 looked no better
 MAP_PERPLEXITY = 30
+# where the map's dots were, so that the next map starts from there instead of afresh.  Made afresh,
+# adding one dot of a thousand moved the rest so much that only 44% of each dot's 10 closest stayed
+# its closest; started from the last map with no exaggeration and 250 steps, 96% did, with dots
+# placed as well as before.  Starts afresh when fewer than MAP_KEEP_SHARE of the dots were there
+MAP_LAYOUT_PATH = os.path.join(os.path.dirname(people_db.PATH), 'people_map_layout.json')
+MAP_KEEP_SHARE = 0.5
+MAP_SETTLE_STEPS = 250
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -618,11 +625,12 @@ def warm_up():
     return not entry['working'] and not map_entry['working']
 
 
-def _map_nodes(places_by_key, ids, embeddings):
+def _map_nodes(places_by_key, ids, embeddings, before):
     """
     A dot for each set of faces with enough of them, as a list of {x, y, near, name, group, faces,
     tight, face}, and each one's average face, made 1 long.  x and y place those that look alike
-    close together, and near is its most alike dots, as [place in the list, how alike out of 1]
+    close together, starting from where they were before, given as {(name, group): (x, y)}, and
+    near is its most alike dots, as [place in the list, how alike out of 1]
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
@@ -630,7 +638,7 @@ def _map_nodes(places_by_key, ids, embeddings):
     averages = np.array([embeddings[places].mean(axis=0) for _, places in kept])
     tight = np.linalg.norm(averages, axis=1)
     centres = averages / tight[:, None]
-    spots = _spread(centres, MAP_PERPLEXITY)
+    spots = _spread(centres, MAP_PERPLEXITY, _starting_spots([key for key, _ in kept], centres, before))
     alike = centres @ centres.T
     np.fill_diagonal(alike, -np.inf)
     neighbours = min(MAP_NEIGHBOURS, len(kept) - 1)
@@ -650,18 +658,67 @@ def _map_nodes(places_by_key, ids, embeddings):
     ], centres
 
 
-def _spread(points, perplexity):
+def _starting_spots(keys, centres, before):
     """
-    Places points on a page, keeping each near about this many of those most like it (t-SNE).  The
-    same points always land in the same places
+    Where each of these dots starts: where it was, or for a group that's been named since, where it
+    was unnamed, or for a new one, beside the dot most like it.  None when too few were there before
+    """
+    by_group = {group: spot for (_, group), spot in before.items() if group is not None}
+    known = {}
+    for place, (name, group) in enumerate(keys):
+        spot = before.get((name, group)) or (by_group.get(group) if group is not None else None)
+        if spot is not None:
+            known[place] = spot
+    if len(keys) < 4 or len(known) < MAP_KEEP_SHARE * len(keys):
+        return None
+    places = np.array(list(known))
+    spots = np.zeros((len(keys), 2))
+    spots[places] = np.array(list(known.values()))
+    new = np.array([place for place in range(len(keys)) if place not in known], dtype=int)
+    if len(new):
+        beside = places[(centres[new] @ centres[places].T).argmax(axis=1)]
+        # a little apart, as dots in the same spot can't be told apart
+        spots[new] = spots[beside] + np.random.default_rng(1).normal(0, 0.01 * spots[places].std(), (len(new), 2))
+    return spots
+
+
+def _spread(points, perplexity, start=None):
+    """
+    Places points on a page, keeping each near about this many of those most like it (t-SNE).  From
+    where they start, if given, only settling them, as starting afresh moves everything.  The same
+    points always land in the same places
     """
     if len(points) < 4:
         return [(place, 0) for place in range(len(points))]
     # imported here, as it takes a while and only this needs it
     from sklearn.manifold import TSNE
+    perplexity = min(perplexity, (len(points) - 1) / 3)
+    if start is None:
+        return TSNE(metric='cosine', init='pca', perplexity=perplexity, random_state=1).fit_transform(points.astype(np.float64))
     return TSNE(
-        metric='cosine', init='pca', perplexity=min(perplexity, (len(points) - 1) / 3), random_state=1
+        metric='cosine', init=start, perplexity=perplexity, random_state=1, early_exaggeration=1, max_iter=MAP_SETTLE_STEPS
     ).fit_transform(points.astype(np.float64))
+
+
+def _saved_layout():
+    """
+    Where the last map's dots were, as {'groups': {(name, group): (x, y)}, 'people': ...}, with ''
+    for no name
+    """
+    try:
+        with open(MAP_LAYOUT_PATH) as fh:
+            saved = json.load(fh)
+        return {mode: {(name, group): (x, y) for name, group, x, y in saved.get(mode, [])} for mode in ('groups', 'people')}
+    except (FileNotFoundError, ValueError, TypeError):
+        return {'groups': {}, 'people': {}}
+
+
+def _save_layout(result):
+    layout = {mode: [[node['name'] or '', node['group'], node['x'], node['y']] for node in nodes] for mode, nodes in result.items()}
+    tmp = f"{MAP_LAYOUT_PATH}.{os.getpid()}"
+    with open(tmp, 'w') as fh:
+        json.dump(layout, fh)
+    os.replace(tmp, MAP_LAYOUT_PATH)
 
 
 def _work_out_map(_name):
@@ -687,8 +744,10 @@ def _work_out_map(_name):
         name = str(who[place])
         by_group.setdefault((name, cluster), []).append(place)
         by_person.setdefault((name, None) if name else (name, cluster), []).append(place)
-    groups, centres = _map_nodes(by_group, ids, embeddings)
-    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings)[0]}
+    before = _saved_layout()
+    groups, centres = _map_nodes(by_group, ids, embeddings, before['groups'])
+    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings, before['people'])[0]}
+    _save_layout(result)
     # together, so that what's near someone always goes with the map it was worked out on
     _cache['map'] = (result, centres)
     return result
