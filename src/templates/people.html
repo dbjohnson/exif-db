@@ -5,6 +5,9 @@
     {% include '_head.html' %}
     <script src="/static/toast.js"></script>
     <script src="/static/people.js"></script>
+    {% if tab == 'map' %}
+    <script src="/static/people_map.js"></script>
+    {% endif %}
     <script>
       async function undoNames(previous, row) {
         try {
@@ -84,7 +87,7 @@
         }
         setTimeout(waitForComparing, 2000);
       }
-      {% if comparing %}
+      {% if comparing and tab != 'map' %}
       window.addEventListener('DOMContentLoaded', waitForComparing);
       {% endif %}
 
@@ -103,12 +106,12 @@
       <p class="people-hint">
         {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status.running %}, still finding more{% endif %}.
       </p>
-      {% if comparing %}
+      {% if comparing and tab != 'map' %}
       <p id="comparing-note" class="people-hint">Comparing these groups with named faces, which can take a minute or two. Those closest to someone will then come first.</p>
       {% elif comparing_failed %}
       <p class="people-hint">Couldn't compare these groups with named faces. The server's log says why.</p>
       {% endif %}
-      <p id="reload-note" class="people-hint" hidden><a href="/people">Reload</a> to see names added here and the groups that changed.</p>
+      <p id="reload-note" class="people-hint" hidden><a href="/people?{{ request.url.query }}#who">Reload</a> to see names added here and the groups that changed.</p>
 
       {% if people %}
       <h2>People</h2>
@@ -131,10 +134,48 @@
         {% endfor %}
       </datalist>
 
-      {% if groups %}
-      <h2>Who is this? <span>{{ "{:,}".format(group_count) }} groups of faces that look alike, those closest to someone named first, then largest first; a group can mix people, so open it to name only some</span></h2>
+      {% if counts.suggested or counts.biggest or people %}
+      <h2 id="who">Who is this?</h2>
+      <nav class="people-tabs" aria-label="Who is this?">
+        <a href="/people?tab=suggested#who"{% if tab == 'suggested' %} aria-current="page"{% endif %}>Suggested <span>{{ "{:,}".format(counts.suggested) }}</span></a>
+        <a href="/people?tab=groups&amp;sort={{ sort }}#who"{% if tab == 'groups' %} aria-current="page"{% endif %}>Groups <span>{{ "{:,}".format(counts.biggest) }}</span></a>
+        <a href="/people?tab=map#who"{% if tab == 'map' %} aria-current="page"{% endif %}>Map</a>
+      </nav>
+      {% if tab == 'suggested' %}
+      <p class="people-hint">Groups of faces that look like someone already named, closest first. A group can mix people, so open it to name only some.</p>
+      {% elif tab == 'groups' %}
+      <nav class="people-tabs people-sort" aria-label="Order">
+        <a href="/people?tab=groups&amp;sort=biggest#who"{% if sort == 'biggest' %} aria-current="page"{% endif %}>Biggest</a>
+        <a href="/people?tab=groups&amp;sort=tightest#who"{% if sort == 'tightest' %} aria-current="page"{% endif %}>Tightest <span>{{ "{:,}".format(counts.tightest) }}</span></a>
+      </nav>
+      <p class="people-hint">
+        {% if sort == 'tightest' %}
+        Groups with photos from {{ tight_days }} or more different days, those whose faces are most alike first. These are the most likely to be one person.
+        {% else %}
+        Groups of faces that look alike and don't look like anyone named yet, largest first. A group can mix people, so open it to name only some.
+        {% endif %}
+      </p>
+      {% endif %}
+      {% if tab == 'map' %}
+      <div class="people-map-bar">
+        <label><input type="checkbox" id="map-merge" /> One dot per person</label>
+        <span id="map-note" class="people-hint">Placing groups by how alike they are, which can take a minute or two.</span>
+        <span class="people-map-zoom">
+          <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+        </span>
+      </div>
+      <svg id="people-map" class="people-map" role="img" aria-label="Groups of faces placed by how alike they are">
+        <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
+        <g id="map-dots"></g>
+      </svg>
+      <div id="map-tip" class="people-map-tip" hidden></div>
+      {% elif groups %}
       {% include '_person_groups.html' %}
-      {% elif not people %}
+      {% else %}
+      <p class="people-hint">Nothing here right now.</p>
+      {% endif %}
+      {% else %}
       <div class="no-images">No faces yet</div>
       {% endif %}
     </div>

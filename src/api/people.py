@@ -12,7 +12,7 @@ from collections import Counter
 
 import numpy as np
 
-from api import people_db, thumbs
+from api import exif, people_db, thumbs
 from api.jobs import Job
 from api.people_db import from_db, to_db
 
@@ -30,6 +30,13 @@ USABLE = f"(score >= {MIN_SCORE} AND pixels >= {MIN_PIXELS})"
 SUGGEST_SIMILARITY = 0.45
 # how many of a group's best faces its row shows, and get compared with named faces
 GROUP_FACES = 8
+# how many days a group's photos need to be from for how tight it is to mean much.  Photos taken a
+# moment apart are as tight as groups get, and even 5 or more faces were mostly that, so each day
+# only counts its best face.  Photos with no date all count as one day, since copies of the same
+# photo at different sizes are told apart only by their size
+TIGHT_DAYS = 4
+# how many faces a group or a person needs to get a dot on the map
+MAP_FACES = 5
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -55,6 +62,11 @@ _comparisons_lock = threading.Lock()
 DOUBTS = 'doubts'
 LIKE = 'like'
 GROUPS = 'groups'
+MAP = 'map'
+# the ways of going through undecided groups
+SUGGESTED = 'suggested'
+BIGGEST = 'biggest'
+TIGHTEST = 'tightest'
 
 
 def _db():
@@ -313,44 +325,108 @@ def _undecided_groups():
     ).fetchall()
 
 
-def _group_place(closeness, faces, group):
-    # those that look like someone named come first, closest first, then the rest, largest first
-    return (-closeness, -faces, group)
+def _place(score, faces, group):
+    # highest score first, then largest first
+    return (-score, -faces, group)
 
 
-def _closeness(matches, group):
-    return matches[group][1] if group in matches else 0
+def _suggested(comparison, known, group):
+    # matches can be from before a rename, and offering the old name would bring it back
+    match = comparison['matches'].get(group)
+    return match[0] if match and match[0] in known else None
 
 
-def _ordered_groups(matches):
-    return sorted(_undecided_groups(), key=lambda row: _group_place(_closeness(matches, row[0]), row[1], row[0]))
+def _score(view, comparison, group):
+    if view == SUGGESTED:
+        return comparison['matches'][group][1]
+    if view == TIGHTEST:
+        return comparison['tightness'][group]
+    return 0
 
 
-def _group_details(rows, matches):
+def _views(comparison):
+    """
+    The undecided groups in each view, in order.  Those that look like someone named are suggested,
+    closest first, and the rest are either largest first or, with enough faces to say, tightest
+    first.  A group is only ever suggested or one of the rest, never both
+    """
+    known = set(known_names())
+    suggested, rest = [], []
+    for row in _undecided_groups():
+        (suggested if _suggested(comparison, known, row[0]) else rest).append(row)
+    tight = [row for row in rest if row[0] in comparison['tightness']]
+
+    def ordered(view, rows):
+        return sorted(rows, key=lambda row: _place(_score(view, comparison, row[0]), row[1], row[0]))
+    return {SUGGESTED: ordered(SUGGESTED, suggested), BIGGEST: ordered(BIGGEST, rest), TIGHTEST: ordered(TIGHTEST, tight)}
+
+
+def _group_details(rows, view, comparison):
     db = _db()
     known = set(known_names())
     groups = []
     for cluster, count, group_photos in rows:
         best = db.execute(
             f"""
-            SELECT id FROM faces
+            SELECT id, photo_id FROM faces
             WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
             ORDER BY pixels * score DESC
             LIMIT ?
             """,
-            (cluster, GROUP_FACES)
+            # SQLite takes a limit below 0 as none
+            (cluster, -1 if view == TIGHTEST else GROUP_FACES)
         ).fetchall()
-        name = matches[cluster][0] if cluster in matches else None
+        if view == TIGHTEST:
+            # a group's best faces can all be from one moment, which isn't what made it tight
+            days = {}
+            for face, photo_id in best:
+                days.setdefault(_photo_day(photo_id), face)
+            preview = list(days.values())
+        else:
+            preview = [face for face, _ in best]
         groups.append({
             'id': cluster,
             'faces': count,
             'photos': group_photos,
-            'preview': [row[0] for row in best],
-            # matches can be from before a rename, and offering the old name would bring it back
-            'suggested': name if name in known else None,
-            'closeness': _closeness(matches, cluster)
+            'preview': preview[:GROUP_FACES],
+            'suggested': _suggested(comparison, known, cluster),
+            'score': _score(view, comparison, cluster)
         })
     return groups
+
+
+def _photo_day(photo_id):
+    # a photo's id ends in when it was taken, or its size for one with no date
+    taken = from_db(photo_id).rpartition('|')[2]
+    year = taken[:4]
+    return taken[:10] if year.isdigit() and int(year) >= exif.LIBRARY_EARLIEST_YEAR else None
+
+
+def _best_each_day(ids):
+    """
+    Where the best undecided face of each day is among ids, by group, for faces that are good
+    enough to compare
+    """
+    places = {face: place for place, face in enumerate(ids)}
+    groups = {}
+    for face, cluster, photo_id in _db().execute(
+        f"""
+        SELECT id, cluster, photo_id FROM faces
+        WHERE cluster IS NOT NULL AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
+        ORDER BY pixels * score DESC
+        """
+    ):
+        if face in places:
+            groups.setdefault(cluster, {}).setdefault(_photo_day(photo_id), places[face])
+    return groups
+
+
+def _tightness(places, embeddings):
+    """
+    How alike faces are, out of 1: how long their average is, as each is 1 long.  It's 1 when
+    they're all the same and goes down as they spread out
+    """
+    return float(np.linalg.norm(embeddings[places].mean(axis=0)))
 
 
 def _compare_groups(_name):
@@ -358,8 +434,9 @@ def _compare_groups(_name):
     Who each undecided group looks like, as {group: (name, closeness)}, going by the closest faces
     with a name in other photos of its best faces.  Closeness is the similarity of those that are
     that person and alike enough to count, averaged over every closest face, so it's out of 1 and
-    goes up as more of them agree.  Groups that nothing named is close to aren't included.  Keeps the
-    result for the page to go on using while the next one is worked out
+    goes up as more of them agree.  Groups that nothing named is close to aren't included.  Also
+    how tight each group with faces from enough days is.  Keeps the result for the page to go on using while
+    the next one is worked out
     """
     ids, who, photos, embeddings = _comparable_faces()
     named = np.flatnonzero(who != '')
@@ -387,40 +464,51 @@ def _compare_groups(_name):
         for group, counted in votes.items():
             name, weight = counted.most_common(1)[0]
             matches[group] = (name, weight / (compared[group] * DOUBT_NEIGHBOURS))
-    _cache['group_matches'] = matches
-    return matches
+    tightness = {
+        group: _tightness(list(days.values()), embeddings)
+        for group, days in _best_each_day(ids).items()
+        if len(days) >= TIGHT_DAYS
+    }
+    result = {'matches': matches, 'tightness': tightness}
+    _cache['group_comparison'] = result
+    return result
 
 
 def _group_comparison():
     """
-    Who groups look like as of the last time that finished, or None before it first has, and how
-    working out the latest is going.  Comparing with every named face can take the NAS a minute or
-    two, so the page doesn't wait.  Going by only some of each person's faces misses most of them
+    Who groups look like and how tight they are as of the last time that finished, or None before
+    it first has, and how working out the latest is going.  Comparing with every named face can take
+    the NAS a minute or two, so the page doesn't wait.  Going by only some of each person's faces
+    misses most of them
     """
     entry = _comparison(GROUPS, '', _compare_groups)
-    return _cache.get('group_matches'), entry
+    return _cache.get('group_comparison'), entry
 
 
-def groups_after(closeness, faces, group):
+NOTHING_COMPARED = {'matches': {}, 'tightness': {}}
+
+
+def groups_after(view, score, faces, group):
     """
-    The next groups after one this close with this many faces, and whether there are more.  Going by
-    where the last one was, not by page, as naming a group takes it out from before the ones still
-    to come
+    The next groups in a view after one with this score and this many faces, and whether there are
+    more.  Going by where the last one was, not by page, as naming a group takes it out from before
+    the ones still to come
     """
-    matches = _group_comparison()[0] or {}
-    rows = [
-        row for row in _ordered_groups(matches)
-        if _group_place(_closeness(matches, row[0]), row[1], row[0]) > _group_place(closeness, faces, group)
-    ]
-    return _group_details(rows[:GROUPS_PAGE], matches), len(rows) > GROUPS_PAGE
+    comparison = _group_comparison()[0] or NOTHING_COMPARED
+    after = _place(score, faces, group)
+    rows = [row for row in _views(comparison)[view] if _place(_score(view, comparison, row[0]), row[1], row[0]) > after]
+    return _group_details(rows[:GROUPS_PAGE], view, comparison), len(rows) > GROUPS_PAGE
 
 
-def overview():
-    matches, comparison = _group_comparison()
-    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
+def overview(view):
+    """
+    The people named so far, and the first of the undecided groups in a view, or none for MAP
+    """
+    comparison, entry = _group_comparison()
+    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone(), view)
     # those still comparing for the first time are the only ones with no idea who a group looks like
-    comparing = {'comparing': matches is None and comparison['working'], 'comparing_failed': comparison['failed']}
-    if _cache.get('overview_stamp') == stamp and _cache.get('overview_matches') is matches:
+    comparing = {'comparing': comparison is None and entry['working'], 'comparing_failed': entry['failed']}
+    if _cache.get('overview_stamp') == stamp and _cache.get('overview_comparison') is comparison:
         return {**_cache['overview'], **comparing}
     db = _db()
     faces, photos = db.execute(
@@ -441,7 +529,8 @@ def overview():
         """,
         (NOBODY,)
     ).fetchall()
-    undecided = _ordered_groups(matches or {})
+    views = _views(comparison or NOTHING_COMPARED)
+    shown = views.get(view, [])
     result = {
         'faces': faces,
         'photos': photos,
@@ -450,12 +539,88 @@ def overview():
             {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
             for name, count, person_photos, _, best_face in people
         ],
-        'groups': _group_details(undecided[:GROUPS_PAGE], matches or {}),
-        'group_count': len(undecided),
-        'more_groups': len(undecided) > GROUPS_PAGE
+        'groups': _group_details(shown[:GROUPS_PAGE], view, comparison or NOTHING_COMPARED),
+        'more_groups': len(shown) > GROUPS_PAGE,
+        'counts': {key: len(rows) for key, rows in views.items()}
     }
-    _cache.update(overview_stamp=stamp, overview_matches=matches, overview=result)
+    _cache.update(overview_stamp=stamp, overview_comparison=comparison, overview=result)
     return {**result, **comparing}
+
+
+def _map_nodes(places_by_key, ids, embeddings):
+    """
+    A dot for each set of faces with enough of them, placed so that those that look alike are
+    close together, as a list of {x, y, name, group, faces, tight, face}
+    """
+    kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
+    if not kept:
+        return []
+    averages = np.array([embeddings[places].mean(axis=0) for _, places in kept])
+    tight = np.linalg.norm(averages, axis=1)
+    spots = _spread(averages / tight[:, None])
+    return [
+        {
+            'x': round(float(x), 2),
+            'y': round(float(y), 2),
+            'name': name or None,
+            'group': group,
+            'faces': len(places),
+            'tight': round(float(tightness), 3),
+            'face': ids[places[0]]
+        }
+        for ((name, group), places), (x, y), tightness in zip(kept, spots, tight)
+    ]
+
+
+def _spread(points):
+    """
+    Places points on a page, keeping those that are alike close to each other (t-SNE).  The same
+    points always land in the same places
+    """
+    if len(points) < 4:
+        return [(place, 0) for place in range(len(points))]
+    # imported here, as it takes a while and only this needs it
+    from sklearn.manifold import TSNE
+    return TSNE(
+        metric='cosine', init='pca', perplexity=min(30, (len(points) - 1) / 3), random_state=1
+    ).fit_transform(points.astype(np.float64))
+
+
+def _work_out_map(_name):
+    """
+    Undecided groups and named people as dots placed by how alike they are, two ways: with each
+    person as a dot for each of the groups their faces came from, which can tell apart what they
+    looked like as a child and grown up, and with each person as one dot
+    """
+    ids, who, _, embeddings = _comparable_faces()
+    places = {face: place for place, face in enumerate(ids)}
+    by_group, by_person = {}, {}
+    # best first, so each dot's first face is the one to show
+    for face, cluster in _db().execute(
+        f"""
+        SELECT id, cluster FROM faces
+        WHERE cluster IS NOT NULL AND {USABLE} AND {SHOWN}
+        ORDER BY pixels * score DESC
+        """
+    ):
+        place = places.get(face)
+        if place is None:
+            continue
+        name = str(who[place])
+        by_group.setdefault((name, cluster), []).append(place)
+        by_person.setdefault((name, None) if name else (name, cluster), []).append(place)
+    result = {'groups': _map_nodes(by_group, ids, embeddings), 'people': _map_nodes(by_person, ids, embeddings)}
+    _cache['map'] = result
+    return result
+
+
+def cluster_map():
+    """
+    The last map worked out, or None before the first has been, and whether a newer one is being
+    worked out, which can take the NAS a minute or two
+    """
+    entry = _comparison(MAP, '', _work_out_map)
+    return {'working': entry['working'], 'failed': entry['failed'], 'map': _cache.get('map')}
 
 
 def group_faces(group_id):

@@ -801,15 +801,23 @@ class PersonCover(BaseModel):
 
 
 @app.get("/people")
-async def _people(request: Request):
+async def _people(request: Request, tab: Literal['suggested', 'groups', 'map'] = None, sort: Literal['biggest', 'tightest'] = 'biggest'):
     update_hidden_faces()
-    overview = people.overview()
+    # suggested groups come first while there are any, as they're the quickest to name
+    if tab is None:
+        overview = people.overview(people.SUGGESTED)
+        tab = 'suggested' if overview['counts'][people.SUGGESTED] else 'groups'
+    view = {'suggested': people.SUGGESTED, 'groups': sort, 'map': people.MAP}[tab]
+    overview = people.overview(view)
     return templates.TemplateResponse(
         request=request,
         name="people.html",
         context={
             **overview,
-            "next_groups": more_groups_url(overview['groups']) if overview['more_groups'] else None,
+            "tab": tab,
+            "sort": sort,
+            "tight_days": people.TIGHT_DAYS,
+            "next_groups": more_groups_url(view, overview['groups']) if overview['more_groups'] else None,
             "known_names": people.known_names(),
             "status": people.job.status()
         }
@@ -897,21 +905,27 @@ def people_faces_page(request, title, faces, url, year=None, photos_url=None, na
     )
 
 
-def more_groups_url(groups):
+def more_groups_url(view, groups):
     # where to carry on from the last of these
     last = groups[-1]
-    return f"/api/people/groups?closeness={last['closeness']}&faces={last['faces']}&after={last['id']}"
+    return f"/api/people/groups?{urlencode({'view': view, 'score': last['score'], 'faces': last['faces'], 'after': last['id']})}"
 
 
 @app.get("/api/people/groups")
-async def _more_groups(request: Request, closeness: float, faces: int, after: int):
+async def _more_groups(request: Request, view: Literal['suggested', 'biggest', 'tightest'], score: float, faces: int, after: int):
     update_hidden_faces()
-    groups, more = people.groups_after(closeness, faces, after)
+    groups, more = people.groups_after(view, score, faces, after)
     return templates.TemplateResponse(
         request=request,
         name="_person_groups.html",
-        context={"groups": groups, "next_groups": more_groups_url(groups) if more else None}
+        context={"groups": groups, "next_groups": more_groups_url(view, groups) if more else None}
     )
+
+
+@app.get("/api/people/map")
+async def _people_map():
+    update_hidden_faces()
+    return people.cluster_map()
 
 
 @app.get("/people/group/{group_id}")
