@@ -984,6 +984,25 @@ button:disabled {
   margin: 0 var(--page-margin) 32px;
 }
 
+.library-section {
+  margin: 28px 0 0;
+  font-size: 20px;
+  font-weight: normal;
+}
+
+/* always on the page, as something hidden can't tell when it's come into view */
+.load-more {
+  min-height: 1px;
+  margin: -16px 0 32px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* under the header, which already sticks to the top of these pages */
+.library-month-header ~ .year-rail {
+  position: static;
+}
+
 .library-day h2 {
   font-size: 14px;
   color: var(--muted);
@@ -1341,6 +1360,69 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.place-search {
+  display: flex;
+  gap: 8px;
+}
+
+.places-tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 var(--page-margin) 8px;
+}
+
+.map-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.map-layout {
+  display: flex;
+  height: calc(100dvh - 120px);
+  min-height: 320px;
+}
+
+.map {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+}
+
+/* a bright map would be the only bright thing on the page */
+.map .leaflet-tile-pane {
+  filter: brightness(0.8) contrast(1.05);
+}
+
+/* more specific than Leaflet's own rule for marker icons */
+.leaflet-marker-icon.map-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 2px solid var(--text-strong);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.map-panel {
+  flex: none;
+  box-sizing: border-box;
+  width: 380px;
+  overflow-y: auto;
+  padding: 0 var(--page-margin);
+}
+
+.map-panel .movie-grid {
+  margin-top: 4px;
+}
+
 .places-page {
   box-sizing: border-box;
   width: 100%;
@@ -1472,6 +1554,21 @@ a.movie-tile {
 }
 
 @media (max-width: 600px) {
+  /* the map above and what's in view below, with the page scrolling rather than the panel */
+  .map-layout {
+    flex-direction: column;
+    height: auto;
+  }
+  .map {
+    flex: none;
+    height: 55dvh;
+  }
+  .map-panel {
+    width: 100%;
+    overflow: visible;
+    padding-top: 4px;
+    padding-bottom: 32px;
+  }
   /* a sheet over the bottom of the screen, so that the photo stays in sight */
   .info-card {
     inset: 35% 0 0;

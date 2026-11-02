@@ -13,6 +13,10 @@
       // whose page this is, or null
       const PERSON = {{ (person or none) | tojson }};
       const TITLE = {{ title | tojson }};
+      // on a page going through someone's or somewhere's photos a year at a time
+      const YEAR = {{ (shown_year or none) | tojson }};
+      // what to carry on into at the end of this page
+      const NEXT_URL = {{ (next_url or none) | tojson }};
       // this page's "YYYY-MM", or null for undated photos
       const MONTH = {{ month | tojson }};
       // a page not organized by date still shows a photo once its date has changed
@@ -165,23 +169,166 @@
         return section;
       }
 
-      function renderGrid() {
-        for (const photo of PHOTOS) {
-          const group = groups[groups.length - 1];
+      function addGroups(photos) {
+        const added = [];
+        for (const photo of photos) {
+          const group = added[added.length - 1];
           if (group && group.name === photo.day) {
             group.photos.push(photo);
           } else {
-            groups.push({name: photo.day, suggested: photo.suggested, photos: [photo]});
+            added.push({name: photo.day, suggested: photo.suggested, photos: [photo]});
           }
         }
-        document.getElementById('days').append(...groups.map(renderGroup));
+        groups.push(...added);
+        document.getElementById('days').append(...added.map(renderGroup));
+      }
+
+      function renderGrid() {
+        addGroups(PHOTOS);
+        sections.push({
+          title: TITLE,
+          year: YEAR,
+          url: window.location.pathname + window.location.search,
+          older: document.getElementById('older-link').getAttribute('href'),
+          newer: document.getElementById('newer-link').getAttribute('href'),
+          filter: document.getElementById('filter-link')?.getAttribute('href'),
+          photos: PHOTOS.slice(),
+          heading: null
+        });
+        renderCount();
+        watchForMore();
+      }
+
+      // ---- carrying on into the next month or year at the end of the page
+
+      // what's been loaded here so far, one for each page's worth
+      const sections = [];
+      let showing = 0;
+      let nextUrl = NEXT_URL;
+      let loadingMore = false;
+      let moreWatcher = null;
+
+      function jsonIn(html, name) {
+        const found = html.match(new RegExp(`const ${name} = (.*);\\n`));
+        return found ? JSON.parse(found[1]) : null;
+      }
+
+      async function loadMore() {
+        if (loadingMore || !nextUrl) {
+          return;
+        }
+        loadingMore = true;
+        const more = document.getElementById('more');
+        const url = nextUrl;
+        more.textContent = 'Loading…';
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          const html = await response.text();
+          const photos = jsonIn(html, 'PHOTOS');
+          // a month that's been emptied sends this to the library page, which has none
+          nextUrl = jsonIn(html, 'NEXT_URL');
+          if (photos) {
+            const page = new DOMParser().parseFromString(html, 'text/html');
+            const title = jsonIn(html, 'TITLE');
+            const year = jsonIn(html, 'YEAR');
+            const heading = document.createElement('h2');
+            heading.className = 'library-section';
+            heading.textContent = year || title;
+            document.getElementById('days').append(heading);
+            PHOTOS.push(...photos);
+            addGroups(photos);
+            sections.push({
+              title,
+              year,
+              url,
+              older: page.getElementById('older-link')?.getAttribute('href'),
+              newer: page.getElementById('newer-link')?.getAttribute('href'),
+              filter: page.getElementById('filter-link')?.getAttribute('href'),
+              photos,
+              heading
+            });
+            renderCount();
+            if (current) {
+              renderViewerDetails();
+            }
+          }
+          more.textContent = '';
+        } catch (error) {
+          console.log(error);
+          more.textContent = '';
+          const retry = document.createElement('button');
+          retry.className = 'control';
+          retry.textContent = `Couldn't load more: try again`;
+          retry.onclick = loadMore;
+          more.append(retry);
+          loadingMore = false;
+          return;
+        }
+        loadingMore = false;
+        // a short month can leave the end of the page still in sight
+        moreWatcher.unobserve(more);
+        if (nextUrl) {
+          moreWatcher.observe(more);
+        }
+      }
+
+      function watchForMore() {
+        moreWatcher = new IntersectionObserver(entries => {
+          if (entries.some(entry => entry.isIntersecting)) {
+            loadMore();
+          }
+        }, {rootMargin: '800px 0px'});
+        if (nextUrl) {
+          moreWatcher.observe(document.getElementById('more'));
+        }
+        window.addEventListener('scroll', noteSection, {passive: true});
+      }
+
+      // the header, its links and the address follow along, so that reloading stays in the same place
+      function noteSection() {
+        const top = document.querySelector('.library-month-header').getBoundingClientRect().bottom;
+        let reached = 0;
+        sections.forEach((section, place) => {
+          if (section.heading && section.heading.getBoundingClientRect().top <= top) {
+            reached = place;
+          }
+        });
+        if (reached === showing) {
+          return;
+        }
+        showing = reached;
+        const section = sections[reached];
+        history.replaceState(history.state, '', section.url);
+        for (const [id, url] of [['older-link', section.older], ['newer-link', section.newer]]) {
+          const link = document.getElementById(id);
+          link.hidden = !url;
+          if (url) {
+            link.href = url;
+          }
+        }
+        if (section.filter) {
+          document.getElementById('filter-link').href = section.filter;
+        }
+        document.querySelectorAll('.year-rail a').forEach(link => {
+          if (link.textContent === section.year) {
+            link.setAttribute('aria-current', 'page');
+          } else {
+            link.removeAttribute('aria-current');
+          }
+        });
         renderCount();
       }
 
       const plural = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
 
       function renderCount() {
-        document.getElementById('summary').textContent = `${TITLE} · ${plural(shown().length, 'photo')}`;
+        const section = sections[showing];
+        const left = section ? section.photos.filter(photo => !photo.removed).length : 0;
+        document.getElementById('summary').textContent =
+          `${section?.title ?? TITLE}${section?.year ? ` · ${section.year}` : ''} · ${plural(left, 'photo')}`;
         for (const group of groups) {
           // folders can be told apart by size; every photo on a day is on screen anyway
           const count = MONTH ? '' : ` · ${plural(group.photos.filter(photo => !photo.removed).length, 'photo')}`;
@@ -865,6 +1012,11 @@
       window.addEventListener('DOMContentLoaded', () => {
         renderGrid();
         renderSelection();
+        // opened on a particular photo, from the map
+        const asked = PHOTOS.find(photo => photo.id === new URLSearchParams(window.location.search).get('open'));
+        if (asked) {
+          openViewer(asked);
+        }
 
         const viewer = document.getElementById('viewer');
         let swipeStart = null;
@@ -894,11 +1046,12 @@
       <span id="summary">{{ title }}</span>
       <span class="month-steps">
         {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
+        {% if map_url %}<a href="{{ map_url }}">Map</a>{% endif %}
         {% if person %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
-        {% if faces_checked %}<a href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
-        {% if older_url %}<a href="{{ older_url }}" title="Older month">‹ Older</a>{% endif %}
-        {% if newer_url %}<a href="{{ newer_url }}" title="Newer month">Newer ›</a>{% endif %}
+        {% if faces_checked %}<a id="filter-link" href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
+        <a id="older-link" href="{{ older_url or '' }}" title="Older month"{% if not older_url %} hidden{% endif %}>‹ Older</a>
+        <a id="newer-link" href="{{ newer_url or '' }}" title="Newer month"{% if not newer_url %} hidden{% endif %}>Newer ›</a>
       </span>
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
@@ -931,6 +1084,7 @@
     </section>
     {% endif %}
     <div id="days" class="library-days"></div>
+    <div id="more" class="load-more"></div>
     <div id="select-bar" class="select-bar" hidden>
       <span id="select-count"></span>
       <button onclick="pickAll(PHOTOS)">Select all</button>

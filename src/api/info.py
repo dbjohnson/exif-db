@@ -145,6 +145,7 @@ def photo_info(path):
     return {
         'sections': [section for section in sections if section],
         'location': location,
+        'location_read': places.location_read(path),
         'people': sorted(set(faces)),
         'all': {
             tag: str(value)

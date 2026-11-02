@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Places</title>
+    {% include '_head.html' %}
+    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="/static/vendor/leaflet.markercluster/MarkerCluster.css">
+    <script src="/static/vendor/leaflet/leaflet.js"></script>
+    <script src="/static/vendor/leaflet.markercluster/leaflet.markercluster.js"></script>
+    <script>
+      // where to look first: a place's bounds, or nothing to carry on from the last look
+      const FOCUS = {{ (focus or none) | tojson }};
+      const SAVED_VIEW = 'places.map';
+      const MAX_ZOOM = 19;
+      // close enough to see one spot, on pressing a circle holding only that
+      const SPOT_ZOOM = 17;
+      let map;
+      let looking;
+      let latestLook = 0;
+
+      const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
+      const plural = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
+
+      function circle(count) {
+        const size = count < 10 ? 28 : count < 100 ? 34 : count < 1000 ? 40 : 48;
+        return L.divIcon({
+          className: 'map-count',
+          html: `<span>${count.toLocaleString()}</span>`,
+          iconSize: [size, size]
+        });
+      }
+
+      function viewKey() {
+        const bounds = map.getBounds();
+        const limit = (value, most) => Math.max(-most, Math.min(most, value));
+        return [
+          limit(bounds.getSouth(), 90), limit(bounds.getWest(), 180),
+          limit(bounds.getNorth(), 90), limit(bounds.getEast(), 180)
+        ].map(value => value.toFixed(5)).join(',');
+      }
+
+      function photoTile(photo, area) {
+        const tile = document.createElement('a');
+        tile.className = 'library-tile';
+        tile.href = `/places/photos?${new URLSearchParams({kind: 'area', key: area, year: photo.year, open: photo.id})}`;
+        const image = document.createElement('img');
+        image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = `/api/thumb${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+        image.onerror = () => image.remove();
+        tile.append(image);
+        return tile;
+      }
+
+      function movieTile(movie) {
+        const tile = document.createElement('a');
+        tile.className = 'movie-tile';
+        tile.href = `/movies?${new URLSearchParams({path: movie.path})}`;
+        tile.setAttribute('aria-label', movie.title || movie.path.split('/').pop());
+        const image = document.createElement('img');
+        image.alt = '';
+        image.loading = 'lazy';
+        image.src = `/api/poster${encodePath(movie.path)}`;
+        image.onerror = () => image.remove();
+        tile.append(image);
+        return tile;
+      }
+
+      async function renderView() {
+        const area = viewKey();
+        const look = ++latestLook;
+        sessionStorage.setItem(SAVED_VIEW, JSON.stringify({center: map.getCenter(), zoom: map.getZoom()}));
+        const response = await fetch(`/api/places/area?${new URLSearchParams({key: area})}`);
+        if (!response.ok || look !== latestLook) {
+          return;
+        }
+        const {photos, movies, shown_photos: shownPhotos, shown_movies: shownMovies} = await response.json();
+        const parts = [];
+        if (photos) parts.push(plural(photos, 'photo'));
+        if (movies) parts.push(plural(movies, 'movie'));
+        document.getElementById('map-summary').textContent = parts.length ? `${parts.join(', ')} in view` : 'Nothing here. Try zooming out';
+        const all = document.getElementById('map-all');
+        all.hidden = !parts.length;
+        all.href = `/places/photos?${new URLSearchParams({kind: 'area', key: area})}`;
+        document.getElementById('map-photos').replaceChildren(...shownPhotos.map(photo => photoTile(photo, area)));
+        document.getElementById('map-movies').replaceChildren(...shownMovies.map(movieTile));
+      }
+
+      function settled() {
+        clearTimeout(looking);
+        looking = setTimeout(renderView, 250);
+      }
+
+      async function start() {
+        map = L.map('map', {minZoom: 2, maxZoom: MAX_ZOOM, worldCopyJump: true}).setView([20, 0], 2);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: MAX_ZOOM,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        const response = await fetch('/api/places/points');
+        const points = response.ok ? await response.json() : [];
+        const clusters = L.markerClusterGroup({
+          showCoverageOnHover: false,
+          maxClusterRadius: 60,
+          chunkedLoading: true,
+          iconCreateFunction: cluster => circle(cluster.getAllChildMarkers().reduce((sum, marker) => sum + marker.options.count, 0))
+        });
+        clusters.addLayers(points.map(([lat, lon, count]) => {
+          const marker = L.marker([lat, lon], {icon: circle(count), count, title: plural(count, 'item')});
+          marker.on('click', () => map.setView([lat, lon], Math.max(map.getZoom(), SPOT_ZOOM)));
+          return marker;
+        }));
+        map.addLayer(clusters);
+        const saved = JSON.parse(sessionStorage.getItem(SAVED_VIEW) || 'null');
+        if (FOCUS) {
+          map.fitBounds(FOCUS, {maxZoom: 15, padding: [24, 24]});
+        } else if (saved) {
+          map.setView(saved.center, saved.zoom);
+        } else if (points.length) {
+          map.fitBounds(points.map(([lat, lon]) => [lat, lon]), {padding: [24, 24]});
+        }
+        map.on('moveend', settled);
+        renderView();
+      }
+
+      window.addEventListener('DOMContentLoaded', start);
+    </script>
+  </head>
+  <body class="library-page map-page">
+    {% include '_nav.html' %}
+    <div class="places-tabs">
+      <a class="control" href="/places">Search</a>
+      <span id="map-summary" class="map-summary">Loading…</span>
+      <a id="map-all" class="control" href="/places" hidden>See all</a>
+    </div>
+    <div class="map-layout">
+      <div id="map" class="map"></div>
+      <div class="map-panel">
+        <div id="map-photos" class="library-grid"></div>
+        <div id="map-movies" class="movie-grid"></div>
+      </div>
+    </div>
+  </body>
+</html>

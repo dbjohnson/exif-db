@@ -76,7 +76,9 @@ The viewer's person button draws a box around each face found in a photo, and a 
 
 `/places` finds photos and movies by where they were taken: a town, state or country, by what they recorded themselves, and any folder by its name, like `2002.03.11 - Escalante`.  Many phones and old cameras don't record a location, so folder names cover a lot of older photos.
 
-`scripts/index_locations.py` reads locations into `locations.csv` in the storage volume at the end of each scan, only for files it hasn't seen, and works out the nearest town from a list of [GeoNames](https://www.geonames.org/) towns of 1,000 or more people (CC BY 4.0).  Nothing is sent anywhere, unless you press the map link on a photo's info card, which opens OpenStreetMap.
+`scripts/index_locations.py` reads locations into `locations.csv` in the storage volume at the end of each scan, only for files it hasn't seen, and works out the nearest town from a list of [GeoNames](https://www.geonames.org/) towns of 1,000 or more people (CC BY 4.0).  Nothing about a photo is sent anywhere.
+
+`/places/map` shows the same locations on a map, with whatever's in view listed alongside.  The map itself comes from [OpenStreetMap](https://www.openstreetmap.org/), so browsers viewing it ask them for the areas being looked at.
 
 ## Info cards
 

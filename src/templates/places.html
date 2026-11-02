@@ -49,8 +49,9 @@
   <body class="library-page">
     {% include '_nav.html' %}
     <div class="places-page">
-      <form action="/places" onsubmit="event.preventDefault()">
+      <form class="place-search" action="/places" onsubmit="event.preventDefault()">
         <input id="place-search" type="search" name="q" value="{{ query }}" placeholder="Search for a place or folder" aria-label="Search for a place or folder" oninput="typed(this)" />
+        <a class="control" href="/places/map">Map</a>
       </form>
       <p class="library-hint">Goes by the location a photo or movie recorded, which {{ "{:,}".format(located) }} of them did, and by the names of folders, like "2002.03.11 - Escalante".</p>
       <div id="places" class="place-list"></div>

@@ -15,8 +15,6 @@ function infoSection(title, fields) {
     if (href) {
       const link = document.createElement('a');
       link.href = href;
-      link.target = '_blank';
-      link.rel = 'noopener';
       link.textContent = value;
       detail.append(link);
     } else {
@@ -67,17 +65,16 @@ async function showInfo(path) {
         ...[['Near', location.city], ['County', location.county], ['State', location.state], ['Country', location.country]]
           .filter(([, value]) => value)
           .map(([label, value]) => ({label, value})),
-        // only ever opened on purpose, since it tells OpenStreetMap where the photo was taken
         {
           label: 'Map',
           value: coordinates,
-          href: `https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lon}#map=14/${location.lat}/${location.lon}`
+          href: `/places/map?${new URLSearchParams({lat: location.lat, lon: location.lon})}`
         }
       ]));
     } else {
       const none = document.createElement('p');
       none.className = 'library-hint';
-      none.textContent = 'No location recorded.';
+      none.textContent = info.location_read ? 'The photo has no location in it.' : "Location not read yet: this happens at the end of each scan.";
       body.push(none);
     }
     body.push(...info.sections.map(section => infoSection(section.title, section.fields)));

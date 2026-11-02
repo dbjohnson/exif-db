@@ -570,7 +570,9 @@ def library_month_page(request, month, title, with_faces):
             "photos": library_month_photos(month, with_faces),
             "known_names": people.known_names(),
             "newer_url": library_url(months[position - 1], with_faces) if position else None,
-            "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None
+            "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None,
+            # what scrolling off the end carries on into: not undated photos, which go by folder
+            "next_url": library_url(months[position + 1], with_faces) if month and position + 1 < len(months) and months[position + 1] else None
         }
     )
 
@@ -763,6 +765,8 @@ def photos_by_year_page(request, title, photos, url, year, **context):
     if UNDATED_YEAR in by_year:
         years.append(UNDATED_YEAR)
     shown_year = year if year in by_year else years[0] if years else None
+    year_url = lambda key: f"{url}{'&' if '?' in url else '?'}year={key}"
+    following = years[years.index(shown_year) + 1:] if shown_year else []
     return templates.TemplateResponse(
         request=request,
         name="library_month.html",
@@ -774,10 +778,11 @@ def photos_by_year_page(request, title, photos, url, year, **context):
             "with_faces": False,
             "faces_checked": 0,
             "years_rail": [
-                {'year': key, 'photos': len(by_year[key]), 'url': f"{url}{'&' if '?' in url else '?'}year={key}"}
+                {'year': key, 'photos': len(by_year[key]), 'url': year_url(key)}
                 for key in years
             ],
             "shown_year": shown_year,
+            "next_url": year_url(following[0]) if following else None,
             "known_names": people.known_names(),
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
@@ -825,6 +830,35 @@ async def _search_places(q: str = ''):
     return places.search(q)
 
 
+@app.get("/places/map")
+async def _places_map(request: Request, kind: str = None, key: str = None, lat: float = None, lon: float = None):
+    focus = None
+    if lat is not None and lon is not None:
+        focus = [[lat, lon], [lat, lon]]
+    elif kind and key:
+        focus = places.bounds(kind, key)
+    return templates.TemplateResponse(request=request, name="places_map.html", context={"focus": focus})
+
+
+@app.get("/api/places/points")
+async def _map_points():
+    return places.points()
+
+
+@app.get("/api/places/area")
+async def _map_area(key: str):
+    photos, clips = places.in_area(key)
+    return {
+        'photos': len(photos),
+        'movies': len(clips),
+        'shown_photos': [
+            {'id': photo['id'], 'path': photo['path'], 'rotation': photo['rotation'], 'year': photo_year(photo)}
+            for photo in photos[:places.AREA_PHOTOS]
+        ],
+        'shown_movies': [{'path': clip['path'], 'title': clip.get('title')} for clip in clips[:places.AREA_MOVIES]]
+    }
+
+
 @app.get("/places/photos")
 async def _place_photos(request: Request, kind: str, key: str, year: str = None):
     place = places.describe(kind, key)
@@ -837,8 +871,9 @@ async def _place_photos(request: Request, kind: str, key: str, year: str = None)
         exif.photos_with_paths(paths),
         f"/places/photos?{urlencode({'kind': kind, 'key': key})}",
         year,
-        back_url="/places",
-        back_label="Places",
+        back_url="/places/map" if kind == places.AREA else "/places",
+        back_label="Map" if kind == places.AREA else "Places",
+        map_url=None if kind == places.AREA or not places.bounds(kind, key) else f"/places/map?{urlencode({'kind': kind, 'key': key})}",
         # newest first, with their own heading, since a movie has no place among a year's photos
         movies=[
             {**clip, 'url': f"/movies?{urlencode({'path': clip['path']})}"}
