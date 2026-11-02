@@ -3,8 +3,9 @@
 // size depends on the screen.  On a person's "Looks like" page, the same map shows only their groups
 // and those that look enough like them
 const MAP_MERGE = 'people-map-merge';
-// Look-alikes places dots near those they look like; Axes places them along two directions worked
-// out from the names, the same for every dot, so where a dot is says something about it
+// Look-alikes places dots near those they look like; Overall order does too, but keeps more of how
+// far apart unalike dots are, at the cost of look-alikes being less tightly together; Axes places
+// them along two directions worked out from the names, the same for every dot
 const MAP_LAYOUT = 'people-map-layout';
 // lines only go to dots at least this alike, leaving out the weakest matches, which Look-alikes had
 // no reason to put nearby: those under 20% were a median of 30% of the map's width apart.  Unrelated
@@ -155,8 +156,16 @@ function mapSource() {
   return mapResult[merged ? 'people' : 'groups'];
 }
 
+function mapLayout() {
+  const chosen = localStorage.getItem(MAP_LAYOUT);
+  if (chosen === 'axes' && mapResult && mapResult.axes) {
+    return 'axes';
+  }
+  return chosen === 'overall' ? 'overall' : 'alike';
+}
+
 function onAxes() {
-  return Boolean(mapResult && mapResult.axes) && localStorage.getItem(MAP_LAYOUT) === 'axes';
+  return mapLayout() === 'axes';
 }
 
 // on Axes, each dot's place in order along each axis, out of 1.  Going by order rather than by how
@@ -176,7 +185,8 @@ function orderOnAxes(nodes) {
 // where a dot goes before being pushed off others: Axes puts the low end of the first axis on the
 // left and of the second at the top
 function spot(node) {
-  return onAxes() ? axisOrder.get(node.index) : [node.x, node.y];
+  const layout = mapLayout();
+  return layout === 'axes' ? axisOrder.get(node.index) : layout === 'overall' ? node.overall : [node.x, node.y];
 }
 
 function mapNodes() {
@@ -239,10 +249,13 @@ function showAxisEnds() {
   const ends = document.getElementById('map-axes');
   const axes = onAxes();
   ends.hidden = !axes;
+  const layout = mapLayout();
   document.querySelectorAll('#map-layout [data-layout]').forEach(button => {
-    button.setAttribute('aria-pressed', (button.dataset.layout === 'axes') === axes ? 'true' : 'false');
+    button.setAttribute('aria-pressed', button.dataset.layout === layout ? 'true' : 'false');
+    if (button.dataset.layout === 'axes') {
+      button.hidden = !mapResult.axes;
+    }
   });
-  document.getElementById('map-layout').hidden = !mapResult.axes;
   if (!axes) {
     return;
   }

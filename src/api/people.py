@@ -39,6 +39,12 @@ TIGHT_DAYS = 4
 MAP_FACES = 5
 # how many of each dot's most alike dots the map can draw lines to
 MAP_NEIGHBOURS = 5
+# how many neighbours t-SNE keeps each dot near, for the map's Look-alikes and Overall order layouts.
+# On 1,008 groups, 100 kept as many of each group's 10 most alike close by as 30 did (31%) and put a
+# few more far-apart groups in the right order.  300 kept only 14% close by, but of three groups where
+# one pair is clearly more alike than the other, it got 77% the right way round, against 70% at 30
+MAP_PERPLEXITY = 100
+MAP_OVERALL_PERPLEXITY = 300
 # the map's Axes layout goes by the two straight directions in the faces' numbers that best tell
 # named people apart, worked out from people with at least this many faces, taking no more than
 # AXES_SAMPLE of each so the few with thousands don't decide it alone.  On this library both came out
@@ -624,10 +630,11 @@ def warm_up():
 
 def _map_nodes(places_by_key, ids, embeddings, on_axes):
     """
-    A dot for each set of faces with enough of them, as a list of {x, y, axes, near, name, group,
-    faces, tight, face}, and each one's average face, made 1 long.  x and y place those that look
-    alike close together, axes is where it is along each of the two axes, if there are any, and
-    near is its most alike dots, as [place in the list, how alike out of 1]
+    A dot for each set of faces with enough of them, as a list of {x, y, overall, axes, near, name,
+    group, faces, tight, face}, and each one's average face, made 1 long.  x and y place those that
+    look alike close together, overall places them keeping more of how far apart things are, axes is
+    where it is along each of the two axes, if there are any, and near is its most alike dots, as
+    [place in the list, how alike out of 1]
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
@@ -635,7 +642,8 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
     averages = np.array([embeddings[places].mean(axis=0) for _, places in kept])
     tight = np.linalg.norm(averages, axis=1)
     centres = averages / tight[:, None]
-    spots = _spread(centres)
+    spots = _spread(centres, MAP_PERPLEXITY)
+    overall = _spread(centres, MAP_OVERALL_PERPLEXITY)
     along = on_axes(centres) if on_axes else [None] * len(kept)
     alike = centres @ centres.T
     np.fill_diagonal(alike, -np.inf)
@@ -645,6 +653,7 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
         {
             'x': round(float(x), 2),
             'y': round(float(y), 2),
+            'overall': [round(float(value), 2) for value in far],
             'axes': [round(float(value), 3) for value in place_on_axes] if place_on_axes is not None else None,
             'near': [[int(other), round(float(alike[row, other]), 3)] for other in closest[row]],
             'name': name or None,
@@ -653,7 +662,7 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
             'tight': round(float(tightness), 3),
             'face': ids[places[0]]
         }
-        for row, (((name, group), places), (x, y), tightness, place_on_axes) in enumerate(zip(kept, spots, tight, along))
+        for row, (((name, group), places), (x, y), far, tightness, place_on_axes) in enumerate(zip(kept, spots, overall, tight, along))
     ], centres
 
 
@@ -694,17 +703,17 @@ def _axis_ends(nodes):
     return ends
 
 
-def _spread(points):
+def _spread(points, perplexity):
     """
-    Places points on a page, keeping those that are alike close to each other (t-SNE).  The same
-    points always land in the same places
+    Places points on a page, keeping each near about this many of those most like it (t-SNE).  The
+    same points always land in the same places
     """
     if len(points) < 4:
         return [(place, 0) for place in range(len(points))]
     # imported here, as it takes a while and only this needs it
     from sklearn.manifold import TSNE
     return TSNE(
-        metric='cosine', init='pca', perplexity=min(30, (len(points) - 1) / 3), random_state=1
+        metric='cosine', init='pca', perplexity=min(perplexity, (len(points) - 1) / 3), random_state=1
     ).fit_transform(points.astype(np.float64))
 
 
