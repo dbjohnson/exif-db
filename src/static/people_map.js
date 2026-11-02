@@ -6,10 +6,11 @@ const MAP_MERGE = 'people-map-merge';
 // Look-alikes places dots near those they look like; Axes places them along two directions worked
 // out from the names, the same for every dot, so where a dot is says something about it
 const MAP_LAYOUT = 'people-map-layout';
-// lines only go to dots at least this alike.  Unrelated faces' averages are 10 to 25% alike, and
-// over half of the groups have nothing at 40% or more, so their 5 most alike were strangers, which
-// Look-alikes had no reason to put nearby.  Those that are this alike were almost always side by side
-const MAP_LINK_ALIKE = 0.4;
+// lines only go to dots at least this alike.  Unrelated faces' averages are 10 to 25% alike, and a
+// quarter of the groups have nothing at 30% or more, so their 5 most alike were strangers, which
+// Look-alikes had no reason to put nearby.  Lines at 30% or more joined dots a median of 3% of the
+// map's width apart, against 19% for weaker ones
+const MAP_LINK_ALIKE = 0.3;
 // the smallest unnamed group shown, chosen with a slider.  Most groups are small: of about 900 with
 // 5 or more faces, 330 have 10 or more and 45 have 50 or more
 const MAP_SIZES = [5, 8, 10, 15, 20, 30, 50, 75, 100, 200];
