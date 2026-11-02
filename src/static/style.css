@@ -2285,11 +2285,6 @@ a.movie-tile {
   font-size: 12px;
 }
 
-.people-map-layout {
-  display: inline-flex;
-  gap: 4px;
-}
-
 /* the tab or toggle that's on, like the page's own place in the menu */
 .people-tabs a[aria-current="page"],
 .people-map-bar button[aria-pressed="true"],

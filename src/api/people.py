@@ -39,12 +39,10 @@ TIGHT_DAYS = 4
 MAP_FACES = 5
 # how many of each dot's most alike dots the map can draw lines to
 MAP_NEIGHBOURS = 5
-# how many neighbours t-SNE keeps each dot near, for the map's Look-alikes and Overall order layouts.
-# On 1,008 groups, 30 kept 31% of each group's 10 most alike close by.  300 kept only 14%, but of
-# three groups where one pair is clearly more alike than the other, it got 77% the right way round,
-# against 70% at 30.  100 looked no better than 30 to the user
+# how many neighbours t-SNE keeps each dot near.  On 1,008 groups, 30 kept 31% of each group's 10
+# most alike close by.  300 kept only 14% but got more of the order of far-apart groups right (77% of
+# clear cases against 70%); the user preferred 30, and 100 looked no better
 MAP_PERPLEXITY = 30
-MAP_OVERALL_PERPLEXITY = 300
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -622,10 +620,9 @@ def warm_up():
 
 def _map_nodes(places_by_key, ids, embeddings):
     """
-    A dot for each set of faces with enough of them, as a list of {x, y, overall, near, name, group,
-    faces, tight, face}, and each one's average face, made 1 long.  x and y place those that look
-    alike close together, overall places them keeping more of how far apart things are, and near is
-    its most alike dots, as [place in the list, how alike out of 1]
+    A dot for each set of faces with enough of them, as a list of {x, y, near, name, group, faces,
+    tight, face}, and each one's average face, made 1 long.  x and y place those that look alike
+    close together, and near is its most alike dots, as [place in the list, how alike out of 1]
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
@@ -634,7 +631,6 @@ def _map_nodes(places_by_key, ids, embeddings):
     tight = np.linalg.norm(averages, axis=1)
     centres = averages / tight[:, None]
     spots = _spread(centres, MAP_PERPLEXITY)
-    overall = _spread(centres, MAP_OVERALL_PERPLEXITY)
     alike = centres @ centres.T
     np.fill_diagonal(alike, -np.inf)
     neighbours = min(MAP_NEIGHBOURS, len(kept) - 1)
@@ -643,7 +639,6 @@ def _map_nodes(places_by_key, ids, embeddings):
         {
             'x': round(float(x), 2),
             'y': round(float(y), 2),
-            'overall': [round(float(value), 2) for value in far],
             'near': [[int(other), round(float(alike[row, other]), 3)] for other in closest[row]],
             'name': name or None,
             'group': group,
@@ -651,7 +646,7 @@ def _map_nodes(places_by_key, ids, embeddings):
             'tight': round(float(tightness), 3),
             'face': ids[places[0]]
         }
-        for row, (((name, group), places), (x, y), far, tightness) in enumerate(zip(kept, spots, overall, tight))
+        for row, (((name, group), places), (x, y), tightness) in enumerate(zip(kept, spots, tight))
     ], centres
 
 

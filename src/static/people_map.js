@@ -3,10 +3,7 @@
 // size depends on the screen.  On a person's "Looks like" page, the same map shows only their groups
 // and those that look enough like them
 const MAP_MERGE = 'people-map-merge';
-// Look-alikes places dots near those they look like; Overall order does too, but keeps more of how
-// far apart unalike dots are, at the cost of look-alikes being less tightly together
-const MAP_LAYOUT = 'people-map-layout';
-// lines only go to dots at least this alike, leaving out the weakest matches, which Look-alikes had
+// lines only go to dots at least this alike, leaving out the weakest matches, which the map had
 // no reason to put nearby: those under 20% were a median of 30% of the map's width apart.  Unrelated
 // faces' averages are 10 to 25% alike, so lines between 20 and 30% (15% apart) are often strangers
 const MAP_LINK_ALIKE = 0.2;
@@ -155,15 +152,6 @@ function mapSource() {
   return mapResult[merged ? 'people' : 'groups'];
 }
 
-function mapLayout() {
-  return localStorage.getItem(MAP_LAYOUT) === 'overall' ? 'overall' : 'alike';
-}
-
-// where a dot goes before being pushed off others
-function spot(node) {
-  return mapLayout() === 'overall' ? node.overall : [node.x, node.y];
-}
-
 function mapNodes() {
   // each keeps its place in the list, which is what its closest dots are given by.  Named people
   // are never too small to show
@@ -219,13 +207,6 @@ function drawLinks(links, dot, drawn, scale) {
   });
 }
 
-function showLayout() {
-  const layout = mapLayout();
-  document.querySelectorAll('#map-layout [data-layout]').forEach(button => {
-    button.setAttribute('aria-pressed', button.dataset.layout === layout ? 'true' : 'false');
-  });
-}
-
 function drawMap() {
   const svg = document.getElementById('people-map');
   const layer = document.getElementById('map-dots');
@@ -245,16 +226,15 @@ function drawMap() {
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
   const everything = mapSource();
-  const toX = across(nodes.map(node => spot(node)[0]), everything.map(node => spot(node)[0]), width);
-  const toY = across(nodes.map(node => spot(node)[1]), everything.map(node => spot(node)[1]), height);
+  const toX = across(nodes.map(node => node.x), everything.map(node => node.x), width);
+  const toY = across(nodes.map(node => node.y), everything.map(node => node.y), height);
   const dots = nodes.map(node => ({
     ...node,
-    cx: toX(spot(node)[0]),
-    cy: toY(spot(node)[1]),
+    cx: toX(node.x),
+    cy: toY(node.y),
     r: dotRadius(node.faces, scale)
   }));
   separate(dots);
-  showLayout();
   const drawn = new Map(dots.map(dot => [dot.index, dot]));
   const links = svgElement('g', {class: 'map-links'});
 
@@ -481,12 +461,6 @@ window.addEventListener('DOMContentLoaded', () => {
       setFull(false);
     }
   });
-  document.querySelectorAll('#map-layout [data-layout]').forEach(button => button.addEventListener('click', () => {
-    localStorage.setItem(MAP_LAYOUT, button.dataset.layout);
-    if (mapResult) {
-      drawMap();
-    }
-  }));
   const size = document.getElementById('map-size');
   const sizeShown = () => {
     document.getElementById('map-size-value').textContent = minFaces();
