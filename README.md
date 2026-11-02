@@ -29,7 +29,7 @@ docker compose up -d
 
 Only approved photos appear in the gallery and kiosk.  New photos start unreviewed: a date with some shows a link to review them, and `/manage` links to everything awaiting review.  Photos left unchecked in the review grid are hidden, not deleted.  Each date also links to an editor for changing the approvals already made there, and approvals can be reset to unreviewed for a date or, from `/manage`, for the whole library.
 
-The review queue shows photos taken within 5 seconds of each other on one camera as a single tile (up to 12), with a button to open it up.  Only that tile's photo starts checked.  Photos with no camera make or model, like screenshots, also start unchecked.
+The review queue shows photos taken within 5 seconds of each other on one camera as a single tile (up to 12) if each one also looks like the one before it, with a button to open it up.  Only that tile's photo starts checked.  How alike they look comes from the duplicate check's fingerprints, so a new photo has its own tile until that check has run.  Photos with no camera make or model, like screenshots, also start unchecked.
 
 Decisions are stored in `reviews.csv` in the storage volume, and survive a full rebuild.  Review thumbnails are cached in `thumbs/` in the storage volume, which is safe to delete.
 

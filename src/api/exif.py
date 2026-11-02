@@ -20,6 +20,8 @@ DELETIONS_CSV = '/storage/deletions.csv'
 MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
 # which photos have been dealt with as duplicates, as in api/copies.py
 DUPLICATES_CSV = '/storage/duplicates.csv'
+# what each photo looks like, by path, written by scripts/find_duplicates.py
+FINGERPRINTS_CSV = '/storage/duplicate_fingerprints.csv'
 # where the faces are in each photo, written by scripts/find_faces.py
 FACES_CSV = '/storage/faces.csv'
 NO_FACES = 'none'
@@ -33,10 +35,13 @@ DELETED = 'deleted'
 HIDDEN = 'hidden'
 NOT_HIDDEN = 'not_hidden'
 RESTORED = 'restored'
-# photos this close together from one camera are reviewed as one, up to a limit so that a
-# long run of different shots isn't all decided by one of them
+# photos this close together from one camera are reviewed as one if they also look alike, up to a
+# limit so that a long run of different shots isn't all decided by one of them
 BURST_GAP_SECS = 5
 BURST_MAX_PHOTOS = 12
+# how many of a fingerprint's 64 bits can differ between one photo of a burst and the next.  In this
+# library, pairs at 20 show the same scene, and pairs at 22 start to show different ones
+BURST_MAX_DIFFERENCE = 20
 # what a photo with no date of its own is treated as having
 NO_DATE = '0000:00:00 00:00:00'
 # cameras with unset clocks give dates like 1901:01:01, which shouldn't appear as years of photos
@@ -627,21 +632,30 @@ def _review_queue_page(datestring, offset, limit):
     A page of the queue, which counts bursts of photos as one tile each.  Each tile's item is
     the middle photo of its burst, with the others listed in its 'burst'
     """
+    table = _with_status()
+    _load_log('fingerprints', FINGERPRINTS_CSV)
     tiles = f"""
         WITH queue AS (
             SELECT
-                photo_id, SourceFile, DateTimeOriginal, review_status, rotation, Make, Model,
-                TRY_STRPTIME(LEFT(DateTimeOriginal, 19), '%Y:%m:%d %H:%M:%S') AS taken
-            FROM {_with_status()}
+                photos.photo_id, SourceFile, DateTimeOriginal, review_status, rotation, Make, Model,
+                TRY_STRPTIME(LEFT(DateTimeOriginal, 19), '%Y:%m:%d %H:%M:%S') AS taken,
+                -- the first of a fingerprint's two hashes covers the whole photo
+                TRY_CAST('0x' || LEFT(fingerprints.value, 16) AS UBIGINT) AS fingerprint
+            FROM {table} AS photos
+            LEFT JOIN fingerprints ON fingerprints.photo_id = SourceFile
             WHERE DateTimeOriginal LIKE ? AND review_status = '{UNREVIEWED}'
         ), bursts AS (
-            -- with no camera or time to go on, a photo is on its own
+            -- with no camera, time or fingerprint to go on, a photo is on its own
             SELECT *, SUM((
                 Model IS NULL OR taken IS NULL
                 OR COALESCE(date_diff('second', previous_taken, taken) > {BURST_GAP_SECS}, true)
+                OR COALESCE(bit_count(xor(previous_fingerprint, fingerprint)) > {BURST_MAX_DIFFERENCE}, true)
             )::INT) OVER (PARTITION BY Model ORDER BY taken, photo_id ROWS UNBOUNDED PRECEDING) AS burst
             FROM (
-                SELECT *, LAG(taken) OVER (PARTITION BY Model ORDER BY taken, photo_id) AS previous_taken
+                SELECT
+                    *,
+                    LAG(taken) OVER (PARTITION BY Model ORDER BY taken, photo_id) AS previous_taken,
+                    LAG(fingerprint) OVER (PARTITION BY Model ORDER BY taken, photo_id) AS previous_fingerprint
                 FROM queue
             )
         ), parts AS (

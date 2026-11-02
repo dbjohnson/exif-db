@@ -12,7 +12,7 @@ from api.jobs import Job
 
 
 job = Job('duplicates', 'find_duplicates.py')
-FINGERPRINTS = '/storage/duplicate_fingerprints.csv'
+FINGERPRINTS = exif.FINGERPRINTS_CSV
 PAIRS = '/storage/duplicate_pairs.csv'
 RESULTS = '/storage/duplicates.json'
 # when the results last applied were written
