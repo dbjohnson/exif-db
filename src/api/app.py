@@ -241,9 +241,15 @@ class RestoreRequest(BaseModel):
 
 
 @app.delete("/api/image{path:path}")
-def _delete_image(path: str):
+async def _delete_image(path: str, every_copy: bool = False):
     path = library_path(path)
-    files = trash.discard(path)
+    # found here on the event loop, the only place the index's connection is used
+    paths = exif.copies_of(path) if every_copy else [path]
+    return await run_in_threadpool(discard_photo, path, paths)
+
+
+def discard_photo(path, paths):
+    files = [moved for each in paths for moved in trash.discard(each)]
     exif.record_deleted({path, *files})
     return {'files': files}
 
@@ -484,6 +490,13 @@ def library_tile(entry, with_faces):
     }
 
 
+def screenshots_tile():
+    photos = exif.screenshots()
+    if not photos:
+        return None
+    return {'name': 'Screenshots', 'photos': len(photos), 'cover': photos[0], 'url': '/screenshots'}
+
+
 def library_years(tiles):
     dated = (tile for tile in tiles if tile['year'])
     years = []
@@ -613,8 +626,31 @@ async def _library(request: Request, with_faces: bool = False):
             "total": sum(tile['photos'] for tile in tiles),
             "with_faces": with_faces,
             "years": library_years(tiles),
-            "undated": next((tile for tile in tiles if not tile['year']), None)
+            "undated": next((tile for tile in tiles if not tile['year']), None),
+            # not with faces, as nobody wants a screenshot for its faces
+            "screenshots": None if with_faces else screenshots_tile()
         }
+    )
+
+
+@app.get("/screenshots")
+async def _screenshots(request: Request, year: str = None):
+    photos = exif.screenshots()
+    return photos_by_year_page(
+        request,
+        "Screenshots",
+        photos or [],
+        "/screenshots",
+        year,
+        back_url="/library",
+        back_label="Library",
+        # or another copy, such as one in a different backup folder, would take its place
+        delete_every_copy=True,
+        hint=(
+            "Screenshots show up here after the next scan, which reads every photo again to find them."
+            if photos is None else
+            None if photos else "No screenshots."
+        )
     )
 
 

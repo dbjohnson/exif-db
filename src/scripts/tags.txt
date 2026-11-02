@@ -43,6 +43,7 @@
 -Orientation
 -ResolutionUnit
 -ScaleFactor35efl
+-Screenshot
 -ShutterSpeed
 -ShutterSpeedValue
 -WhiteBalance

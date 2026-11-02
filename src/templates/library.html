@@ -16,6 +16,9 @@
       {% if undated %}
       <a href="#undated">Undated</a>
       {% endif %}
+      {% if screenshots %}
+      <a href="#screenshots">Screenshots</a>
+      {% endif %}
     </nav>
     {% macro month_tile(tile) %}
     <a class="month-tile" href="{{ tile.url }}">
@@ -47,6 +50,14 @@
       <h2>Undated <span>no usable date</span></h2>
       <div class="month-grid">
         {{ month_tile(undated) }}
+      </div>
+    </section>
+    {% endif %}
+    {% if screenshots %}
+    <section id="screenshots" class="library-year">
+      <h2>Screenshots <span>from iPhones and iPads, also in their months</span></h2>
+      <div class="month-grid">
+        {{ month_tile(screenshots) }}
       </div>
     </section>
     {% endif %}

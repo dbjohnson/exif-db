@@ -72,9 +72,9 @@ def load_csv(force_reload=False):
         _left_out_of_index.update(_deleted_paths())
         db.execute(
             f"""
-            CREATE OR REPLACE TABLE exif AS
+            CREATE OR REPLACE TEMP TABLE scanned AS
             SELECT
-                * REPLACE (COALESCE(DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal),
+                *,
                 ?::TIMESTAMP last_modified,
                 LOWER(REGEXP_REPLACE(FileName, '\\.[^.]*$', '')) || '|' || CASE
                     WHEN DateTimeOriginal IS NULL OR DateTimeOriginal = '{NO_DATE}' THEN 'size ' || FileSize
@@ -82,8 +82,21 @@ def load_csv(force_reload=False):
                 END AS photo_id
             FROM read_csv_auto(?, sample_size=-1, ignore_errors=true)
             WHERE MIMEType LIKE 'image/%'
+            """,
+            [
+                last_modified(),
+                EXIF_CSV
+            ]
+        )
+        # every file of each photo, as only one of them is kept below
+        db.execute("CREATE OR REPLACE TABLE photo_files AS SELECT photo_id, SourceFile FROM scanned")
+        db.execute(
+            f"""
+            CREATE OR REPLACE TABLE exif AS
+            SELECT * REPLACE (COALESCE(DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal)
+            FROM scanned
             -- so that another copy of a deleted photo can take its place
-            AND SourceFile NOT IN (SELECT photo_id FROM deletions)
+            WHERE SourceFile NOT IN (SELECT photo_id FROM deletions)
             -- prefer JPEGs, then PNGs, then HEICs, then everything else
             QUALIFY ROW_NUMBER() OVER (
                PARTITION BY photo_id
@@ -95,13 +108,10 @@ def load_csv(force_reload=False):
                 END,
                 -- the same file each time, as different photos can share an identity
                 SourceFile
-            ) = 1;
-            """,
-            [
-                last_modified(),
-                EXIF_CSV
-            ]
+            ) = 1
+            """
         )
+        db.execute("DROP TABLE scanned")
 
 
 def last_modified():
@@ -472,6 +482,30 @@ def photo_details(path):
 
 def photos_with_ids(photo_ids):
     return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids])
+
+
+def copies_of(path):
+    """
+    Every file in the index that's the same photo as this one, including this one, such as
+    the same screenshot backed up into two folders
+    """
+    load_csv()
+    rows = db.execute(
+        "SELECT SourceFile FROM photo_files WHERE photo_id IN (SELECT photo_id FROM photo_files WHERE SourceFile = ?)",
+        [path]
+    ).fetchall()
+    return [found for found, in rows] or [path]
+
+
+def screenshots():
+    """
+    Screenshots from an iPhone or iPad, newest first, which iOS marks as such.  None for an index
+    from before scans read that mark, until a scan has read every photo again
+    """
+    if 'Screenshot' not in tags():
+        return None
+    # a column with nothing in it yet reads as text rather than a number
+    return _library_rows("CAST(Screenshot AS VARCHAR) = '1'", [])
 
 
 def dated_folders():

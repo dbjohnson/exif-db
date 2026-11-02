@@ -1,7 +1,8 @@
 #!/bin/bash
 # Usage: scan.sh [--full]
-# Scans files changed since the last scan, or everything if --full is given (or there
-# is no index yet).  A full scan replaces the index only once it has succeeded.
+# Scans files changed since the last scan, or everything if --full is given, there is
+# no index yet, or the tags to read have changed since the index was made.  A full scan
+# replaces the index only once it has succeeded.
 
 EXIF_CSV="/storage/exif.csv"
 LAST_SCAN="/storage/last_scan"
@@ -10,8 +11,14 @@ LOCK="/storage/scan.lock"
 LOG="/storage/scan.log"
 RESULT="/storage/scan_result.json"
 TAGS_FILE=$(dirname "$(realpath "$0")")/tags.txt
+# defines tags of our own, such as Screenshot; exiftool needs -config before anything else
+CONFIG_FILE=$(dirname "$(realpath "$0")")/exiftool.config
+# what tags the index was made with: new ones need every file read again, as appending
+# rows with other columns would put values under the wrong ones
+TAGS_STAMP="/storage/scan_tags"
+TAGS=$(cat "${TAGS_FILE}" "${CONFIG_FILE}" | md5sum | cut -d ' ' -f 1)
 
-if [ "$1" == "--full" ] || [ ! -f ${EXIF_CSV} ]; then
+if [ "$1" == "--full" ] || [ ! -f ${EXIF_CSV} ] || [ "$(cat "${TAGS_STAMP}" 2>/dev/null)" != "${TAGS}" ]; then
     MODE="full"
 else
     MODE="incremental"
@@ -46,17 +53,18 @@ if [ "${MODE}" == "incremental" ]; then
     # original modified time, so most of what they add looks older than the last scan
     find /photo -not -path '*/[@.]*' -type f -cnewer "${NEWER}" > tmp.txt || exit 1
     if [ -s tmp.txt ]; then
-        exiftool -f -@ "${TAGS_FILE}" -@ tmp.txt -fast -progress -n -api "missingtagvalue^=" -csv > "${OUTPUT}"
+        exiftool -config "${CONFIG_FILE}" -f -@ "${TAGS_FILE}" -@ tmp.txt -fast -progress -n -api "missingtagvalue^=" -csv > "${OUTPUT}"
         [ -s "${OUTPUT}" ] || exit 1
         tail -n +2 "${OUTPUT}" >> "${EXIF_CSV}"
     else
         echo "No new files" >&2
     fi
 else
-    exiftool -f -@ "${TAGS_FILE}" -csv -i @eaDir -fast -progress -n -api "missingtagvalue^=" -r /photo > "${OUTPUT}"
+    exiftool -config "${CONFIG_FILE}" -f -@ "${TAGS_FILE}" -csv -i @eaDir -fast -progress -n -api "missingtagvalue^=" -r /photo > "${OUTPUT}"
     [ -s "${OUTPUT}" ] || exit 1
     [ -f "${EXIF_CSV}" ] && cp -p "${EXIF_CSV}" "${EXIF_CSV}.bak"
     mv "${OUTPUT}" "${EXIF_CSV}"
+    echo "${TAGS}" > "${TAGS_STAMP}"
 fi
 
 mv "${LAST_SCAN}.tmp" "${LAST_SCAN}"

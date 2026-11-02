@@ -17,6 +17,8 @@
       const YEAR = {{ (shown_year or none) | tojson }};
       // what to carry on into at the end of this page
       const NEXT_URL = {{ (next_url or none) | tojson }};
+      // whether deleting takes every copy of a photo, rather than letting another take its place
+      const DELETE_EVERY_COPY = {{ (delete_every_copy or false) | tojson }};
       // this page's "YYYY-MM", or null for undated photos
       const MONTH = {{ month | tojson }};
       // a page not organized by date still shows a photo once its date has changed
@@ -541,6 +543,10 @@
 
       // one at a time, as a single request for many could outlast the proxy's patience.  They're
       // gone from the page straight away, so that browsing carries on meanwhile
+      function deleteUrl(photo) {
+        return `/api/image${encodePath(photo.path)}${DELETE_EVERY_COPY ? '?every_copy=true' : ''}`;
+      }
+
       async function deleteSelected(button) {
         const photos = [...selected];
         if (!pressedTwice(button, `Delete ${photos.length.toLocaleString()}?`)) {
@@ -556,7 +562,7 @@
             showToast(`Deleting ${position + 1} of ${photos.length.toLocaleString()}…`);
           }
           try {
-            const response = await fetch(`/api/image${encodePath(photo.path)}`, {method: 'DELETE'});
+            const response = await fetch(deleteUrl(photo), {method: 'DELETE'});
             if (!response.ok) {
               throw new Error('Status: ' + response.status);
             }
@@ -969,7 +975,7 @@
           "Couldn't delete",
           async () => {
             // keepalive so that it still completes if the page is left straight after
-            const response = await fetch(`/api/image${encodePath(photo.path)}`, {method: 'DELETE', keepalive: true});
+            const response = await fetch(deleteUrl(photo), {method: 'DELETE', keepalive: true});
             if (!response.ok) {
               throw new Error('Status: ' + response.status);
             }
@@ -1067,6 +1073,9 @@
       <option value="{{ known }}"></option>
       {% endfor %}
     </datalist>
+    {% if hint %}
+    <p class="library-hint">{{ hint }}</p>
+    {% endif %}
     {% if not dated %}
     <p class="library-hint">These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.</p>
     {% endif %}

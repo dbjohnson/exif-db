@@ -13,7 +13,7 @@ Scan all files for exif data; subsequent runs will only check files added or cha
 docker compose run --rm -d exif-db bash /src/app/scripts/scan.sh
 ```
 
-To rebuild the index from scratch, add `--full`.  The current index stays in use until the rebuild succeeds, and is then kept as `exif.csv.bak`
+To rebuild the index from scratch, add `--full`.  The current index stays in use until the rebuild succeeds, and is then kept as `exif.csv.bak`.  A scan also rebuilds it by itself after `scripts/tags.txt` or `scripts/exiftool.config` changes, since every file has to be read again for the new tags (about 50 minutes for 80,000 files on a Synology DS224+)
 ```bash
 docker compose run --rm -d exif-db bash /src/app/scripts/scan.sh --full
 ```
@@ -44,6 +44,12 @@ Deleting moves a photo to `deleted/` in the storage volume and records it in `de
 `/library` browses the whole index by year and month, newest first, then shows a month's photos by day, also newest first, with a viewer for favoriting, rotating, hiding, deleting and downloading.  Unlike the gallery it includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, are under Undated, by folder.
 
 Any month, and Undated, has a Select button for approving, favoriting, rotating, hiding, deleting or setting the date of many photos at once (shift-click selects a range).  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
+
+## Screenshots
+
+`/screenshots`, also at the bottom of `/library`, has every screenshot from an iPhone or iPad, one year at a time, for deleting in bulk: Select, then Select all, then untick the ones to keep.  iOS marks each screenshot in its `UserComment` tag, which `scripts/exiftool.config` turns into a `Screenshot` column in the index, so new ones show up after the scan that finds them.  Screenshots stay in their months in the library too.
+
+Deleting from this page takes every copy of a screenshot, such as the same file backed up into two folders.  Elsewhere another copy takes a deleted photo's place.
 
 ## Finding faces
 
