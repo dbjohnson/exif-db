@@ -18,6 +18,7 @@ from api.people_db import from_db, to_db
 
 logger = logging.getLogger('uvicorn.error')
 job = Job('people', 'find_people.py')
+dogs_job = Job('dogs', 'find_dogs.py')
 # a face that's been looked at and isn't anyone worth naming
 NOBODY = ''
 # below these, a face isn't good enough to compare or to offer for naming: they're mostly blurs,
@@ -686,6 +687,22 @@ def to_scan(photos):
     """
     scanned = people_db.scanned_photos(_db())
     return [photo for photo in photos if photo['id'] not in scanned]
+
+
+def has_looked_for_dogs():
+    return _db().execute('SELECT 1 FROM animals_scanned LIMIT 1').fetchone() is not None
+
+
+def to_look_for_dogs(photos):
+    """
+    Those of these photos that haven't been looked at for dogs yet
+    """
+    scanned = {from_db(row[0]) for row in _db().execute('SELECT photo_id FROM animals_scanned')}
+    return [photo for photo in photos if photo['id'] not in scanned]
+
+
+def look_for_dogs(photos):
+    return dogs_job.start(photos, people_db.PATH)
 
 
 def _overlap(first, second):

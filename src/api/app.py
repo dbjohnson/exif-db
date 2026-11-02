@@ -662,10 +662,17 @@ async def check_photos_after_scans():
             duplicates.check()
         except Exception as e:
             logger.warning(f"Can't check for duplicates: {e}")
+        started = False
         try:
-            find_new_people()
+            started = find_new_people()
         except Exception as e:
             logger.warning(f"Can't start finding people: {e}")
+        try:
+            # not straight after people, whose worker may not have its lock yet
+            if not started:
+                find_new_dogs()
+        except Exception as e:
+            logger.warning(f"Can't start finding dogs: {e}")
 
 
 _people_checked = {}
@@ -673,17 +680,40 @@ _people_checked = {}
 
 def find_new_people():
     """
-    Finds the faces in photos the check for faces has just found some in.  Once the library has
-    been gone through, that is: the first time takes days here, so it's only started on request
+    Finds the faces in photos the check for faces has just found some in, and says whether it started.
+    Once the library has been gone through, that is: the first time takes days here, so it's only
+    started on request
     """
-    if scans.running() or faces.job.running() or people.job.running() or not people.has_scanned():
-        return
+    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    if busy or not people.has_scanned():
+        return False
     stamp = exif.faces_stamp()
     if _people_checked.get('stamp') != stamp:
         _people_checked['stamp'] = stamp
         photos = people.to_scan(exif.photos_with_faces())
         if photos:
-            people.start(photos)
+            return people.start(photos)
+    return False
+
+
+_dogs_checked = {}
+
+
+def find_new_dogs():
+    """
+    Finds the dogs in photos that haven't been looked at for them, after the faces in them have been
+    found, as both want the processor.  Like finding people, only once the library has been gone
+    through, which was done for this one on a faster computer
+    """
+    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    if busy or not people.has_looked_for_dogs():
+        return
+    stamp, _ = exif.shown_photos()
+    if _dogs_checked.get('stamp') != stamp:
+        _dogs_checked['stamp'] = stamp
+        photos = people.to_look_for_dogs(exif.shown_photo_list())
+        if photos:
+            people.look_for_dogs(photos)
 
 
 def update_hidden_faces():

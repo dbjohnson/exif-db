@@ -1,6 +1,6 @@
 """
-Works through a queue of photos, finding the faces in each, and adds them to the groups of faces
-they look like.  Started by api/people.py after a scan, and safe to stop at any time: every photo
+Works through a queue of photos, finding the faces in each, adds them to the groups of faces they
+look like, and names those that are clearly someone already named.  Started by api/people.py after a scan, and safe to stop at any time: every photo
 is saved as it's done, and the next run carries on from there.
 
 Usage: find_people.py <queue> <people.db> <progress> <lock>
@@ -80,7 +80,7 @@ def main(queue_path, database, progress_path, lock_path):
     # whatever was found is worth grouping, even if this was stopped part way
     progress['state'] = 'grouping'
     save_progress(progress_path, progress)
-    people_db.attach_new_faces(connection)
+    people_db.name_new_faces(connection, people_db.attach_new_faces(connection))
     progress.update(state='stopped' if stopping else 'finished', finished=int(time.time()))
     save_progress(progress_path, progress)
 

@@ -6,6 +6,8 @@ RUN pip3 install "fastapi[standard]" uvicorn jinja2 duckdb==1.5.6 pandas pillow 
 
 COPY scripts/fetch_face_models.py /tmp/fetch_face_models.py
 RUN python3 /tmp/fetch_face_models.py /opt/face-models
+COPY scripts/fetch_dog_models.py /tmp/fetch_dog_models.py
+RUN python3 /tmp/fetch_dog_models.py /opt/dog-models
 COPY scripts/fetch_places.py /tmp/fetch_places.py
 RUN python3 /tmp/fetch_places.py /opt/places
 

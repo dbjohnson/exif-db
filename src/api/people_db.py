@@ -7,6 +7,7 @@ import hashlib
 import os
 import sqlite3
 import time
+from collections import Counter
 
 import numpy as np
 
@@ -21,6 +22,20 @@ MIN_PIXELS = 30
 # a person than to untangle two people in one
 CLUSTER_SIMILARITY = 0.5
 CLUSTER_NEIGHBOURS = 10
+# a new face is given a name only when its group and its closest named faces in other photos both
+# say who it is.  Hiding the names given by hand in each naming, this named 77% of faces from 2024
+# on, and 3 of those 1,947 were wrong; older photos fare worse, mostly by mixing up Lucy and Jane
+NAME_GROUP_FACES = 5
+NAME_GROUP_SHARE = 0.95
+NAME_NEIGHBOURS = 10
+NAME_SIMILARITY = 0.45
+NAME_VOTES = 6
+NAME_VOTE_SHARE = 0.9
+# who a face is when it's been looked at and isn't anyone worth naming
+NOBODY = ''
+# a dog, once it's been given a name, is kept as a face with this score: below what faces need to
+# be compared or offered for naming, so it never joins a group of faces or a comparison of them
+DOG_FACE_SCORE = 0.5
 SCHEMA = """
     CREATE TABLE IF NOT EXISTS faces (
         id TEXT PRIMARY KEY,
@@ -57,6 +72,25 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- photos not to show faces from, as hidden and deleted ones are only known to the main index
     CREATE TABLE IF NOT EXISTS hidden_photos (photo_id BLOB PRIMARY KEY);
+    -- dogs and cats found in photos, as fractions of the copy looked at, described by DINOv2.  Cats
+    -- are only kept as what dogs aren't.  A dog's id is the id of the face it becomes once named,
+    -- and one with no face is still undecided
+    CREATE TABLE IF NOT EXISTS animals (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        photo_id BLOB NOT NULL,
+        path BLOB NOT NULL,
+        rotation INTEGER NOT NULL,
+        left REAL NOT NULL,
+        top REAL NOT NULL,
+        width REAL NOT NULL,
+        height REAL NOT NULL,
+        score REAL NOT NULL,
+        pixels REAL NOT NULL,
+        embedding BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS animals_photo ON animals (photo_id);
+    CREATE TABLE IF NOT EXISTS animals_scanned (photo_id BLOB PRIMARY KEY, animals INTEGER NOT NULL, at INTEGER NOT NULL);
 """
 
 
@@ -132,7 +166,8 @@ def _usable_where():
 
 def attach_new_faces(connection):
     """
-    Puts each new face in the group its closest faces are mostly in, or a group of its own.  Groups
+    Puts each new face in the group its closest faces are mostly in, or a group of its own, and returns
+    their ids.  Groups
     are worked out for the whole library once, by scripts/cluster_people.py, and only added to here:
     that's slow enough on a NAS that it can't be done again every time something changes
     """
@@ -140,7 +175,7 @@ def attach_new_faces(connection):
         f'SELECT id, embedding FROM faces WHERE cluster IS NULL AND {_usable_where()}'
     ).fetchall()
     if not new:
-        return 0
+        return []
     rows = connection.execute(
         'SELECT cluster, embedding FROM faces WHERE cluster IS NOT NULL'
     ).fetchall()
@@ -171,4 +206,78 @@ def attach_new_faces(connection):
         chosen.append((cluster, face_id))
     with connection:
         connection.executemany('UPDATE faces SET cluster = ? WHERE id = ?', chosen)
+    return [face_id for _, face_id in chosen]
+
+
+def record_names(connection, rows):
+    """
+    Gives faces names, as (face id, name), and keeps a note of each
+    """
+    now = time.time_ns()
+    with connection:
+        connection.executemany('INSERT OR REPLACE INTO names (face_id, name, at) VALUES (?, ?, ?)', [(face_id, name, now) for face_id, name in rows])
+        connection.executemany('INSERT INTO name_history (face_id, name, at) VALUES (?, ?, ?)', [(face_id, name, now) for face_id, name in rows])
+
+
+def name_new_faces(connection, face_ids):
+    """
+    Names those of these faces that are clearly someone already named, going by their group and their
+    closest named faces in other photos, and returns how many were named.  Leaves alone faces that
+    already have a name or have been said not to be that person, and a name already in the photo,
+    since nobody is in a photo twice
+    """
+    if not face_ids:
+        return 0
+    rows = connection.execute(
+        f"""
+        SELECT faces.id, faces.photo_id, faces.cluster, COALESCE(names.name, ''), faces.embedding
+        FROM faces LEFT JOIN names ON names.face_id = faces.id
+        WHERE {_usable_where()} AND (names.name IS NULL OR names.name <> ?)
+            AND faces.photo_id NOT IN (SELECT photo_id FROM hidden_photos)
+        """,
+        (NOBODY,)
+    ).fetchall()
+    places = {row[0]: place for place, row in enumerate(rows)}
+    who = np.array([row[3] for row in rows], dtype=object)
+    photo_numbers = {}
+    photos = np.array([photo_numbers.setdefault(row[1], len(photo_numbers)) for row in rows])
+    clusters = np.array([-1 if row[2] is None else row[2] for row in rows])
+    named = np.flatnonzero(who != '')
+    new = [places[face_id] for face_id in face_ids if face_id in places and who[places[face_id]] == '']
+    if not new or len(named) < NAME_NEIGHBOURS:
+        return 0
+    embeddings = np.frombuffer(b''.join(row[4] for row in rows), dtype=np.float32).reshape(-1, EMBEDDING_SIZE)
+    group_names = {}
+    for place in named:
+        group_names.setdefault(clusters[place], Counter())[who[place]] += 1
+    refused = {}
+    for face_id, name in connection.execute('SELECT face_id, name FROM not_person'):
+        refused.setdefault(face_id, set()).add(name)
+    in_photo = {}
+    for place in named:
+        in_photo.setdefault(photos[place], set()).add(who[place])
+    similar = embeddings[new] @ embeddings[named].T
+    similar[photos[new][:, None] == photos[named]] = -1
+    closest = np.argpartition(-similar, NAME_NEIGHBOURS - 1, axis=1)[:, :NAME_NEIGHBOURS]
+    chosen = []
+    for row, place in enumerate(new):
+        counts = group_names.get(clusters[place]) if clusters[place] >= 0 else None
+        if not counts:
+            continue
+        name, count = counts.most_common(1)[0]
+        if count < NAME_GROUP_FACES or count < NAME_GROUP_SHARE * sum(counts.values()):
+            continue
+        votes, weights = 0, Counter()
+        for neighbour in closest[row]:
+            weight = similar[row, neighbour]
+            if weight >= NAME_SIMILARITY:
+                weights[who[named[neighbour]]] += weight
+                votes += who[named[neighbour]] == name
+        if votes < NAME_VOTES or weights[name] < NAME_VOTE_SHARE * sum(weights.values()):
+            continue
+        if name in in_photo.get(photos[place], ()) or name in refused.get(rows[place][0], ()):
+            continue
+        in_photo.setdefault(photos[place], set()).add(name)
+        chosen.append((rows[place][0], name))
+    record_names(connection, chosen)
     return len(chosen)

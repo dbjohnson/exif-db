@@ -66,6 +66,8 @@ python scripts/cluster_people.py people.db
 
 Copy `people.db` into the storage volume before starting the app with it.  Faces, names and covers are all kept in that file.  Faces too small or too poor to compare are kept but not offered for naming, as they're mostly blurs and the backs of heads.
 
+After the first time, each new face joins the group its closest faces are in, and gets a name when that's clear: its group has at least 5 named faces and 95% of them are one person, and at least 6 of its 10 closest named faces in other photos are that person, making up 90% of how alike they all are.  A name already in the photo, or one the face has been said not to be, isn't given.  Hiding the names given by hand and naming them this way, 77% of faces from 2024 on got a name and 3 of 1,947 were wrong; older photos fare worse, mostly by mixing up sisters as children.  Faces that don't get a name wait in "Who is this?" as before.
+
 `/people` shows every group of faces that look alike, loading more as you scroll.  Groups that look like someone already named come first, closest first, each with that name as a suggestion.  The rest follow, largest first, with faces that look like no others at the end.  Comparing every group with every named face runs in the background and can take a minute or two, so after you name someone the order and suggestions catch up on a later reload.  Naming a group, or some of the faces in it, adds that person's photos to their own page, one year at a time.
 
 Edit on a person's page renames them, or removes them, which sends their faces back to "Who is this?" and leaves the photos alone.  Using a name someone already has joins the two together.  All of these can be undone straight afterwards.
@@ -75,6 +77,14 @@ The viewer's person button draws a box around each face found in a photo, and a 
 A person's Faces page also has "May be someone else", which lists faces whose closest named faces in other photos mostly have a different name, grouped by that name.  It only suggests: nothing changes until you say who a face is, and a face you've settled doesn't come up again.  New names change what it finds.
 
 "Looks like" is the same the other way round: faces not called this person, named or not, with at least 3 of their 10 closest named faces being this person and those making up most of them.  Relatives do come up: hiding every name of one person left about 5% of their faces matching someone else.  Saying a face without a name isn't this person doesn't stop it coming up for someone else.  Both comparisons run on the server when the page is opened, taking from a few seconds to a couple of minutes for someone with 16,000 faces on a Celeron J4125.  A person's cover is otherwise their largest, clearest face.
+
+## Dogs
+
+Dogs are named like people, and show up the same way on `/people` and in the viewer, as a box around the whole dog.  `scripts/find_dogs.py` runs after the people, on every photo that hasn't been looked at for dogs, about 10 seconds a photo on a Celeron J4125.  It finds dogs and cats with [YOLOX-m](https://github.com/Megvii-BaseDetection/YOLOX) and describes each with [DINOv2-small](https://github.com/facebookresearch/dinov2), both Apache 2.0, fetched when the image is built.  They're kept in `people.db` too.
+
+For each dog with at least 5 named photos, a logistic regression on those descriptions is worked out afresh every time, from the dogs with that name against every other named dog, every cat, and every dog photographed more than half a year before that dog's first named photo or a year after its last.  A new dog gets a name when it's from around when that dog was photographed and the model is at least 90% sure.  Without the dates, a friend's dog of the same breed would pass; without the cats, a black cat passed for a black dog.  Names given or changed by hand count from the next run, as does a name given to a dog's face, once most of that name's faces are inside dogs.  A named dog whose name is taken off isn't named again.
+
+Like faces, it only starts once a library has been gone through.  This one's was done on a faster computer with a different detector, YOLO11m, and named the same way.  Checked by eye, samples of 60 named photos of each dog were all right, while about 5 to 10% of those named with less than 97% certainty were another dog, two dogs in one box, or a cat.
 
 ## Places
 

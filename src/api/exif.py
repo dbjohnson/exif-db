@@ -560,6 +560,20 @@ def photos_with_faces():
     return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
 
 
+def shown_photo_list():
+    # every photo in the library that isn't hidden, newest first
+    table = _with_status()
+    rows = db.execute(
+        f"""
+        SELECT photo_id, SourceFile, rotation FROM {table}
+        WHERE review_status <> ?
+        ORDER BY DateTimeOriginal DESC
+        """,
+        [REJECTED]
+    ).fetchall()
+    return [{'id': photo_id, 'path': path, 'rotation': rotation} for photo_id, path, rotation in rows]
+
+
 def faces_stamp():
     # the same until the check for faces has found more
     return _file_stamps(FACES_CSV)
