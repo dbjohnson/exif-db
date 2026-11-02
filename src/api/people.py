@@ -59,6 +59,8 @@ _cache = {}
 _comparisons = {}
 # one at a time, as each uses all the processor it can get
 _comparisons_lock = threading.Lock()
+# so that two pages loading at once don't both spend seconds on the same summary
+_summary_lock = threading.Lock()
 DOUBTS = 'doubts'
 LIKE = 'like'
 GROUPS = 'groups'
@@ -488,63 +490,96 @@ def _group_comparison():
 NOTHING_COMPARED = {'matches': {}, 'tightness': {}}
 
 
+def _summary():
+    """
+    What every view of /people goes on: how many faces and photos there are, the people, and the
+    undecided groups in each view, along with who groups look like.  That takes the NAS a few
+    seconds, so it's worked out once for each state of the names and of the comparison, and also
+    how working out the latest comparison is going
+    """
+    comparison, entry = _group_comparison()
+    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone())
+    with _summary_lock:
+        summary = _cache.get('summary')
+        if summary and summary['stamp'] == stamp and summary['comparison'] is comparison:
+            return summary, entry
+        db = _db()
+        faces, photos = db.execute(
+            f'SELECT COUNT(*), COUNT(DISTINCT photo_id) FROM faces WHERE {USABLE} AND {SHOWN}'
+        ).fetchone()
+        covers = dict(db.execute(
+            'SELECT covers.name, covers.face_id FROM covers JOIN names ON names.face_id = covers.face_id AND names.name = covers.name'
+        ))
+        people = db.execute(
+            f"""
+            SELECT name, COUNT(*), COUNT(DISTINCT photo_id), MAX(pixels * score), id FROM (
+                SELECT names.name AS name, faces.id AS id, photo_id, pixels, score
+                FROM names JOIN faces ON faces.id = names.face_id
+                WHERE names.name <> ? AND {SHOWN}
+            )
+            GROUP BY name
+            ORDER BY COUNT(*) DESC
+            """,
+            (NOBODY,)
+        ).fetchall()
+        compared = comparison or NOTHING_COMPARED
+        summary = {
+            'stamp': stamp,
+            'comparison': comparison,
+            'compared': compared,
+            'faces': faces,
+            'photos': photos,
+            'people': [
+                # SQLite gives best_face from the row with the largest value when a query has one MAX
+                {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
+                for name, count, person_photos, _, best_face in people
+            ],
+            'views': _views(compared)
+        }
+        _cache['summary'] = summary
+    return summary, entry
+
+
 def groups_after(view, score, faces, group):
     """
     The next groups in a view after one with this score and this many faces, and whether there are
     more.  Going by where the last one was, not by page, as naming a group takes it out from before
     the ones still to come
     """
-    comparison = _group_comparison()[0] or NOTHING_COMPARED
+    summary, _ = _summary()
+    compared = summary['compared']
     after = _place(score, faces, group)
-    rows = [row for row in _views(comparison)[view] if _place(_score(view, comparison, row[0]), row[1], row[0]) > after]
-    return _group_details(rows[:GROUPS_PAGE], view, comparison), len(rows) > GROUPS_PAGE
+    rows = [row for row in summary['views'][view] if _place(_score(view, compared, row[0]), row[1], row[0]) > after]
+    return _group_details(rows[:GROUPS_PAGE], view, compared), len(rows) > GROUPS_PAGE
 
 
 def overview(view):
     """
     The people named so far, and the first of the undecided groups in a view, or none for MAP
     """
-    comparison, entry = _group_comparison()
-    stamp = (_stamp(), _db().execute('SELECT COUNT(*), MAX(rowid) FROM covers').fetchone(), view)
-    # those still comparing for the first time are the only ones with no idea who a group looks like
-    comparing = {'comparing': comparison is None and entry['working'], 'comparing_failed': entry['failed']}
-    if _cache.get('overview_stamp') == stamp and _cache.get('overview_comparison') is comparison:
-        return {**_cache['overview'], **comparing}
-    db = _db()
-    faces, photos = db.execute(
-        f'SELECT COUNT(*), COUNT(DISTINCT photo_id) FROM faces WHERE {USABLE} AND {SHOWN}'
-    ).fetchone()
-    covers = dict(db.execute(
-        'SELECT covers.name, covers.face_id FROM covers JOIN names ON names.face_id = covers.face_id AND names.name = covers.name'
-    ))
-    people = db.execute(
-        f"""
-        SELECT name, COUNT(*), COUNT(DISTINCT photo_id), MAX(pixels * score), id FROM (
-            SELECT names.name AS name, faces.id AS id, photo_id, pixels, score
-            FROM names JOIN faces ON faces.id = names.face_id
-            WHERE names.name <> ? AND {SHOWN}
-        )
-        GROUP BY name
-        ORDER BY COUNT(*) DESC
-        """,
-        (NOBODY,)
-    ).fetchall()
-    views = _views(comparison or NOTHING_COMPARED)
-    shown = views.get(view, [])
-    result = {
-        'faces': faces,
-        'photos': photos,
-        'people': [
-            # SQLite gives best_face from the row with the largest value when a query has one MAX
-            {'name': name, 'faces': count, 'photos': person_photos, 'cover': covers.get(name, best_face)}
-            for name, count, person_photos, _, best_face in people
-        ],
-        'groups': _group_details(shown[:GROUPS_PAGE], view, comparison or NOTHING_COMPARED),
+    summary, entry = _summary()
+    shown = summary['views'].get(view, [])
+    return {
+        'faces': summary['faces'],
+        'photos': summary['photos'],
+        'people': summary['people'],
+        'groups': _group_details(shown[:GROUPS_PAGE], view, summary['compared']),
         'more_groups': len(shown) > GROUPS_PAGE,
-        'counts': {key: len(rows) for key, rows in views.items()}
+        'counts': {key: len(rows) for key, rows in summary['views'].items()},
+        # those still comparing for the first time are the only ones with no idea who a group looks like
+        'comparing': summary['comparison'] is None and entry['working'],
+        'comparing_failed': entry['failed']
     }
-    _cache.update(overview_stamp=stamp, overview_comparison=comparison, overview=result)
-    return {**result, **comparing}
+
+
+def warm_up():
+    """
+    Starts working out what /people needs that takes a while, such as after a scan, so that it's
+    ready when someone looks.  Says whether all of it is done
+    """
+    _, entry = _summary()
+    map_entry = _comparison(MAP, '', _work_out_map)
+    return not entry['working'] and not map_entry['working']
 
 
 def _map_nodes(places_by_key, ids, embeddings):

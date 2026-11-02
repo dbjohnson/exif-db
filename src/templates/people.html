@@ -107,7 +107,7 @@
         {{ "{:,}".format(faces) }} faces in {{ "{:,}".format(photos) }} photos{% if status.running %}, still finding more{% endif %}.
       </p>
       {% if comparing and tab != 'map' %}
-      <p id="comparing-note" class="people-hint">Comparing these groups with named faces, which can take a minute or two. Those closest to someone will then come first.</p>
+      <p id="comparing-note" class="people-hint"><span class="spinner" aria-hidden="true"></span> Comparing these groups with named faces, which can take a minute or two. Those closest to someone will then come first.</p>
       {% elif comparing_failed %}
       <p class="people-hint">Couldn't compare these groups with named faces. The server's log says why.</p>
       {% endif %}
@@ -137,16 +137,16 @@
       {% if counts.suggested or counts.biggest or people %}
       <h2 id="who">Who is this?</h2>
       <nav class="people-tabs" aria-label="Who is this?">
-        <a href="/people?tab=suggested#who"{% if tab == 'suggested' %} aria-current="page"{% endif %}>Suggested <span>{{ "{:,}".format(counts.suggested) }}</span></a>
-        <a href="/people?tab=groups&amp;sort={{ sort }}#who"{% if tab == 'groups' %} aria-current="page"{% endif %}>Groups <span>{{ "{:,}".format(counts.biggest) }}</span></a>
-        <a href="/people?tab=map#who"{% if tab == 'map' %} aria-current="page"{% endif %}>Map</a>
+        <a class="control" href="/people?tab=suggested#who"{% if tab == 'suggested' %} aria-current="page"{% endif %}>Suggested <span>{{ "{:,}".format(counts.suggested) }}</span></a>
+        <a class="control" href="/people?tab=groups&amp;sort={{ sort }}#who"{% if tab == 'groups' %} aria-current="page"{% endif %}>Groups <span>{{ "{:,}".format(counts.biggest) }}</span></a>
+        <a class="control" href="/people?tab=map#who"{% if tab == 'map' %} aria-current="page"{% endif %}>Map</a>
       </nav>
       {% if tab == 'suggested' %}
       <p class="people-hint">Groups of faces that look like someone already named, closest first. A group can mix people, so open it to name only some.</p>
       {% elif tab == 'groups' %}
       <nav class="people-tabs people-sort" aria-label="Order">
-        <a href="/people?tab=groups&amp;sort=biggest#who"{% if sort == 'biggest' %} aria-current="page"{% endif %}>Biggest</a>
-        <a href="/people?tab=groups&amp;sort=tightest#who"{% if sort == 'tightest' %} aria-current="page"{% endif %}>Tightest <span>{{ "{:,}".format(counts.tightest) }}</span></a>
+        <a class="control" href="/people?tab=groups&amp;sort=biggest#who"{% if sort == 'biggest' %} aria-current="page"{% endif %}>Biggest</a>
+        <a class="control" href="/people?tab=groups&amp;sort=tightest#who"{% if sort == 'tightest' %} aria-current="page"{% endif %}>Tightest <span>{{ "{:,}".format(counts.tightest) }}</span></a>
       </nav>
       <p class="people-hint">
         {% if sort == 'tightest' %}
@@ -158,17 +158,24 @@
       {% endif %}
       {% if tab == 'map' %}
       <div class="people-map-bar">
-        <label><input type="checkbox" id="map-merge" /> One dot per person</label>
-        <span id="map-note" class="people-hint">Placing groups by how alike they are, which can take a minute or two.</span>
+        <button type="button" id="map-merge" aria-pressed="false">One dot per person</button>
+        <span id="map-note" class="people-hint" hidden></span>
+        <button type="button" id="map-refresh" hidden>Show the updated map</button>
         <span class="people-map-zoom">
           <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
           <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
         </span>
       </div>
-      <svg id="people-map" class="people-map" role="img" aria-label="Groups of faces placed by how alike they are">
-        <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
-        <g id="map-dots"></g>
-      </svg>
+      <div class="people-map-frame">
+        <svg id="people-map" class="people-map" role="img" aria-label="Groups of faces placed by how alike they are">
+          <defs><clipPath id="map-circle" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5" /></clipPath></defs>
+          <g id="map-dots"></g>
+        </svg>
+        <div id="map-loading" class="people-map-loading">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="map-loading-text">Loading the map</span>
+        </div>
+      </div>
       <div id="map-tip" class="people-map-tip" hidden></div>
       {% elif groups %}
       {% include '_person_groups.html' %}

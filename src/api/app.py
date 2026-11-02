@@ -37,6 +37,19 @@ STATIC_DIR = os.path.join(APP_DIR, "static")
 TEMPLATES_DIR = os.path.join(APP_DIR, "templates")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+
+@app.middleware("http")
+async def _check_static_files(request: Request, call_next):
+    # without this, Safari went on using the stylesheet from before a deploy until a hard refresh.
+    # Asking each time costs a quick "not modified" answer.  What's vendored never changes
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith('/static/') and not path.startswith('/static/vendor/'):
+        response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
 exif.load_csv()
 scans.start_scheduler()
 DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
@@ -709,9 +722,40 @@ async def check_photos_after_scans():
                 find_new_dogs()
         except Exception as e:
             logger.warning(f"Can't start finding dogs: {e}")
+        try:
+            if not started:
+                await warm_up_people()
+        except Exception as e:
+            logger.warning(f"Can't get the people page ready: {e}")
 
 
 _people_checked = {}
+_people_warmed = {}
+
+
+def _finished(progress):
+    return progress.get('finished') if progress else None
+
+
+async def warm_up_people():
+    """
+    Works out who groups look like and the map of them once a scan and the jobs after it are done,
+    and once after starting, so that /people doesn't wait a minute or two for them.  They're worked
+    out again as names change, but only when someone looks
+    """
+    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    if busy or not people.available():
+        return
+    key = (_finished(scans.last_result()), _finished(people.job.progress()), _finished(people.dogs_job.progress()))
+    if _people_warmed.get('key') == key:
+        return
+
+    def work():
+        update_hidden_faces()
+        return people.warm_up()
+    # the summary takes a few seconds, which would hold up every page if it ran here
+    if await asyncio.to_thread(work):
+        _people_warmed['key'] = key
 
 
 def find_new_people():

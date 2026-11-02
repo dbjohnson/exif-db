@@ -2276,44 +2276,24 @@ a.movie-tile {
 .people-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 0 0 8px;
-}
-
-.people-tabs a {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  min-height: var(--control-height);
-  padding: 0 12px;
-  border-radius: var(--radius);
-  color: var(--muted);
-  font-size: 14px;
-  text-decoration: none;
+  margin: 0 0 10px;
 }
 
 .people-tabs a span {
-  color: var(--disabled);
+  color: var(--muted);
   font-size: 12px;
 }
 
-.people-tabs a[aria-current="page"] {
+/* the tab or toggle that's on, like the page's own place in the menu */
+.people-tabs a[aria-current="page"],
+.people-map-bar button[aria-pressed="true"] {
+  border-color: var(--border-strong);
   background: var(--selected);
   color: var(--text-strong);
 }
 
-.people-tabs a[aria-current="page"] span {
-  color: var(--muted);
-}
-
-@media (hover: hover) {
-  .people-tabs a:hover {
-    background: var(--hover);
-    color: var(--text-strong);
-  }
-}
-
-.people-sort a {
+.people-sort .control {
   min-height: calc(var(--control-height) - 6px);
   font-size: 13px;
 }
@@ -2322,15 +2302,12 @@ a.movie-tile {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: 8px 12px;
   margin: 0 0 8px;
-  font-size: 13px;
 }
 
-.people-map-bar label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.people-map-bar .people-hint {
+  margin: 0;
 }
 
 .people-map-zoom {
@@ -2339,10 +2316,32 @@ a.movie-tile {
   margin-left: auto;
 }
 
-.people-map-zoom button {
+.people .people-map-zoom button {
   width: var(--control-height);
   padding: 0;
   font-size: 18px;
+}
+
+.people-map-frame {
+  position: relative;
+}
+
+.people-map-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.people-map-loading[hidden] {
+  display: none;
 }
 
 .people-map {
@@ -2418,6 +2417,68 @@ a.movie-tile {
 
 .people-map-tip span {
   color: var(--muted);
+}
+
+/* something the NAS is still working out */
+.spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-right: 2px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-strong);
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner[hidden] {
+  display: none;
+}
+
+.people-map-loading .spinner {
+  width: 20px;
+  height: 20px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* a bar along the top while the next page is on its way, from navigation.js */
+html.navigating::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 50% 100%;
+  animation: navigating 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes navigating {
+  from {
+    background-position: -100% 0;
+  }
+
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  html.navigating::before {
+    animation-duration: 3s;
+  }
 }
 
 .face-grid {

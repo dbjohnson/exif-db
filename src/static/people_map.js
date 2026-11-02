@@ -5,29 +5,77 @@ const MAP_MERGE = 'people-map-merge';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let mapResult = null;
 let mapView = null;
+// whether someone has zoomed or moved the map since it was drawn, so a newer one shouldn't replace it
+let mapMoved = false;
 
-async function loadMap() {
+function setMapNote(text, spinning = false) {
   const note = document.getElementById('map-note');
+  note.replaceChildren();
+  if (spinning) {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    note.append(spinner, ' ');
+  }
+  note.append(text);
+  note.hidden = !text;
+}
+
+function setMapLoading(text, spinning = true) {
+  document.getElementById('map-loading').hidden = !text;
+  document.getElementById('map-loading-text').textContent = text;
+  document.querySelector('#map-loading .spinner').hidden = !spinning;
+}
+
+// the map is worked out in the background after each scan and when names change.  An older one is
+// shown while a newer one is on its way
+async function loadMap() {
+  let wait = 3000;
   try {
     const response = await fetch('/api/people/map');
     if (!response.ok) {
       throw new Error('Status: ' + response.status);
     }
-    const {map, failed} = await response.json();
-    if (map) {
-      mapResult = map;
-      note.hidden = true;
-      drawMap();
+    const {map, working, failed} = await response.json();
+    if (!mapResult) {
+      if (map) {
+        mapResult = map;
+        drawMap();
+      } else if (failed) {
+        setMapLoading("Couldn't work out the map. The server's log says why.", false);
+        return;
+      } else {
+        setMapLoading('Placing groups by how alike they look, which takes a minute or two after a restart');
+      }
+    } else if (!working) {
+      if (failed) {
+        setMapNote("Couldn't update the map. The server's log says why.");
+      } else if (mapMoved) {
+        setMapNote('');
+        const refresh = document.getElementById('map-refresh');
+        refresh.hidden = false;
+        refresh.onclick = () => {
+          refresh.hidden = true;
+          mapResult = map;
+          drawMap();
+        };
+      } else {
+        setMapNote('');
+        mapResult = map;
+        drawMap();
+      }
       return;
     }
-    if (failed) {
-      note.textContent = "Couldn't work out the map. The server's log says why.";
+    if (mapResult && working) {
+      setMapNote('Updating for the latest names', true);
+    } else if (mapResult) {
       return;
     }
   } catch (error) {
     // the next try may do better
+    wait = 5000;
   }
-  setTimeout(loadMap, 3000);
+  setTimeout(loadMap, wait);
 }
 
 function dotRadius(faces, scale) {
@@ -79,15 +127,15 @@ function setView(svg, view) {
 function drawMap() {
   const svg = document.getElementById('people-map');
   const layer = document.getElementById('map-dots');
-  const merged = document.getElementById('map-merge').checked;
+  const merged = document.getElementById('map-merge').getAttribute('aria-pressed') === 'true';
   const nodes = mapResult[merged ? 'people' : 'groups'];
   layer.replaceChildren();
+  mapMoved = false;
   if (!nodes.length) {
-    const note = document.getElementById('map-note');
-    note.textContent = 'No groups big enough to show yet.';
-    note.hidden = false;
+    setMapLoading('No groups big enough to show yet', false);
     return;
   }
+  setMapLoading('');
   const width = svg.clientWidth;
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
@@ -181,6 +229,7 @@ function hideMapTip() {
 
 // zooming by a factor, keeping the point at clientX, clientY where it is
 function zoomMap(svg, factor, clientX, clientY) {
+  mapMoved = true;
   const box = svg.getBoundingClientRect();
   const x = mapView.x + (clientX - box.left) / box.width * mapView.w;
   const y = mapView.y + (clientY - box.top) / box.height * mapView.h;
@@ -219,6 +268,7 @@ function watchMapGestures(svg) {
       if (dx || dy) {
         dragged = dragged || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4;
         svg.classList.add('dragging');
+        mapMoved = true;
         hideMapTip();
         setView(svg, {...mapView, x: mapView.x - dx / box.width * mapView.w, y: mapView.y - dy / box.height * mapView.h});
       }
@@ -272,9 +322,11 @@ window.addEventListener('DOMContentLoaded', () => {
     return;
   }
   const merge = document.getElementById('map-merge');
-  merge.checked = localStorage.getItem(MAP_MERGE) === '1';
-  merge.addEventListener('change', () => {
-    localStorage.setItem(MAP_MERGE, merge.checked ? '1' : '0');
+  merge.setAttribute('aria-pressed', localStorage.getItem(MAP_MERGE) === '1' ? 'true' : 'false');
+  merge.addEventListener('click', () => {
+    const merged = merge.getAttribute('aria-pressed') !== 'true';
+    merge.setAttribute('aria-pressed', merged ? 'true' : 'false');
+    localStorage.setItem(MAP_MERGE, merged ? '1' : '0');
     if (mapResult) {
       drawMap();
     }
