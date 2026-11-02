@@ -15,6 +15,10 @@
       // a big group or person shows a page of faces at a time, and has this many in all
       const TOTAL = {{ total }};
       const GROUP = {{ (group if group is not none else none) | tojson }};
+      const YEAR = {{ (shown_year or none) | tojson }};
+      // faces that seem to be someone else, which stay settled once they've been looked at
+      const CHECKING = {{ checking | tojson }};
+      const WORKING = {{ working | tojson }};
       const selected = new Set();
       let lastPicked = null;
 
@@ -38,6 +42,60 @@
           coverButton.disabled = !only;
           coverButton.textContent = only && only === coverFace ? 'Automatic cover' : 'Use as cover';
         }
+        renderSections();
+      }
+
+      // a row of faces that look like the same person: its buttons go for those picked out in it, or all of it
+      function sectionFaces(section) {
+        const inSection = [...section.querySelectorAll('.face-tile:not([hidden])')];
+        const picked = inSection.filter(tile => selected.has(tile));
+        return picked.length ? picked : inSection;
+      }
+
+      function renderSections() {
+        document.querySelectorAll('.face-section').forEach(section => {
+          const count = sectionFaces(section).length;
+          const these = count === 1 ? 'This is' : `These ${count.toLocaleString()} are`;
+          section.querySelector('.face-section-move').textContent = `${these} ${section.dataset.looksLike}`;
+          section.querySelector('.face-section-keep').textContent = `${these} ${CURRENT_NAME}`;
+        });
+      }
+
+      function keepFaces(section) {
+        const chosen = sectionFaces(section);
+        const faceIds = chosen.map(tile => tile.dataset.faceId);
+        postJson('/api/people/faces/checked', {face_ids: faceIds, checked: true}).then(() => {
+          hiddenSoFar += faceIds.length;
+          chosen.forEach(tile => {
+            setPicked(tile, false);
+            tile.hidden = true;
+          });
+          render();
+          showToast(`Kept ${faceIds.length.toLocaleString()} as ${CURRENT_NAME}`, async () => {
+            try {
+              await postJson('/api/people/faces/checked', {face_ids: faceIds, checked: false});
+              hiddenSoFar -= faceIds.length;
+              chosen.forEach(tile => tile.hidden = false);
+              render();
+            } catch (error) {
+              showToast(`Couldn't undo: ${error.message}`);
+            }
+          });
+        }).catch(error => showToast(`Couldn't save: ${error.message}`));
+      }
+
+      // comparing a person's faces with everyone's goes on in the background
+      async function waitForComparing() {
+        try {
+          const response = await fetch(`/api/people/doubts?name=${encodeURIComponent(CURRENT_NAME)}`);
+          if (response.ok && !(await response.json()).working) {
+            location.reload();
+            return;
+          }
+        } catch (error) {
+          // the next try may do better
+        }
+        setTimeout(waitForComparing, 2000);
       }
 
       function renderCover() {
@@ -130,24 +188,23 @@
         render();
       }
 
-      // a whole group, which can be more faces than this page shows
+      // a whole group, or its year, which can be more faces than this page shows
       async function allInGroup() {
-        const response = await fetch(`/people/group/${GROUP}/ids`);
+        const response = await fetch(`/people/group/${GROUP}/ids${YEAR ? `?year=${encodeURIComponent(YEAR)}` : ''}`);
         if (!response.ok) {
           throw new Error('Status: ' + response.status);
         }
         return response.json();
       }
 
-      async function apply(name) {
-        const chosen = selected.size ? [...selected] : tiles();
+      async function apply(name, chosen = selected.size ? [...selected] : tiles()) {
         if (!chosen.length) {
           return;
         }
         try {
           const wholeGroup = GROUP !== null && !selected.size;
           const faceIds = wholeGroup ? await allInGroup() : chosen.map(tile => tile.dataset.faceId);
-          const {previous} = await postJson('/api/people/faces', {face_ids: faceIds, name});
+          const {previous} = await postJson('/api/people/faces', {face_ids: faceIds, name, checked: CHECKING});
           hiddenSoFar += faceIds.length;
           chosen.forEach(tile => {
             setPicked(tile, false);
@@ -157,7 +214,7 @@
           const said = name.trim() ? `Named ${faceIds.length.toLocaleString()} as ${name.trim()}` : `Skipped ${faceIds.length.toLocaleString()}`;
           showToast(said, async () => {
             try {
-              await postJson('/api/people/faces/restore', {previous});
+              await postJson('/api/people/faces/restore', {previous, checked: CHECKING});
               hiddenSoFar -= faceIds.length;
               chosen.forEach(tile => tile.hidden = false);
               render();
@@ -177,10 +234,27 @@
         }
       }
 
-      window.addEventListener('DOMContentLoaded', render);
+      window.addEventListener('DOMContentLoaded', () => {
+        render();
+        if (WORKING) {
+          setTimeout(waitForComparing, 1000);
+        }
+      });
     </script>
   </head>
   <body class="library-page">
+    {% macro face_tile(face) %}
+    <div class="face-tile{{ ' cover' if face.id == cover }}" data-face-id="{{ face.id }}">
+      <button class="face-pick" aria-label="Select this face" onclick="pick(this.closest('.face-tile'), event.shiftKey)">
+        <img src="/api/face/{{ face.id }}" loading="lazy" decoding="async" alt="" />
+        <span class="tile-check" aria-hidden="true">✓</span>
+      </button>
+      <span class="face-cover-mark" title="This person's cover" aria-label="This person's cover">★</span>
+      <button class="face-show" onclick="showInPhoto('{{ face.id }}')" title="Show in its photo" aria-label="Show in its photo">
+        <i class="fa fa-picture-o" aria-hidden="true"></i>
+      </button>
+    </div>
+    {% endmacro %}
     <div class="library-month-header">
       <a href="{{ photos_url or '/people' }}">‹ {{ 'Photos' if photos_url else 'People' }}</a>
       <span id="summary">{{ title }} · <span id="count"></span></span>
@@ -190,33 +264,52 @@
       </span>
     </div>
     {% if name %}{% set person = name %}{% include '_person_edit.html' %}{% endif %}
+    {% if years_rail %}
+    <nav class="year-rail" aria-label="Years">
+      {% for entry in years_rail %}
+      <a href="{{ entry.url }}"{% if entry.current %} aria-current="page"{% endif %}{% if entry.faces is not none %} title="{{ '{:,}'.format(entry.faces) }} face{{ '' if entry.faces == 1 else 's' }}"{% endif %}>{{ entry.label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    {% if working %}
+    <p class="library-hint">Comparing {{ "{:,}".format(total) }} faces with everyone else's. A person with thousands of faces can take a minute.</p>
+    {% elif failed %}
+    <p class="library-hint">Couldn't compare these faces. The server's log says why.</p>
+    {% elif checking %}
+    <p class="library-hint">These look more like someone else than {{ name }}. Select any, or none for the whole row, then say who they are. Either way they won't come up here again.</p>
+    <div class="face-sections">
+      {% for section in sections %}
+      <section class="face-section" data-looks-like="{{ section.name }}">
+        <div class="face-section-head">
+          <h2>Look like {{ section.name }}</h2>
+          <button class="control face-section-move" onclick="apply(this.closest('.face-section').dataset.looksLike, sectionFaces(this.closest('.face-section')))"></button>
+          <button class="control face-section-keep" onclick="keepFaces(this.closest('.face-section'))"></button>
+        </div>
+        <div class="face-grid">
+          {% for face in section.faces %}{{ face_tile(face) }}{% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+      <p class="library-hint face-none">Nothing here seems to be someone else.</p>
+    </div>
+    {% else %}
     <p class="library-hint">
       {% if name %}Select any that aren't {{ name }}, then give them the right name, or skip them. Select one to use it as the cover on {{ name }}'s folder.
       {% else %}If these are all one person, name them. If not, select the ones who are the same person and name those; the rest stay here. Shift-click selects a range.{% endif %}
     </p>
     <div class="face-grid">
-      {% for face in faces %}
-      <div class="face-tile{{ ' cover' if face.id == cover }}" data-face-id="{{ face.id }}">
-        <button class="face-pick" aria-label="Select this face" onclick="pick(this.closest('.face-tile'), event.shiftKey)">
-          <img src="/api/face/{{ face.id }}" loading="lazy" decoding="async" alt="" />
-          <span class="tile-check" aria-hidden="true">✓</span>
-        </button>
-        <span class="face-cover-mark" title="This person's cover" aria-label="This person's cover">★</span>
-        <button class="face-show" onclick="showInPhoto('{{ face.id }}')" title="Show in its photo" aria-label="Show in its photo">
-          <i class="fa fa-picture-o" aria-hidden="true"></i>
-        </button>
-      </div>
-      {% endfor %}
+      {% for face in faces %}{{ face_tile(face) }}{% endfor %}
     </div>
-    {% if more %}
-    <p class="face-more"><a class="control" href="/people/{{ name | urlencode }}/faces?page={{ page + 1 }}">Next {{ "{:,}".format(faces | length) }}</a></p>
+    {% endif %}
+    {% if next_url %}
+    <p class="face-more"><a class="control" href="{{ next_url }}">Next {{ "{:,}".format(faces | length) }}</a></p>
     {% endif %}
     <datalist id="names">
       {% for known in known_names %}
       <option value="{{ known }}"></option>
       {% endfor %}
     </datalist>
-    <div class="select-bar">
+    <div class="select-bar"{% if working or failed %} style="display: none"{% endif %}>
       <span id="select-count"></span>
       <label>
         Name

@@ -669,14 +669,22 @@ class FaceNames(BaseModel):
     face_ids: list[str]
     # blank for faces that aren't anyone worth naming
     name: str = Field(max_length=80)
+    # moved because they seemed to be someone else, so not to be asked about again
+    checked: bool = False
 
 
 class FaceNamesRestore(BaseModel):
     previous: dict[str, str | None]
+    checked: bool = False
 
 
 class FaceIds(BaseModel):
     face_ids: list[str]
+
+
+class FacesChecked(BaseModel):
+    face_ids: list[str]
+    checked: bool
 
 
 class PersonRename(BaseModel):
@@ -704,20 +712,63 @@ async def _people(request: Request):
     )
 
 
-def people_faces_page(request, title, face_ids, total, photos_url=None, name=None, group=None, page=1):
+def faces_by_year(faces):
+    # which year each (face, photo)'s photo is from, going by the same dates as the person's photos
+    taken = {photo['id']: photo_year(photo) for photo in exif.photos_with_ids(list({photo for _, photo in faces}))}
+    by_year = {}
+    for face, photo in faces:
+        if photo in taken:
+            by_year.setdefault(taken[photo], []).append(face)
+    return by_year
+
+
+def years_newest_first(by_year):
+    years = sorted((key for key in by_year if key != UNDATED_YEAR), reverse=True)
+    return years + [UNDATED_YEAR] if UNDATED_YEAR in by_year else years
+
+
+def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, checking=False):
+    by_year = faces_by_year(faces)
+    # a year whose faces have all gone by now leaves all of them
+    shown_year = year if year in by_year and not checking else None
+    face_ids = by_year[shown_year] if shown_year else [face for face, _ in faces]
+    year_query = {'year': shown_year} if shown_year else {}
+    doubts = people.doubtful_faces(name) if checking else None
+    looks_like = {}
+    if doubts:
+        looks_like = {face['id']: face['looks_like'] for face in doubts['faces']}
+        face_ids = list(looks_like)
+    details = people.face_details(face_ids[(page - 1) * people.PAGE_FACES:page * people.PAGE_FACES])
+    sections = {}
+    for face in details if doubts else []:
+        sections.setdefault(looks_like[face['id']], []).append(face)
+    rail = [
+        {'label': 'All', 'faces': len(faces), 'url': url, 'current': not shown_year and not checking},
+        *([{'label': 'May be someone else', 'faces': None, 'url': f"{url}?check=1", 'current': checking}] if name else []),
+        *(
+            {'label': key, 'faces': len(by_year[key]), 'url': f"{url}?{urlencode({'year': key})}", 'current': key == shown_year}
+            for key in years_newest_first(by_year)
+        )
+    ]
+    working = bool(doubts and doubts['working'])
     return templates.TemplateResponse(
         request=request,
         name="people_faces.html",
         context={
             "title": title,
-            "faces": people.face_details(face_ids),
-            "total": total,
-            "photos_url": photos_url,
+            "faces": details,
+            "sections": [{'name': key, 'faces': value} for key, value in sections.items()],
+            "checking": checking,
+            "working": working,
+            "failed": bool(doubts and doubts['failed']),
+            "total": len(faces) if working else len(face_ids),
+            "photos_url": f"{photos_url}?{urlencode(year_query)}" if photos_url and shown_year else photos_url,
             "name": name,
             "group": group,
-            "page": page,
+            "years_rail": rail if name or len(by_year) > 1 else [],
+            "shown_year": shown_year,
             # a group's are only ever the best ones, with the rest coming up as those get named
-            "more": bool(name) and page * people.PAGE_FACES < total,
+            "next_url": f"{url}?{urlencode({**year_query, 'page': page + 1})}" if name and not checking and page * people.PAGE_FACES < len(face_ids) else None,
             "cover": people.chosen_cover(name) if name else None,
             "known_names": people.known_names()
         }
@@ -725,32 +776,43 @@ def people_faces_page(request, title, face_ids, total, photos_url=None, name=Non
 
 
 @app.get("/people/group/{group_id}")
-async def _people_group(request: Request, group_id: int):
+async def _people_group(request: Request, group_id: int, year: str = None):
     update_hidden_faces()
-    face_ids = people.group_faces(group_id)
+    faces = people.group_faces(group_id)
     # groups change as faces in them are named
-    if not face_ids:
+    if not faces:
         return RedirectResponse(url='/people')
-    return people_faces_page(request, "Who is this?", face_ids, people.group_size(group_id), group=group_id)
+    return people_faces_page(request, "Who is this?", faces, f"/people/group/{group_id}", year, group=group_id)
 
 
 @app.get("/people/group/{group_id}/ids")
-async def _people_group_ids(group_id: int):
+async def _people_group_ids(group_id: int, year: str = None):
     update_hidden_faces()
-    face_ids = people.group_face_ids(group_id)
+    faces = people.group_faces(group_id)
+    # a year that has emptied must not turn into the whole group, as these are about to be named
+    face_ids = faces_by_year(faces).get(year) if year else [face for face, _ in faces]
     if not face_ids:
         raise HTTPException(status_code=404, detail="That group has changed")
     return face_ids
 
 
 @app.get("/people/{name}/faces")
-async def _person_faces(request: Request, name: str, page: int = 1):
+async def _person_faces(request: Request, name: str, year: str = None, page: int = 1, check: bool = False):
     update_hidden_faces()
-    page = max(page, 1)
-    face_ids, total = people.person_faces(name, page)
-    if not total:
+    faces = people.person_faces(name)
+    if not faces:
         return RedirectResponse(url='/people')
-    return people_faces_page(request, name, face_ids, total, f"/people/{quote(name)}", name, page=page)
+    return people_faces_page(
+        request,
+        name,
+        faces,
+        f"/people/{quote(name)}/faces",
+        year,
+        photos_url=f"/people/{quote(name)}",
+        name=name,
+        page=max(page, 1),
+        checking=check
+    )
 
 
 def photos_by_year_page(request, title, photos, url, year, **context):
@@ -761,9 +823,7 @@ def photos_by_year_page(request, title, photos, url, year, **context):
     by_year = {}
     for photo in photos:
         by_year.setdefault(photo_year(photo), []).append(photo)
-    years = sorted((key for key in by_year if key != UNDATED_YEAR), reverse=True)
-    if UNDATED_YEAR in by_year:
-        years.append(UNDATED_YEAR)
+    years = years_newest_first(by_year)
     shown_year = year if year in by_year else years[0] if years else None
     year_url = lambda key: f"{url}{'&' if '?' in url else '?'}year={key}"
     following = years[years.index(shown_year) + 1:] if shown_year else []
@@ -914,7 +974,7 @@ def clean_name(name):
 
 @app.post("/api/people/faces")
 async def _name_faces(names: FaceNames):
-    return {'previous': people.set_names(names.face_ids, clean_name(names.name))}
+    return {'previous': people.set_names(names.face_ids, clean_name(names.name), names.checked)}
 
 
 @app.post("/api/people/faces/clear")
@@ -955,6 +1015,17 @@ async def _photo_faces(photo_id: str):
     return people.photo_faces(photo_id)
 
 
+@app.post("/api/people/faces/checked")
+async def _check_faces(faces_checked: FacesChecked):
+    people.set_checked(faces_checked.face_ids, faces_checked.checked)
+    return "saved"
+
+
+@app.get("/api/people/doubts")
+async def _people_doubts(name: str):
+    return {'working': people.doubts_working(name)}
+
+
 @app.get("/api/people/status")
 async def _people_status():
     return people.status()
@@ -976,7 +1047,7 @@ async def _stop_finding_people():
 
 @app.post("/api/people/faces/restore")
 async def _restore_face_names(restore: FaceNamesRestore):
-    people.restore_names(restore.previous)
+    people.restore_names(restore.previous, restore.checked)
     return "saved"
 
 

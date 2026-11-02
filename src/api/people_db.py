@@ -50,6 +50,8 @@ SCHEMA = """
     -- every change to a name, in case one needs working out afterwards
     CREATE TABLE IF NOT EXISTS name_history (face_id TEXT NOT NULL, name TEXT, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS covers (name TEXT PRIMARY KEY, face_id TEXT NOT NULL);
+    -- faces someone has looked at because they seemed to be someone else, and settled
+    CREATE TABLE IF NOT EXISTS checked_faces (face_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- photos not to show faces from, as hidden and deleted ones are only known to the main index
     CREATE TABLE IF NOT EXISTS hidden_photos (photo_id BLOB PRIMARY KEY);

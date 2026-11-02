@@ -2330,6 +2330,35 @@ a.movie-tile {
   display: flex;
 }
 
+.face-sections {
+  margin-bottom: 170px;
+}
+
+.face-section .face-grid {
+  margin-bottom: 24px;
+}
+
+.face-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 var(--page-margin);
+}
+
+.face-section-head h2 {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* nothing left in a row once its faces have been settled */
+.face-section:not(:has(.face-tile:not([hidden]))),
+.face-sections:has(.face-tile:not([hidden])) .face-none {
+  display: none;
+}
+
 @media (pointer: coarse), (max-width: 768px) {
   .face-show {
     width: 36px;

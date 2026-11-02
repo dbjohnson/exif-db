@@ -31,6 +31,11 @@ SUGGEST_SIMILARITY = 0.45
 SUGGEST_FACES_PER_PERSON = 200
 SUGGEST_NEIGHBOURS = 5
 PAGE_FACES = 500
+# a face seems to be someone else when most of the closest of this many named faces in other photos
+# aren't called what it is.  Comparing with only some of a person's faces isn't good enough: it made
+# 15 times as many of the person with the most faces look wrong
+DOUBT_NEIGHBOURS = 10
+DOUBT_BATCH = 1000
 # what Rekognition's results left behind, for the names given then to be carried over
 OLD_FACES = '/storage/rekognition/indexed.jsonl'
 OLD_NAMES_CSV = '/storage/people.csv'
@@ -39,6 +44,10 @@ OLD_UNDECIDED = '\x7fundecided'
 OLD_MATCH_OVERLAP = 0.3
 _local = threading.local()
 _cache = {}
+# what's been worked out about each person's faces, as that can take the NAS most of a minute
+_doubts = {}
+# one at a time, as each uses all the processor it can get
+_doubts_lock = threading.Lock()
 
 
 def _db():
@@ -120,19 +129,32 @@ def _current_names(face_ids):
     return found
 
 
-def set_names(face_ids, name):
+def set_names(face_ids, name, checked=False):
     """
-    Returns what each known face was called before, for putting back with restore_names
+    Returns what each known face was called before, for putting back with restore_names.  checked is
+    for a face moved because it seemed to be someone else, which needn't be asked about again
     """
     previous = _current_names(face_ids)
     _record_names([(face_id, name) for face_id in previous])
+    if checked:
+        set_checked(list(previous), True)
     return previous
 
 
-def restore_names(previous):
-    # None for a face that hadn't been decided on
+def restore_names(previous, checked=False):
+    # None for a face that hadn't been decided on.  checked undoes the same in set_names
     known = _current_names(list(previous))
     _record_names([(face_id, previous[face_id]) for face_id in known])
+    if checked:
+        set_checked(list(known), False)
+
+
+def set_checked(face_ids, checked):
+    with _db() as db:
+        if checked:
+            db.executemany('INSERT OR REPLACE INTO checked_faces (face_id, at) VALUES (?, ?)', [(face_id, time.time_ns()) for face_id in face_ids])
+        else:
+            db.executemany('DELETE FROM checked_faces WHERE face_id = ?', [(face_id,) for face_id in face_ids])
 
 
 def clear_names(face_ids):
@@ -142,6 +164,8 @@ def clear_names(face_ids):
     """
     previous = {face_id: name for face_id, name in _current_names(face_ids).items() if name is not None}
     _record_names([(face_id, None) for face_id in previous])
+    # whatever they're called next is a new decision
+    set_checked(list(previous), False)
     return previous
 
 
@@ -375,52 +399,108 @@ def overview(max_groups=100, preview_faces=8):
     return result
 
 
-def group_faces(group_id, limit=PAGE_FACES):
-    # best first, or nothing if there's no such group any more
-    return [row[0] for row in _db().execute(
+def group_faces(group_id):
+    """
+    A group's undecided faces, best first, as (face, photo), or nothing if there's no such group any more
+    """
+    return [(face_id, from_db(photo_id)) for face_id, photo_id in _db().execute(
         f"""
-        SELECT id FROM faces
+        SELECT id, photo_id FROM faces
         WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)
         ORDER BY pixels * score DESC
-        LIMIT ?
         """,
-        (group_id, limit)
+        (group_id,)
     )]
 
 
-def group_face_ids(group_id):
-    return group_faces(group_id, limit=-1)
-
-
-def group_size(group_id):
-    return _db().execute(
-        f'SELECT COUNT(*) FROM faces WHERE cluster = ? AND {SHOWN} AND id NOT IN (SELECT face_id FROM names)',
-        (group_id,)
-    ).fetchone()[0]
-
-
-def person_faces(name, page=1):
+def person_faces(name):
     """
-    A page of a person's faces, best first, and how many they have in all
+    A person's faces, best first, as (face, photo)
     """
-    db = _db()
-    total = db.execute(
+    return [(face_id, from_db(photo_id)) for face_id, photo_id in _db().execute(
         f"""
-        SELECT COUNT(*) FROM names JOIN faces ON faces.id = names.face_id
-        WHERE names.name = ? AND names.name <> ? AND {SHOWN}
-        """,
-        (name, NOBODY)
-    ).fetchone()[0]
-    rows = db.execute(
-        f"""
-        SELECT faces.id FROM names JOIN faces ON faces.id = names.face_id
+        SELECT faces.id, faces.photo_id FROM names JOIN faces ON faces.id = names.face_id
         WHERE names.name = ? AND names.name <> ? AND {SHOWN}
         ORDER BY pixels * score DESC
-        LIMIT ? OFFSET ?
         """,
-        (name, NOBODY, PAGE_FACES, (page - 1) * PAGE_FACES)
+        (name, NOBODY)
+    )]
+
+
+def _compare_with_everyone(name):
+    """
+    Which of a person's faces most look like someone else, going by the closest faces with a name in
+    other photos, as a list of {id, looks_like, share}.  Faces too poor to compare aren't included,
+    and those whose closest faces aren't much like them say nothing either way
+    """
+    rows = _db().execute(
+        f"""
+        SELECT faces.id, faces.photo_id, names.name, faces.embedding
+        FROM names JOIN faces ON faces.id = names.face_id
+        WHERE names.name <> ? AND {USABLE} AND {SHOWN}
+        """,
+        (NOBODY,)
     ).fetchall()
-    return [row[0] for row in rows], total
+    embeddings = np.frombuffer(b''.join(row[3] for row in rows), dtype=np.float32).reshape(-1, people_db.EMBEDDING_SIZE)
+    who = np.array([row[2] for row in rows])
+    photo_numbers = {}
+    photos = np.array([photo_numbers.setdefault(row[1], len(photo_numbers)) for row in rows])
+    mine = np.flatnonzero(who == name)
+    neighbours = min(DOUBT_NEIGHBOURS, len(rows) - 1)
+    found = []
+    for start in range(0, len(mine), DOUBT_BATCH):
+        part = mine[start:start + DOUBT_BATCH]
+        similar = embeddings[part] @ embeddings.T
+        # the face itself is in its own photo, and nobody is in a photo twice
+        similar[photos[part][:, None] == photos] = -1
+        closest = np.argpartition(-similar, neighbours, axis=1)[:, :neighbours]
+        weights = np.take_along_axis(similar, closest, axis=1)
+        weights[weights < SUGGEST_SIMILARITY] = 0
+        mine_too = (weights * (who[closest] == name)).sum(axis=1)
+        for row in np.flatnonzero(mine_too < weights.sum(axis=1) / 2):
+            votes = Counter()
+            for neighbour, weight in zip(who[closest[row]], weights[row]):
+                if neighbour != name and weight:
+                    votes[str(neighbour)] += float(weight)
+            looks_like, weight = votes.most_common(1)[0]
+            found.append({'id': rows[part[row]][0], 'looks_like': looks_like, 'share': weight / float(weights[row].sum())})
+    return found
+
+
+def _work_out_doubts(name, entry):
+    with _doubts_lock:
+        # the names may have changed again while this waited its turn
+        if _doubts.get(name) is not entry:
+            return
+        try:
+            entry['faces'] = _compare_with_everyone(name)
+        except Exception:
+            logger.exception(f"Can't compare {name}'s faces")
+            entry['failed'] = True
+        entry['working'] = False
+
+
+def doubtful_faces(name):
+    """
+    A person's faces that seem to be someone else, and nobody has settled yet, grouped by who they
+    look like with the most in common first.  Starts working them out if the names have changed, so
+    'faces' is empty while 'working' is true
+    """
+    stamp = _stamp()
+    entry = _doubts.get(name)
+    if not entry or entry['stamp'] != stamp:
+        entry = _doubts[name] = {'stamp': stamp, 'working': True, 'failed': False, 'faces': []}
+        threading.Thread(target=_work_out_doubts, args=(name, entry), daemon=True).start()
+    settled = {row[0] for row in _db().execute('SELECT face_id FROM checked_faces')}
+    faces = [face for face in entry['faces'] if face['id'] not in settled]
+    how_many = Counter(face['looks_like'] for face in faces)
+    faces.sort(key=lambda face: (-how_many[face['looks_like']], face['looks_like'], -face['share']))
+    return {'working': entry['working'], 'failed': entry['failed'], 'faces': faces}
+
+
+def doubts_working(name):
+    entry = _doubts.get(name)
+    return bool(entry and entry['working'])
 
 
 def person_photo_ids(name):
