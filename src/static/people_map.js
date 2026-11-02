@@ -3,6 +3,9 @@
 // size depends on the screen.  On a person's "Looks like" page, the same map shows only their groups
 // and those that look enough like them
 const MAP_MERGE = 'people-map-merge';
+// Look-alikes places dots near those they look like; Axes places them along two directions worked
+// out from the names, the same for every dot, so where a dot is says something about it
+const MAP_LAYOUT = 'people-map-layout';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let mapPerson = null;
 let mapResult = null;
@@ -90,8 +93,8 @@ function dotRadius(faces, scale) {
 }
 
 // moves overlapping dots apart, a little at a time, as moving one can push it into another
-function separate(dots) {
-  for (let round = 0; round < 60; round++) {
+function separate(dots, rounds = 60) {
+  for (let round = 0; round < rounds; round++) {
     let moved = false;
     for (let i = 0; i < dots.length; i++) {
       const a = dots[i];
@@ -132,14 +135,47 @@ function setView(svg, view) {
 }
 
 // the dots to show: on a person's page their groups and those at least as alike as asked for
+function mapSource() {
+  if (mapPerson !== null) {
+    return mapResult.groups;
+  }
+  const merged = document.getElementById('map-merge').getAttribute('aria-pressed') === 'true';
+  return mapResult[merged ? 'people' : 'groups'];
+}
+
+function onAxes() {
+  return Boolean(mapResult && mapResult.axes) && localStorage.getItem(MAP_LAYOUT) === 'axes';
+}
+
+// on Axes, each dot's place in order along each axis, out of 1.  Going by order rather than by how
+// far along it is, as a few dots far out at either end squashed all the rest into the middle
+let axisOrder = null;
+
+function orderOnAxes(nodes) {
+  const order = new Map(nodes.map(node => [node.index, [0, 0]]));
+  [0, 1].forEach(axis => {
+    [...nodes].sort((a, b) => a.axes[axis] - b.axes[axis]).forEach((node, place) => {
+      order.get(node.index)[axis] = place / (nodes.length - 1 || 1);
+    });
+  });
+  return order;
+}
+
+// where a dot goes before being pushed off others: Axes puts the low end of the first axis on the
+// left and of the second at the top
+function spot(node) {
+  return onAxes() ? axisOrder.get(node.index) : [node.x, node.y];
+}
+
 function mapNodes() {
+  // each keeps its place in the list, which is what its closest dots are given by
+  const source = mapSource().map((node, index) => ({...node, index}));
   if (mapPerson === null) {
-    const merged = document.getElementById('map-merge').getAttribute('aria-pressed') === 'true';
-    return mapResult[merged ? 'people' : 'groups'];
+    return source;
   }
   const threshold = Number(document.getElementById('map-threshold').value);
-  return mapResult.groups
-    .map((node, place) => ({...node, alike: mapNear[place], mine: node.name === mapPerson}))
+  return source
+    .map(node => ({...node, alike: mapNear[node.index], mine: node.name === mapPerson}))
     .filter(node => node.mine || node.alike >= threshold);
 }
 
@@ -151,6 +187,50 @@ function across(values, everything, size) {
   const range = Math.max(high - low, (Math.max(...everything) - Math.min(...everything)) / 4) || 1;
   const middle = (low + high) / 2;
   return value => ((value - middle) / range + 0.5) * size;
+}
+
+// lines from a dot to the most alike of those shown, each with how alike they are
+function drawLinks(links, dot, drawn, scale) {
+  links.replaceChildren();
+  dot.near.forEach(([index, alike]) => {
+    const other = drawn.get(index);
+    if (!other) {
+      return;
+    }
+    links.append(svgElement('line', {x1: dot.cx, y1: dot.cy, x2: other.cx, y2: other.cy}));
+    const label = svgElement('text', {
+      x: dot.cx + (other.cx - dot.cx) * 0.6,
+      y: dot.cy + (other.cy - dot.cy) * 0.6 + 4 * scale,
+      'text-anchor': 'middle',
+      'font-size': 12 * scale
+    });
+    label.textContent = `${Math.round(alike * 100)}%`;
+    links.append(label);
+  });
+}
+
+// the faces at each end of each axis, which are what says what the axes mean
+function showAxisEnds() {
+  const ends = document.getElementById('map-axes');
+  const axes = onAxes();
+  ends.hidden = !axes;
+  document.querySelectorAll('#map-layout [data-layout]').forEach(button => {
+    button.setAttribute('aria-pressed', (button.dataset.layout === 'axes') === axes ? 'true' : 'false');
+  });
+  document.getElementById('map-layout').hidden = !mapResult.axes;
+  if (!axes) {
+    return;
+  }
+  ends.querySelectorAll('.axis-faces').forEach(strip => {
+    const faces = mapResult.axes[Number(strip.dataset.axis)][strip.dataset.end];
+    strip.replaceChildren(...faces.map(face => {
+      const image = document.createElement('img');
+      image.src = `/api/face/${face}`;
+      image.alt = '';
+      image.loading = 'lazy';
+      return image;
+    }));
+  });
 }
 
 function drawMap() {
@@ -171,15 +251,21 @@ function drawMap() {
   const width = svg.clientWidth;
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
-  const toX = across(nodes.map(node => node.x), mapResult.groups.map(node => node.x), width);
-  const toY = across(nodes.map(node => node.y), mapResult.groups.map(node => node.y), height);
+  const everything = mapSource().map((node, index) => ({...node, index}));
+  axisOrder = onAxes() ? orderOnAxes(everything) : null;
+  const toX = across(nodes.map(node => spot(node)[0]), everything.map(node => spot(node)[0]), width);
+  const toY = across(nodes.map(node => spot(node)[1]), everything.map(node => spot(node)[1]), height);
   const dots = nodes.map(node => ({
     ...node,
-    cx: toX(node.x),
-    cy: toY(node.y),
+    cx: toX(spot(node)[0]),
+    cy: toY(spot(node)[1]),
     r: dotRadius(node.faces, scale)
   }));
-  separate(dots);
+  // on Axes, only a little, so that each stays close to where the axes put it
+  separate(dots, onAxes() ? 8 : 60);
+  showAxisEnds();
+  const drawn = new Map(dots.map(dot => [dot.index, dot]));
+  const links = svgElement('g', {class: 'map-links'});
 
   // a person split into several groups gets one label, on their biggest
   const labelled = new Set();
@@ -201,9 +287,17 @@ function drawMap() {
       }),
       svgElement('circle', {cx: dot.cx, cy: dot.cy, r: dot.r})
     );
-    link.addEventListener('pointerenter', event => showMapTip(event, dot));
+    link.addEventListener('pointerenter', event => {
+      showMapTip(event, dot);
+      if (event.pointerType === 'mouse') {
+        drawLinks(links, dot, drawn, scale);
+      }
+    });
     link.addEventListener('pointermove', moveMapTip);
-    link.addEventListener('pointerleave', hideMapTip);
+    link.addEventListener('pointerleave', () => {
+      hideMapTip();
+      links.replaceChildren();
+    });
     layer.append(link);
     if (dot.name && !labelled.has(dot.name)) {
       labelled.add(dot.name);
@@ -212,7 +306,7 @@ function drawMap() {
       labels.append(label);
     }
   });
-  layer.append(labels);
+  layer.append(links, labels);
 
   // the whole map, with the same shape as the space it's shown in so that dots stay round
   const margin = 40 * scale;
@@ -391,6 +485,12 @@ window.addEventListener('DOMContentLoaded', () => {
       setFull(false);
     }
   });
+  document.querySelectorAll('#map-layout [data-layout]').forEach(button => button.addEventListener('click', () => {
+    localStorage.setItem(MAP_LAYOUT, button.dataset.layout);
+    if (mapResult) {
+      drawMap();
+    }
+  }));
   const threshold = document.getElementById('map-threshold');
   if (threshold) {
     let drawing = null;

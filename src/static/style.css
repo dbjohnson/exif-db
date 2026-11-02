@@ -2285,6 +2285,11 @@ a.movie-tile {
   font-size: 12px;
 }
 
+.people-map-layout {
+  display: inline-flex;
+  gap: 4px;
+}
+
 /* the tab or toggle that's on, like the page's own place in the menu */
 .people-tabs a[aria-current="page"],
 .people-map-bar button[aria-pressed="true"],
@@ -2384,6 +2389,56 @@ a.movie-tile {
   position: relative;
 }
 
+.people-map-axes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.people-map-axes .people-hint {
+  margin: 0;
+}
+
+.people-map-axis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+
+.people-map-axis .axis-name {
+  width: 96px;
+  flex: none;
+  color: var(--muted);
+}
+
+.people-map-axis .axis-arrow {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.people-map-axis .axis-faces {
+  display: flex;
+  gap: 3px;
+}
+
+.people-map-axis .axis-faces img {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  object-fit: cover;
+}
+
+@media (max-width: 600px) {
+  .people-map-axis .axis-faces img {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 /* the map over the whole window, from its Full page button */
 .people-map-area.full {
   position: fixed;
@@ -2468,6 +2523,15 @@ body.map-full {
     stroke: var(--text-strong);
     stroke-width: 3;
   }
+}
+
+/* lines from the dot under the pointer to the most alike of the others shown */
+.people-map .map-links line {
+  stroke: var(--text-strong);
+  stroke-opacity: 0.7;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 
 .people-map text {

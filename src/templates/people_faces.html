@@ -295,6 +295,10 @@
             At least <output id="map-threshold-value">30%</output> alike
             <input id="map-threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.3" />
           </label>
+          <span id="map-layout" class="people-map-layout" role="group" aria-label="Layout" hidden>
+            <button type="button" data-layout="alike" aria-pressed="true" title="Groups near those they look like">Look-alikes</button>
+            <button type="button" data-layout="axes" aria-pressed="false" title="Groups along two directions that tell named people apart">Axes</button>
+          </span>
           <span id="map-note" class="people-hint" hidden></span>
           <button type="button" id="map-refresh" hidden>Show the updated map</button>
           <span class="people-map-zoom">
@@ -302,6 +306,21 @@
             <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
             <button type="button" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
           </span>
+        </div>
+        <div id="map-axes" class="people-map-axes" hidden>
+          <div class="people-map-axis">
+            <span class="axis-name">Left to right</span>
+            <span class="axis-faces" data-axis="0" data-end="low"></span>
+            <span class="axis-arrow" aria-hidden="true">&rarr;</span>
+            <span class="axis-faces" data-axis="0" data-end="high"></span>
+          </div>
+          <div class="people-map-axis">
+            <span class="axis-name">Top to bottom</span>
+            <span class="axis-faces" data-axis="1" data-end="low"></span>
+            <span class="axis-arrow" aria-hidden="true">&rarr;</span>
+            <span class="axis-faces" data-axis="1" data-end="high"></span>
+          </div>
+          <p class="people-hint">The faces furthest towards each end of the two directions that best tell named people apart, worked out again as names change. Dots are in order along each, spread evenly.</p>
         </div>
         <div class="people-map-frame">
           <svg id="people-map" class="people-map" data-person="{{ name }}" role="img" aria-label="{{ name }}'s groups and those that look like them">

@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import os
 import datetime
 import hashlib
@@ -12,7 +13,7 @@ from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, Query, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -969,9 +970,13 @@ async def _more_groups(request: Request, view: Literal['suggested', 'biggest', '
 
 
 @app.get("/api/people/map")
-async def _people_map(near: str = None):
+async def _people_map(request: Request, near: str = None):
     update_hidden_faces()
-    return people.cluster_map(near)
+    found = json.dumps(people.cluster_map(near), separators=(',', ':')).encode()
+    # about 430KB of numbers for a thousand dots, which squeeze to about a quarter
+    if 'gzip' not in request.headers.get('accept-encoding', ''):
+        return Response(found, media_type='application/json')
+    return Response(gzip.compress(found, 6), media_type='application/json', headers={'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding'})
 
 
 class PersonFamily(BaseModel):
