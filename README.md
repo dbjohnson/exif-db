@@ -13,7 +13,7 @@ Scan all files for exif data; subsequent runs will only check files added or cha
 docker compose run --rm -d exif-db bash /src/app/scripts/scan.sh
 ```
 
-To rebuild the index from scratch, add `--full`.  The current index stays in use until the rebuild succeeds, and is then kept as `exif.csv.bak`.  A scan also rebuilds it by itself after `scripts/tags.txt` or `scripts/exiftool.config` changes, since every file has to be read again for the new tags (about 50 minutes for 80,000 files on a Synology DS224+)
+To rebuild the index from scratch, add `--full`.  The current index stays in use until the rebuild succeeds, and is then kept as `exif.csv.bak`.  A scan also rebuilds it by itself after `scripts/tags.txt` or `scripts/exiftool.config` changes, since every file has to be read again for the new tags (about 2 hours for 80,000 files on a Synology DS224+, measured in November 2026)
 ```bash
 docker compose run --rm -d exif-db bash /src/app/scripts/scan.sh --full
 ```
