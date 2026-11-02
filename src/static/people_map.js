@@ -4,8 +4,7 @@
 // and those that look enough like them
 const MAP_MERGE = 'people-map-merge';
 // Look-alikes places dots near those they look like; Overall order does too, but keeps more of how
-// far apart unalike dots are, at the cost of look-alikes being less tightly together; Axes places
-// them along two directions worked out from the names, the same for every dot
+// far apart unalike dots are, at the cost of look-alikes being less tightly together
 const MAP_LAYOUT = 'people-map-layout';
 // lines only go to dots at least this alike, leaving out the weakest matches, which Look-alikes had
 // no reason to put nearby: those under 20% were a median of 30% of the map's width apart.  Unrelated
@@ -106,8 +105,8 @@ function dotRadius(faces, scale) {
 }
 
 // moves overlapping dots apart, a little at a time, as moving one can push it into another
-function separate(dots, rounds = 60) {
-  for (let round = 0; round < rounds; round++) {
+function separate(dots) {
+  for (let round = 0; round < 60; round++) {
     let moved = false;
     for (let i = 0; i < dots.length; i++) {
       const a = dots[i];
@@ -157,36 +156,12 @@ function mapSource() {
 }
 
 function mapLayout() {
-  const chosen = localStorage.getItem(MAP_LAYOUT);
-  if (chosen === 'axes' && mapResult && mapResult.axes) {
-    return 'axes';
-  }
-  return chosen === 'overall' ? 'overall' : 'alike';
+  return localStorage.getItem(MAP_LAYOUT) === 'overall' ? 'overall' : 'alike';
 }
 
-function onAxes() {
-  return mapLayout() === 'axes';
-}
-
-// on Axes, each dot's place in order along each axis, out of 1.  Going by order rather than by how
-// far along it is, as a few dots far out at either end squashed all the rest into the middle
-let axisOrder = null;
-
-function orderOnAxes(nodes) {
-  const order = new Map(nodes.map(node => [node.index, [0, 0]]));
-  [0, 1].forEach(axis => {
-    [...nodes].sort((a, b) => a.axes[axis] - b.axes[axis]).forEach((node, place) => {
-      order.get(node.index)[axis] = place / (nodes.length - 1 || 1);
-    });
-  });
-  return order;
-}
-
-// where a dot goes before being pushed off others: Axes puts the low end of the first axis on the
-// left and of the second at the top
+// where a dot goes before being pushed off others
 function spot(node) {
-  const layout = mapLayout();
-  return layout === 'axes' ? axisOrder.get(node.index) : layout === 'overall' ? node.overall : [node.x, node.y];
+  return mapLayout() === 'overall' ? node.overall : [node.x, node.y];
 }
 
 function mapNodes() {
@@ -244,30 +219,10 @@ function drawLinks(links, dot, drawn, scale) {
   });
 }
 
-// the faces at each end of each axis, which are what says what the axes mean
-function showAxisEnds() {
-  const ends = document.getElementById('map-axes');
-  const axes = onAxes();
-  ends.hidden = !axes;
+function showLayout() {
   const layout = mapLayout();
   document.querySelectorAll('#map-layout [data-layout]').forEach(button => {
     button.setAttribute('aria-pressed', button.dataset.layout === layout ? 'true' : 'false');
-    if (button.dataset.layout === 'axes') {
-      button.hidden = !mapResult.axes;
-    }
-  });
-  if (!axes) {
-    return;
-  }
-  ends.querySelectorAll('.axis-faces').forEach(strip => {
-    const faces = mapResult.axes[Number(strip.dataset.axis)][strip.dataset.end];
-    strip.replaceChildren(...faces.map(face => {
-      const image = document.createElement('img');
-      image.src = `/api/face/${face}`;
-      image.alt = '';
-      image.loading = 'lazy';
-      return image;
-    }));
   });
 }
 
@@ -289,9 +244,7 @@ function drawMap() {
   const width = svg.clientWidth;
   const height = svg.clientHeight;
   const scale = Math.max(0.6, Math.min(1, width / 1200));
-  // on Axes, ordered among those shown, so that they spread over the whole space
-  const everything = onAxes() ? nodes : mapSource().map((node, index) => ({...node, index}));
-  axisOrder = onAxes() ? orderOnAxes(everything) : null;
+  const everything = mapSource();
   const toX = across(nodes.map(node => spot(node)[0]), everything.map(node => spot(node)[0]), width);
   const toY = across(nodes.map(node => spot(node)[1]), everything.map(node => spot(node)[1]), height);
   const dots = nodes.map(node => ({
@@ -300,9 +253,8 @@ function drawMap() {
     cy: toY(spot(node)[1]),
     r: dotRadius(node.faces, scale)
   }));
-  // on Axes, only a little, so that each stays close to where the axes put it
-  separate(dots, onAxes() ? 8 : 60);
-  showAxisEnds();
+  separate(dots);
+  showLayout();
   const drawn = new Map(dots.map(dot => [dot.index, dot]));
   const links = svgElement('g', {class: 'map-links'});
 

@@ -40,19 +40,11 @@ MAP_FACES = 5
 # how many of each dot's most alike dots the map can draw lines to
 MAP_NEIGHBOURS = 5
 # how many neighbours t-SNE keeps each dot near, for the map's Look-alikes and Overall order layouts.
-# On 1,008 groups, 100 kept as many of each group's 10 most alike close by as 30 did (31%) and put a
-# few more far-apart groups in the right order.  300 kept only 14% close by, but of three groups where
-# one pair is clearly more alike than the other, it got 77% the right way round, against 70% at 30
-MAP_PERPLEXITY = 100
+# On 1,008 groups, 30 kept 31% of each group's 10 most alike close by.  300 kept only 14%, but of
+# three groups where one pair is clearly more alike than the other, it got 77% the right way round,
+# against 70% at 30.  100 looked no better than 30 to the user
+MAP_PERPLEXITY = 30
 MAP_OVERALL_PERPLEXITY = 300
-# the map's Axes layout goes by the two straight directions in the faces' numbers that best tell
-# named people apart, worked out from people with at least this many faces, taking no more than
-# AXES_SAMPLE of each so the few with thousands don't decide it alone.  On this library both came out
-# as a mix of age and sex: what tells one person from another otherwise takes about 10 directions
-AXES_PERSON_FACES = 20
-AXES_SAMPLE = 1500
-# how many dots' faces show what each end of an axis looks like
-AXES_END_DOTS = 8
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -628,13 +620,12 @@ def warm_up():
     return not entry['working'] and not map_entry['working']
 
 
-def _map_nodes(places_by_key, ids, embeddings, on_axes):
+def _map_nodes(places_by_key, ids, embeddings):
     """
-    A dot for each set of faces with enough of them, as a list of {x, y, overall, axes, near, name,
-    group, faces, tight, face}, and each one's average face, made 1 long.  x and y place those that
-    look alike close together, overall places them keeping more of how far apart things are, axes is
-    where it is along each of the two axes, if there are any, and near is its most alike dots, as
-    [place in the list, how alike out of 1]
+    A dot for each set of faces with enough of them, as a list of {x, y, overall, near, name, group,
+    faces, tight, face}, and each one's average face, made 1 long.  x and y place those that look
+    alike close together, overall places them keeping more of how far apart things are, and near is
+    its most alike dots, as [place in the list, how alike out of 1]
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
@@ -644,7 +635,6 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
     centres = averages / tight[:, None]
     spots = _spread(centres, MAP_PERPLEXITY)
     overall = _spread(centres, MAP_OVERALL_PERPLEXITY)
-    along = on_axes(centres) if on_axes else [None] * len(kept)
     alike = centres @ centres.T
     np.fill_diagonal(alike, -np.inf)
     neighbours = min(MAP_NEIGHBOURS, len(kept) - 1)
@@ -654,7 +644,6 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
             'x': round(float(x), 2),
             'y': round(float(y), 2),
             'overall': [round(float(value), 2) for value in far],
-            'axes': [round(float(value), 3) for value in place_on_axes] if place_on_axes is not None else None,
             'near': [[int(other), round(float(alike[row, other]), 3)] for other in closest[row]],
             'name': name or None,
             'group': group,
@@ -662,45 +651,8 @@ def _map_nodes(places_by_key, ids, embeddings, on_axes):
             'tight': round(float(tightness), 3),
             'face': ids[places[0]]
         }
-        for row, (((name, group), places), (x, y), far, tightness, place_on_axes) in enumerate(zip(kept, spots, overall, tight, along))
+        for row, (((name, group), places), (x, y), far, tightness) in enumerate(zip(kept, spots, overall, tight))
     ], centres
-
-
-def _axes(who, embeddings):
-    """
-    The two straight directions in the faces' numbers that best tell named people apart compared
-    with how much each person's own faces vary (linear discriminant analysis), as something that
-    takes faces' numbers to where they are along each.  None with fewer than 3 people to go on
-    """
-    names, counts = np.unique(who[who != ''], return_counts=True)
-    chosen = names[counts >= AXES_PERSON_FACES]
-    if len(chosen) < 3:
-        return None
-    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-    rng = np.random.default_rng(1)
-    train = np.concatenate([
-        rng.choice(np.flatnonzero(who == name), min(count, AXES_SAMPLE), replace=False)
-        for name, count in zip(names, counts) if count >= AXES_PERSON_FACES
-    ])
-    found = LinearDiscriminantAnalysis(solver='eigen', shrinkage='auto', n_components=2).fit(embeddings[train], who[train])
-    # the same way round each time as far as possible, with whoever has the most faces at the low end
-    biggest = names[np.argmax(counts)]
-    signs = np.where(found.transform(embeddings[who == biggest].mean(axis=0, keepdims=True))[0] > 0, -1.0, 1.0)
-    return lambda vectors: found.transform(vectors) * signs
-
-
-def _axis_ends(nodes):
-    """
-    The faces of the dots furthest along each axis at each end, to show what the axis means
-    """
-    ends = []
-    for axis in range(2):
-        ordered = sorted(nodes, key=lambda node: node['axes'][axis])
-        ends.append({
-            'low': [node['face'] for node in ordered[:AXES_END_DOTS]],
-            'high': [node['face'] for node in ordered[::-1][:AXES_END_DOTS]]
-        })
-    return ends
 
 
 def _spread(points, perplexity):
@@ -721,8 +673,7 @@ def _work_out_map(_name):
     """
     Undecided groups and named people as dots placed by how alike they are, two ways: with each
     person as a dot for each of the groups their faces came from, which can tell apart what they
-    looked like as a child and grown up, and with each person as one dot.  Also where each is along
-    two axes worked out from the names, with faces showing what each end of them looks like
+    looked like as a child and grown up, and with each person as one dot
     """
     ids, who, _, embeddings = _comparable_faces()
     places = {face: place for place, face in enumerate(ids)}
@@ -741,13 +692,8 @@ def _work_out_map(_name):
         name = str(who[place])
         by_group.setdefault((name, cluster), []).append(place)
         by_person.setdefault((name, None) if name else (name, cluster), []).append(place)
-    on_axes = _axes(who, embeddings)
-    groups, centres = _map_nodes(by_group, ids, embeddings, on_axes)
-    result = {
-        'groups': groups,
-        'people': _map_nodes(by_person, ids, embeddings, on_axes)[0],
-        'axes': _axis_ends(groups) if on_axes and groups else None
-    }
+    groups, centres = _map_nodes(by_group, ids, embeddings)
+    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings)[0]}
     # together, so that what's near someone always goes with the map it was worked out on
     _cache['map'] = (result, centres)
     return result
