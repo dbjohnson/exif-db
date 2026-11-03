@@ -110,7 +110,20 @@ button {
   color: #e5566d;
 }
 
+/* favorites behind the link to review, dimmed so that it stays readable */
+.kiosk-background {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.45;
+}
+
 .no-images {
+  position: relative;
+  padding: 24px 32px;
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.6);
   color: #ddd;
   text-align: center;
 }

@@ -1447,21 +1447,24 @@ def slides(df, bursts=None):
 
 def kiosk_photos(min_pics):
     date = datetime.date.today()
-    recent = slides(*exif.recent_photos(recent_range(KIOSK_RECENT_DAYS), KIOSK_RECENT_PHOTOS))
+    # photos from other dates, recent ones included, would make up the numbers while today's wait
+    # unseen, so a date with photos to review shows only its own approved ones until they're decided
+    fill_in = not exif.review_counts(date_filter(date, True))[exif.UNREVIEWED]
+    recent = slides(*exif.recent_photos(recent_range(KIOSK_RECENT_DAYS), KIOSK_RECENT_PHOTOS)) if fill_in else []
     recent_ids = {pic['photo_id'] for pic in recent}
     pics = []
     offs = 0
     # search up to +/- 10 days for images until we get to the minimum
     # number requested
-    while len(pics) < min_pics and offs < 10:
+    while len(pics) < min_pics and offs < (10 if fill_in else 1):
         for sign in (-1, 1) if offs else (1,):
             dt = date + datetime.timedelta(days=offs * sign)
             df = exif.select_photos(f"%{dt.month:02d}:{dt.day:02d} ")
             if len(df):
                 pics.extend(slides(sample_across_years(df, len(df))))
         offs += 1
-    # a frame should always have something to show
-    if len(pics) < min_pics:
+    # a frame should have something to show, unless what's missing is today's to review
+    if fill_in and len(pics) < min_pics:
         pics.extend(slides(exif.stand_in_photos(
             [*recent_ids, *(pic['photo_id'] for pic in pics)],
             KIOSK_STAND_INS,
@@ -1480,6 +1483,7 @@ async def _kiosk_photos(min_pics: int = 20):
 @app.get("/kiosk")
 async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
     date = datetime.date.today()
+    images = kiosk_photos(min_pics)
     return templates.TemplateResponse(
         request=request,
         name="kiosk.html",
@@ -1491,7 +1495,11 @@ async def _kiosk(request: Request, refresh_secs: int = 300, min_pics: int = 20):
             "to_review": kiosk_to_review(date),
             "photos_version": exif.photos_version(),
             "build": PAGE_BUILD,
-            "images": kiosk_photos(min_pics)
+            "images": images,
+            # behind the link to review, while today has nothing approved to show
+            "backgrounds": [] if images else exif.favorite_photos(KIOSK_STAND_INS),
+            # what's keeping the frame empty, on a date in any year
+            "today_to_review": 0 if images else exif.review_counts(date_filter(date, True))[exif.UNREVIEWED]
         }
     )
 

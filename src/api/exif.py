@@ -342,6 +342,21 @@ def stand_in_photos(exclude, limit, seed):
     ).df()
 
 
+def favorite_photos(limit):
+    """
+    Approved favorites in a random order, for a frame with nothing of its own to show.  Failing
+    any favorites, approved photos from anywhere
+    """
+    query = f"""
+        SELECT SourceFile, rotation FROM {_with_status()}
+        WHERE review_status = ? AND (favorite OR ?)
+        ORDER BY random()
+        LIMIT ?
+    """
+    rows = db.execute(query, [APPROVED, False, limit]).fetchall() or db.execute(query, [APPROVED, True, limit]).fetchall()
+    return [{'SourceFile': path, 'rotation': rotation} for path, rotation in rows]
+
+
 def recent_photos(recent, limit):
     """
     Photos taken in a recent range, newest first, without waiting for a review: those approved, and

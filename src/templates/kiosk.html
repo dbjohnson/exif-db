@@ -473,12 +473,36 @@
         scheduleNext();
       }
 
+      // favorites going by, dimmed, behind the link to review when today has nothing approved
+      const backgrounds = {{ backgrounds | tojson }};
+      let backgroundIndex = -1;
+
+      function nextBackground() {
+        backgroundIndex = (backgroundIndex + 1) % backgrounds.length;
+        const image = backgrounds[backgroundIndex];
+        const url = imageUrl(image.SourceFile, image.rotation);
+        // the one on screen stays up until the next has loaded; one that fails waits its turn
+        const element = new Image();
+        element.onload = () => {
+          const background = document.getElementById('background');
+          background.classList.add('hidden');
+          setTimeout(() => {
+            background.src = url;
+            background.classList.remove('hidden');
+          }, 200);
+        };
+        element.src = url;
+        setTimeout(nextBackground, {{ refresh_secs * 1000 }});
+      }
+
       // for when loading a page fails anyway, like the frame starting up before the NAS
       navigator.serviceWorker?.register('/kiosk-sw.js').catch(console.log);
 
       // Load the image once on page load
       if (images.length) {
         refreshImage();
+      } else if (backgrounds.length) {
+        window.addEventListener('DOMContentLoaded', nextBackground);
       }
       // also picks up photos approved from elsewhere when there are none to show
       setInterval(refreshStatus, STATUS_REFRESH_MS);
@@ -488,8 +512,15 @@
   </head>
   <body style="background-color:#000">
     {% if not images %}
+    {% if backgrounds %}
+    <img id="background" class="kiosk-background hidden" alt="" />
+    {% endif %}
     <div class="no-images">
+      {% if today_to_review %}
+      <p>{{ '{:,}'.format(today_to_review) }} photo{{ 's' if today_to_review != 1 }} from today to review</p>
+      {% else %}
       <p>No photos to show yet</p>
+      {% endif %}
       <a href="{{ review_url }}">Review photos</a>
     </div>
     {% else %}
