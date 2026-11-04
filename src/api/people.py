@@ -50,12 +50,14 @@ MAP_PERPLEXITY = 30
 MAP_LAYOUT_PATH = os.path.join(os.path.dirname(people_db.PATH), 'people_map_layout.json')
 MAP_KEEP_SHARE = 0.5
 MAP_SETTLE_STEPS = 250
-# how much closer than their faces alone say the map takes relatives to be, by how many steps apart
-# they are in the family: 1 for a parent, child, brother or sister or someone they have a child
-# with, 2 for a grandparent, aunt, uncle or in-law, 3 for a cousin.  Each relative's dot also starts the map in the middle of
-# theirs, as t-SNE moves a dot only a little from where it starts.  On 910 dots with one each, a
-# made-up family of 12 ended up with all their parents, children, partners and siblings among their
-# 10 closest dots, against a quarter without this, and other dots kept 91% of their 10 closest
+# how much closer than their faces alone say the map takes blood relatives to be, by how closely
+# they're related: 1 for a parent, child, brother or sister, 2 for a grandparent, aunt, uncle, niece
+# or nephew, 3 for a first cousin or great-grandparent.  Partners and in-laws aren't pulled, though
+# two parents still end up near each other, as each is pulled to their children.  Each relative's
+# dot also starts the map in the middle of theirs, as t-SNE moves a dot only a little from where it
+# starts.  On 910 dots with one each and a made-up family of 14, 90% of first-degree pairs ended up
+# among each other's 10 closest dots, against 24% without this, 71% of second-degree and 33% of
+# third-degree against none, and the other dots kept 90% of their 10 closest
 MAP_RELATIVES_CLOSER = {1: 0.3, 2: 0.6, 3: 0.85}
 PAGE_FACES = 500
 GROUPS_PAGE = 100
@@ -329,42 +331,43 @@ def relatives(name):
 
 def _relation_steps():
     """
-    How many steps apart in the family people are, as {name: {name: steps}}, going no further than
-    the steps MAP_RELATIVES_CLOSER has.  A parent, child and sibling are one step, and so are two
-    people with a child together
+    How closely related by blood people are, as {name: {name: degree}}, going no further than the
+    degrees MAP_RELATIVES_CLOSER has.  A parent, child, brother or sister is 1, a grandparent, aunt,
+    uncle, niece or nephew 2, and a first cousin or great-grandparent 3.  Those related only by
+    marriage, such as two people with a child together or in-laws, aren't related here
     """
-    parents, children = _family_links()
-    links = {}
-
-    def link(first, second):
-        if first != second:
-            links.setdefault(first, set()).add(second)
-            links.setdefault(second, set()).add(first)
-
-    for child, theirs in parents.items():
-        for parent in theirs:
-            link(child, parent)
-            for other in theirs:
-                link(parent, other)
-    for theirs in children.values():
-        for first in theirs:
-            for second in theirs:
-                link(first, second)
+    parents, _ = _family_links()
     furthest = max(MAP_RELATIVES_CLOSER)
-    steps = {}
-    for start in links:
-        reached = {start: 0}
-        waiting = deque([start])
+
+    def ancestors(name):
+        # {ancestor: generations up}, including themselves at 0
+        found = {name: 0}
+        waiting = deque([name])
         while waiting:
-            name = waiting.popleft()
-            if reached[name] == furthest:
+            person = waiting.popleft()
+            if found[person] == furthest:
                 continue
-            for other in links[name]:
-                if other not in reached:
-                    reached[other] = reached[name] + 1
-                    waiting.append(other)
-        del reached[start]
-        steps[start] = reached
+            for parent in parents.get(person, ()):
+                if parent not in found:
+                    found[parent] = found[person] + 1
+                    waiting.append(parent)
+        return found
+
+    everyone = set(parents) | {parent for theirs in parents.values() for parent in theirs}
+    lines = {name: ancestors(name) for name in everyone}
+    steps = {}
+    for name, mine in lines.items():
+        for other, theirs in lines.items():
+            if other == name:
+                continue
+            # up to an ancestor they have in common and down again, which for two people both
+            # descended from them counts one less: siblings are as close as a parent and child
+            degree = min(
+                (up + down - (1 if up and down else 0) for ancestor, up in mine.items() if (down := theirs.get(ancestor)) is not None),
+                default=None
+            )
+            if degree is not None and degree <= furthest:
+                steps.setdefault(name, {})[other] = degree
     return steps
 
 
