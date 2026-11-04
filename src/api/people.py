@@ -59,6 +59,11 @@ MAP_SETTLE_STEPS = 250
 # among each other's 10 closest dots, against 24% without this, 71% of second-degree and 33% of
 # third-degree against none, and the other dots kept 90% of their 10 closest
 MAP_RELATIVES_CLOSER = {1: 0.3, 2: 0.6, 3: 0.85}
+# that still left only 16% of children drawn with a parent among their 6 closest dots, as t-SNE packs
+# a family into less room than its dots take, and pushing them apart in the browser shuffled them.
+# So the browser also pulls each parent and child towards touching while it pushes dots apart, and
+# siblings by this much as hard
+MAP_SIBLINGS_PULL = 0.5
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -916,16 +921,24 @@ def _work_out_map(_name):
     return result
 
 
+def _drawn_family():
+    parents, children = _family_links()
+    links = [[child, parent, 1] for child, theirs in parents.items() for parent in sorted(theirs)]
+    siblings = {tuple(sorted((first, second))) for theirs in children.values() for first in theirs for second in theirs if first != second}
+    return links + [[first, second, MAP_SIBLINGS_PULL] for first, second in sorted(siblings)]
+
+
 def cluster_map(near=None):
     """
     The last map worked out, or None before the first has been, and whether a newer one is being
     worked out, which can take the NAS a minute or two.  Each person shows with their chosen cover
     when they're one dot.  Given a name, also how alike each dot with a dot for each group is to the
-    closest of that person's, out of 1, in 'near'
+    closest of that person's, out of 1, in 'near'.  'family' is who to draw touching, as [name,
+    name, strength]: a parent and child at 1, two siblings at MAP_SIBLINGS_PULL
     """
     entry = _map_entry()
     result, centres = _cache.get('map') or (None, None)
-    found = {'working': entry['working'], 'failed': entry['failed'], 'map': result}
+    found = {'working': entry['working'], 'failed': entry['failed'], 'map': result, 'family': _drawn_family()}
     if result:
         covers = _covers()
         found['map'] = {**result, 'people': [

@@ -20,6 +20,8 @@ let mapPerson = null;
 let mapResult = null;
 // on a person's page, how alike each of mapResult.groups is to the closest of theirs, out of 1
 let mapNear = null;
+// who to draw touching, as [name, name, how hard]: parents and children, and siblings less
+let mapFamily = [];
 let mapView = null;
 // whether someone has zoomed or moved the map since it was drawn, so a newer one shouldn't replace it
 let mapMoved = false;
@@ -52,7 +54,8 @@ async function loadMap() {
     if (!response.ok) {
       throw new Error('Status: ' + response.status);
     }
-    const {map, near, working, failed} = await response.json();
+    const {map, near, working, failed, family} = await response.json();
+    mapFamily = family || [];
     if (!mapResult) {
       if (map) {
         mapResult = map;
@@ -101,35 +104,112 @@ function dotRadius(faces, scale) {
   return Math.max(7, Math.min(32, 2.5 * Math.sqrt(faces))) * scale;
 }
 
-// moves overlapping dots apart, a little at a time, as moving one can push it into another
-function separate(dots) {
-  for (let round = 0; round < 60; round++) {
-    let moved = false;
-    for (let i = 0; i < dots.length; i++) {
-      const a = dots[i];
-      for (let j = i + 1; j < dots.length; j++) {
-        const b = dots[j];
-        const dx = b.cx - a.cx;
-        const dy = b.cy - a.cy;
-        const needed = a.r + b.r + 2;
-        if (Math.abs(dx) >= needed || Math.abs(dy) >= needed) {
-          continue;
-        }
-        const distance = Math.hypot(dx, dy) || 0.01;
-        if (distance < needed) {
-          const push = (needed - distance) / 2;
-          a.cx -= dx / distance * push;
-          a.cy -= dy / distance * push;
-          b.cx += dx / distance * push;
-          b.cy += dy / distance * push;
-          moved = true;
+// how hard relatives are pulled towards touching, and how far overlapping dots are pushed apart,
+// each round, for some rounds and then for some more only pushing.  Pushing each overlapping pair
+// fully apart in turn, as this used to, shuffled a crowded family: with 45 relatives, 13 of 49
+// parents and children touched.  Small steps for all dots at once and this pull made it 30, and
+// a stronger pull or more rounds did no better
+const FAMILY_PULL = 0.5;
+const OVERLAP_PUSH = 0.5;
+const FAMILY_ROUNDS = 60;
+const SPREAD_ROUNDS = 40;
+
+// moves overlapping dots apart, while pulling relatives, given as [dot, dot, how hard], together
+function spreadOut(dots, links) {
+  const count = dots.length;
+  const x = Float64Array.from(dots, dot => dot.cx);
+  const y = Float64Array.from(dots, dot => dot.cy);
+  const r = Float64Array.from(dots, dot => dot.r);
+  const moveX = new Float64Array(count);
+  const moveY = new Float64Array(count);
+  const cell = 2 * Math.max(...r) + 2;
+  // only dots in the same or a neighbouring square of a grid can touch.  Squares are numbered, as
+  // building text keys each round took most of the time
+  const columns = 1 << 16;
+  const grid = new Map();
+  for (let round = 0; round < FAMILY_ROUNDS + SPREAD_ROUNDS; round++) {
+    const pulling = round < FAMILY_ROUNDS;
+    moveX.fill(0);
+    moveY.fill(0);
+    grid.clear();
+    for (let i = 0; i < count; i++) {
+      const key = Math.floor(y[i] / cell) * columns + Math.floor(x[i] / cell);
+      const square = grid.get(key);
+      if (square) {
+        square.push(i);
+      } else {
+        grid.set(key, [i]);
+      }
+    }
+    let worst = 0;
+    for (let i = 0; i < count; i++) {
+      const gx = Math.floor(x[i] / cell);
+      const gy = Math.floor(y[i] / cell);
+      for (let row = gy - 1; row <= gy + 1; row++) {
+        for (let column = gx - 1; column <= gx + 1; column++) {
+          const square = grid.get(row * columns + column);
+          if (!square) {
+            continue;
+          }
+          for (const j of square) {
+            if (j <= i) {
+              continue;
+            }
+            const dx = x[j] - x[i];
+            const dy = y[j] - y[i];
+            const distance = Math.hypot(dx, dy) || 0.01;
+            const overlap = r[i] + r[j] + 2 - distance;
+            if (overlap > 0) {
+              worst = Math.max(worst, overlap);
+              const push = OVERLAP_PUSH * overlap / 2 / distance;
+              moveX[i] -= dx * push;
+              moveY[i] -= dy * push;
+              moveX[j] += dx * push;
+              moveY[j] += dy * push;
+            }
+          }
         }
       }
     }
-    if (!moved) {
+    if (pulling) {
+      for (const [i, j, strength] of links) {
+        const dx = x[j] - x[i];
+        const dy = y[j] - y[i];
+        const distance = Math.hypot(dx, dy) || 0.01;
+        const gap = distance - r[i] - r[j] - 2;
+        if (gap > 0) {
+          const pull = FAMILY_PULL * strength * gap / 2 / distance;
+          moveX[i] += dx * pull;
+          moveY[i] += dy * pull;
+          moveX[j] -= dx * pull;
+          moveY[j] -= dy * pull;
+        }
+      }
+    } else if (worst < 0.5) {
       break;
     }
+    for (let i = 0; i < count; i++) {
+      x[i] += moveX[i];
+      y[i] += moveY[i];
+    }
   }
+  dots.forEach((dot, i) => {
+    dot.cx = x[i];
+    dot.cy = y[i];
+  });
+}
+
+// mapFamily as places in dots, going by each person's biggest dot
+function familyLinks(dots) {
+  const biggest = new Map();
+  dots.forEach((dot, index) => {
+    if (dot.name && !(biggest.has(dot.name) && dots[biggest.get(dot.name)].faces >= dot.faces)) {
+      biggest.set(dot.name, index);
+    }
+  });
+  return mapFamily
+    .filter(([first, second]) => biggest.has(first) && biggest.has(second))
+    .map(([first, second, strength]) => [biggest.get(first), biggest.get(second), strength]);
 }
 
 function svgElement(name, attributes) {
@@ -234,7 +314,7 @@ function drawMap() {
     cy: toY(node.y),
     r: dotRadius(node.faces, scale)
   }));
-  separate(dots);
+  spreadOut(dots, familyLinks(dots));
   const drawn = new Map(dots.map(dot => [dot.index, dot]));
   const links = svgElement('g', {class: 'map-links'});
 
