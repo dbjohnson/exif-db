@@ -110,12 +110,21 @@ function dotRadius(faces, scale) {
 // parents and children touched.  Small steps for all dots at once and this pull made it 30, and
 // a stronger pull or more rounds did no better
 const FAMILY_PULL = 0.5;
+// those in a family who aren't related by blood or partners, such as in-laws, are pushed apart
+// while the gap between them is less than this many pixels at full size, and this hard, shared
+// between each person's in-laws, which spreads a family out into its sides.  With a family of 45
+// that made the median gap between in-laws 221 pixels instead of 178, with 33 of 49 parents and
+// children touching.  Not sharing it out pushed partners apart, and pushing further split families
+const IN_LAWS_GAP = 150;
+const IN_LAWS_PUSH = 1;
+// the furthest a dot moves in one round, in pixels at full size
+const MOST_MOVED = 20;
 const OVERLAP_PUSH = 0.5;
 const FAMILY_ROUNDS = 60;
 const SPREAD_ROUNDS = 40;
 
 // moves overlapping dots apart, while pulling relatives, given as [dot, dot, how hard], together
-function spreadOut(dots, links) {
+function spreadOut(dots, links, scale) {
   const count = dots.length;
   const x = Float64Array.from(dots, dot => dot.cx);
   const y = Float64Array.from(dots, dot => dot.cy);
@@ -127,6 +136,16 @@ function spreadOut(dots, links) {
   // building text keys each round took most of the time
   const columns = 1 << 16;
   const grid = new Map();
+  // each person's push from their in-laws is shared between them, so that someone with many isn't
+  // pushed away from their partner and children by all of them
+  const inLaws = new Float64Array(count);
+  links.forEach(([i, j, strength]) => {
+    if (strength < 0) {
+      inLaws[i]++;
+      inLaws[j]++;
+    }
+  });
+  const furthest = MOST_MOVED * scale;
   for (let round = 0; round < FAMILY_ROUNDS + SPREAD_ROUNDS; round++) {
     const pulling = round < FAMILY_ROUNDS;
     moveX.fill(0);
@@ -177,20 +196,27 @@ function spreadOut(dots, links) {
         const dy = y[j] - y[i];
         const distance = Math.hypot(dx, dy) || 0.01;
         const gap = distance - r[i] - r[j] - 2;
-        if (gap > 0) {
-          const pull = FAMILY_PULL * strength * gap / 2 / distance;
-          moveX[i] += dx * pull;
-          moveY[i] += dy * pull;
-          moveX[j] -= dx * pull;
-          moveY[j] -= dy * pull;
+        // those in the family who aren't related by blood, pushed apart while they're close
+        const apart = strength < 0 && gap < IN_LAWS_GAP * scale;
+        if (gap > 0 && strength > 0 || apart) {
+          const pull = apart
+            ? -IN_LAWS_PUSH * (IN_LAWS_GAP * scale - gap) / 2 / distance
+            : FAMILY_PULL * strength * gap / 2 / distance;
+          moveX[i] += dx * pull / (apart ? inLaws[i] : 1);
+          moveY[i] += dy * pull / (apart ? inLaws[i] : 1);
+          moveX[j] -= dx * pull / (apart ? inLaws[j] : 1);
+          moveY[j] -= dy * pull / (apart ? inLaws[j] : 1);
         }
       }
     } else if (worst < 0.5) {
       break;
     }
     for (let i = 0; i < count; i++) {
-      x[i] += moveX[i];
-      y[i] += moveY[i];
+      // pulls and pushes together can overshoot, which grows each round unless held back
+      const moved = Math.hypot(moveX[i], moveY[i]);
+      const share = moved > furthest ? furthest / moved : 1;
+      x[i] += moveX[i] * share;
+      y[i] += moveY[i] * share;
     }
   }
   dots.forEach((dot, i) => {
@@ -314,7 +340,7 @@ function drawMap() {
     cy: toY(node.y),
     r: dotRadius(node.faces, scale)
   }));
-  spreadOut(dots, familyLinks(dots));
+  spreadOut(dots, familyLinks(dots), scale);
   const drawn = new Map(dots.map(dot => [dot.index, dot]));
   const links = svgElement('g', {class: 'map-links'});
 

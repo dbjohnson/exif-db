@@ -62,8 +62,10 @@ MAP_RELATIVES_CLOSER = {1: 0.3, 2: 0.6, 3: 0.85}
 # that still left only 16% of children drawn with a parent among their 6 closest dots, as t-SNE packs
 # a family into less room than its dots take, and pushing them apart in the browser shuffled them.
 # So the browser also pulls each parent and child towards touching while it pushes dots apart, and
-# siblings by this much as hard
+# siblings and two people with a child together by these much as hard, and pushes apart others in
+# a family not related by blood
 MAP_SIBLINGS_PULL = 0.5
+MAP_PARTNERS_PULL = 1
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -925,7 +927,52 @@ def _drawn_family():
     parents, children = _family_links()
     links = [[child, parent, 1] for child, theirs in parents.items() for parent in sorted(theirs)]
     siblings = {tuple(sorted((first, second))) for theirs in children.values() for first in theirs for second in theirs if first != second}
-    return links + [[first, second, MAP_SIBLINGS_PULL] for first, second in sorted(siblings)]
+    partners = {tuple(sorted((first, second))) for theirs in parents.values() for first in theirs for second in theirs if first != second}
+    return (
+        links
+        + [[first, second, MAP_SIBLINGS_PULL] for first, second in sorted(siblings)]
+        + [[first, second, MAP_PARTNERS_PULL] for first, second in sorted(partners)]
+        + [link for link in _in_laws(parents) if tuple(link[:2]) not in partners]
+    )
+
+
+def _in_laws(parents):
+    """
+    Each two people in the same family who aren't related by blood, such as in-laws and partners, as
+    [name, name, -1], for the map to push apart
+    """
+    links = {}
+    for child, theirs in parents.items():
+        for parent in theirs:
+            links.setdefault(child, set()).add(parent)
+            links.setdefault(parent, set()).add(child)
+    family = {}
+    for start in links:
+        if start in family:
+            continue
+        family[start] = start
+        waiting = [start]
+        while waiting:
+            for other in links[waiting.pop()]:
+                if other not in family:
+                    family[other] = start
+                    waiting.append(other)
+    ancestors = {}
+    for name in links:
+        found = {name}
+        waiting = [name]
+        while waiting:
+            for parent in parents.get(waiting.pop(), ()):
+                if parent not in found:
+                    found.add(parent)
+                    waiting.append(parent)
+        ancestors[name] = found
+    names = sorted(links)
+    return [
+        [first, second, -1]
+        for place, first in enumerate(names) for second in names[place + 1:]
+        if family[first] == family[second] and not ancestors[first] & ancestors[second]
+    ]
 
 
 def cluster_map(near=None):
