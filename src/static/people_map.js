@@ -521,26 +521,6 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  // the map over the whole window, and back.  Not the browser's own full screen, which iPhones only
-  // allow for videos
-  const full = document.getElementById('map-full');
-  const area = document.getElementById('map-area');
-  const setFull = on => {
-    area.classList.toggle('full', on);
-    document.body.classList.toggle('map-full', on);
-    full.setAttribute('aria-pressed', on ? 'true' : 'false');
-    full.textContent = on ? 'Exit full page' : 'Full page';
-    hideMapTip();
-    if (mapResult) {
-      drawMap();
-    }
-  };
-  full.addEventListener('click', () => setFull(!area.classList.contains('full')));
-  window.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && area.classList.contains('full')) {
-      setFull(false);
-    }
-  });
   const size = document.getElementById('map-size');
   const sizeShown = () => {
     document.getElementById('map-size-value').textContent = minFaces();

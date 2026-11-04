@@ -2420,33 +2420,6 @@ a.movie-tile {
   position: relative;
 }
 
-/* the map over the whole window, from its Full page button */
-.people-map-area.full {
-  position: fixed;
-  inset: 0;
-  /* under toasts, at 20 */
-  z-index: 18;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  padding: 8px var(--page-margin) var(--page-margin);
-  background: var(--bg);
-}
-
-.people-map-area.full .people-map-frame {
-  flex: 1;
-  min-height: 0;
-}
-
-.people-map-area.full .people-map {
-  height: 100%;
-  min-height: 0;
-}
-
-body.map-full {
-  overflow: hidden;
-}
-
 .people-map-loading {
   position: absolute;
   inset: 0;
@@ -2468,7 +2441,7 @@ body.map-full {
 .people-map {
   display: block;
   width: 100%;
-  height: calc(100dvh - 260px);
+  height: 90vh;
   min-height: 360px;
   border-radius: var(--radius);
   background: var(--surface);
@@ -2524,7 +2497,6 @@ body.map-full {
 
 .people-map-tip {
   position: fixed;
-  /* over the map when it's full page */
   z-index: 19;
   display: flex;
   flex-direction: column;
