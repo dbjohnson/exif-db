@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 
 import numpy as np
 
@@ -50,6 +50,13 @@ MAP_PERPLEXITY = 30
 MAP_LAYOUT_PATH = os.path.join(os.path.dirname(people_db.PATH), 'people_map_layout.json')
 MAP_KEEP_SHARE = 0.5
 MAP_SETTLE_STEPS = 250
+# how much closer than their faces alone say the map takes relatives to be, by how many steps apart
+# they are in the family: 1 for a parent, child, brother or sister or someone they have a child
+# with, 2 for a grandparent, aunt, uncle or in-law, 3 for a cousin.  Each relative's dot also starts the map in the middle of
+# theirs, as t-SNE moves a dot only a little from where it starts.  On 910 dots with one each, a
+# made-up family of 12 ended up with all their parents, children, partners and siblings among their
+# 10 closest dots, against a quarter without this, and other dots kept 91% of their 10 closest
+MAP_RELATIVES_CLOSER = {1: 0.3, 2: 0.6, 3: 0.85}
 PAGE_FACES = 500
 GROUPS_PAGE = 100
 # a face seems to be someone else when most of the closest of this many named faces in other photos
@@ -228,9 +235,18 @@ def rename(old, new):
     if cover_face and not joining_with_cover:
         with _db() as db:
             db.execute('INSERT OR REPLACE INTO covers (name, face_id) VALUES (?, ?)', (new, cover_face))
-    # being family goes along too.  The old name stays marked, so undoing this brings that back
+    # being family goes along too, and so do their mom and dad, unless the person they're joining has
+    # them already.  The old name keeps both, so undoing this brings them back
     if old in family():
         set_family(new, True)
+    with _db() as db:
+        db.execute(
+            'INSERT OR IGNORE INTO parents (name, slot, parent) SELECT ?, slot, parent FROM parents WHERE name = ? AND parent <> ?',
+            (new, old, new)
+        )
+        # their children's mom or dad becomes the new name, which undoing this doesn't change back,
+        # as each child has one of each
+        db.execute('UPDATE parents SET parent = ? WHERE parent = ? AND name <> ?', (new, old, new))
     return {face_id: old for face_id in members}
 
 
@@ -248,6 +264,108 @@ def set_family(name, is_family):
             db.execute('INSERT OR IGNORE INTO family (name) VALUES (?)', (name,))
         else:
             db.execute('DELETE FROM family WHERE name = ?', (name,))
+
+
+def parents_of(name):
+    """
+    Someone's mom and dad, as {slot: name}, leaving out a slot nobody fills
+    """
+    return dict(_db().execute('SELECT slot, parent FROM parents WHERE name = ?', (name,)))
+
+
+def set_parent(name, slot, parent):
+    """
+    Says who someone's mom or dad is, or with None that it's nobody named.  Returns who it was before
+    """
+    previous = parents_of(name).get(slot)
+    with _db() as db:
+        if parent is None:
+            db.execute('DELETE FROM parents WHERE name = ? AND slot = ?', (name, slot))
+        else:
+            db.execute('INSERT OR REPLACE INTO parents (name, slot, parent) VALUES (?, ?, ?)', (name, slot, parent))
+    return previous
+
+
+def _family_links():
+    """
+    Each person's parents and children, among those who still have a name, as a name that's gone
+    keeps its parents in case it comes back.  As ({child: {parents}}, {parent: {children}})
+    """
+    parents, children = {}, {}
+    for name, parent in _db().execute(
+        """
+        SELECT name, parent FROM parents
+        WHERE name IN (SELECT name FROM names) AND parent IN (SELECT name FROM names)
+        """
+    ):
+        parents.setdefault(name, set()).add(parent)
+        children.setdefault(parent, set()).add(name)
+    return parents, children
+
+
+def relatives(name):
+    """
+    Who someone is related to, worked out from everyone's mom and dad: their children, brothers and
+    sisters, and those they have children with, as {kind: [{name, through}]}, through being the
+    parent or child that relates them
+    """
+    parents, children = _family_links()
+    siblings, partners = {}, {}
+    for parent in sorted(parents.get(name, ())):
+        for other in children[parent]:
+            if other != name:
+                siblings.setdefault(other, parent)
+    for child in sorted(children.get(name, ())):
+        for other in parents[child]:
+            if other != name:
+                partners.setdefault(other, child)
+    listed = lambda found: [{'name': other, 'through': through} for other, through in sorted(found.items(), key=lambda item: item[0].lower())]
+    return {
+        'children': listed({child: None for child in children.get(name, ())}),
+        'siblings': listed(siblings),
+        'partners': listed(partners)
+    }
+
+
+def _relation_steps():
+    """
+    How many steps apart in the family people are, as {name: {name: steps}}, going no further than
+    the steps MAP_RELATIVES_CLOSER has.  A parent, child and sibling are one step, and so are two
+    people with a child together
+    """
+    parents, children = _family_links()
+    links = {}
+
+    def link(first, second):
+        if first != second:
+            links.setdefault(first, set()).add(second)
+            links.setdefault(second, set()).add(first)
+
+    for child, theirs in parents.items():
+        for parent in theirs:
+            link(child, parent)
+            for other in theirs:
+                link(parent, other)
+    for theirs in children.values():
+        for first in theirs:
+            for second in theirs:
+                link(first, second)
+    furthest = max(MAP_RELATIVES_CLOSER)
+    steps = {}
+    for start in links:
+        reached = {start: 0}
+        waiting = deque([start])
+        while waiting:
+            name = waiting.popleft()
+            if reached[name] == furthest:
+                continue
+            for other in links[name]:
+                if other not in reached:
+                    reached[other] = reached[name] + 1
+                    waiting.append(other)
+        del reached[start]
+        steps[start] = reached
+    return steps
 
 
 def remove(name):
@@ -621,16 +739,49 @@ def warm_up():
     ready when someone looks.  Says whether all of it is done
     """
     _, entry = _summary()
-    map_entry = _comparison(MAP, '', _work_out_map)
+    map_entry = _map_entry()
     return not entry['working'] and not map_entry['working']
 
 
-def _map_nodes(places_by_key, ids, embeddings, before):
+def _map_entry():
+    # a new map when who's related changes, as well as when names do
+    return _comparison(MAP, '', _work_out_map, tuple(_db().execute('SELECT * FROM parents ORDER BY 1, 2')))
+
+
+def _closer(names, steps):
+    """
+    How much closer than their faces say each two of these names' dots are, as a square of
+    multipliers: 1 for those not related, and for unnamed groups
+    """
+    closer = np.ones((len(names), len(names)))
+    places = {}
+    for place, name in enumerate(names):
+        places.setdefault(name, []).append(place)
+    for name, theirs in places.items():
+        for other, apart in steps.get(name, {}).items():
+            if other in places:
+                closer[np.ix_(theirs, places[other])] = MAP_RELATIVES_CLOSER[apart]
+    return closer
+
+
+def _beside_relatives(spots, closer):
+    """
+    Each related dot moved to the middle of its relatives' dots, the closest relatives counting most
+    """
+    pull = 1 - closer
+    related = pull.sum(axis=1) > 0
+    moved = spots.copy()
+    moved[related] = (pull @ spots)[related] / pull.sum(axis=1)[related, None]
+    return moved
+
+
+def _map_nodes(places_by_key, ids, embeddings, before, steps):
     """
     A dot for each set of faces with enough of them, as a list of {x, y, near, name, group, faces,
     tight, face}, and each one's average face, made 1 long.  x and y place those that look alike
-    close together, starting from where they were before, given as {(name, group): (x, y)}, and
-    near is its most alike dots, as [place in the list, how alike out of 1]
+    close together, and relatives closer still, going by steps from _relation_steps, starting from
+    where they were before, given as {(name, group): (x, y)}.  near is its most alike dots, as
+    [place in the list, how alike out of 1]
     """
     kept = [(key, places) for key, places in places_by_key.items() if len(places) >= MAP_FACES]
     if not kept:
@@ -638,8 +789,11 @@ def _map_nodes(places_by_key, ids, embeddings, before):
     averages = np.array([embeddings[places].mean(axis=0) for _, places in kept])
     tight = np.linalg.norm(averages, axis=1)
     centres = averages / tight[:, None]
-    spots = _spread(centres, MAP_PERPLEXITY, _starting_spots([key for key, _ in kept], centres, before))
     alike = centres @ centres.T
+    closer = _closer([name for (name, _), _ in kept], steps)
+    distances = np.clip(1 - alike.astype(np.float64), 0, None) * closer
+    start = _starting_spots([key for key, _ in kept], centres, before)
+    spots = _spread(centres, distances, MAP_PERPLEXITY, None if start is None else _beside_relatives(start, closer))
     np.fill_diagonal(alike, -np.inf)
     neighbours = min(MAP_NEIGHBOURS, len(kept) - 1)
     closest = np.argsort(-alike, axis=1)[:, :neighbours]
@@ -682,22 +836,27 @@ def _starting_spots(keys, centres, before):
     return spots
 
 
-def _spread(points, perplexity, start=None):
+def _spread(points, distances, perplexity, start=None):
     """
-    Places points on a page, keeping each near about this many of those most like it (t-SNE).  From
-    where they start, if given, only settling them, as starting afresh moves everything.  The same
-    points always land in the same places
+    Places points on a page, keeping each near about this many of the closest to it, going by a
+    square of how far apart each two are (t-SNE).  From where they start, if given, only settling
+    them, as starting afresh moves everything.  The same points always land in the same places
     """
     if len(points) < 4:
         return [(place, 0) for place in range(len(points))]
-    # imported here, as it takes a while and only this needs it
+    # imported here, as they take a while and only this needs them
+    from sklearn.decomposition import PCA
     from sklearn.manifold import TSNE
+    np.fill_diagonal(distances, 0)
     perplexity = min(perplexity, (len(points) - 1) / 3)
     if start is None:
-        return TSNE(metric='cosine', init='pca', perplexity=perplexity, random_state=1).fit_transform(points.astype(np.float64))
+        # what TSNE's init='pca' does, which it can't with distances given instead of points
+        start = PCA(n_components=2, svd_solver='randomized', random_state=1).fit_transform(points.astype(np.float64)).astype(np.float32)
+        start = start / np.std(start[:, 0]) * 1e-4
+        return TSNE(metric='precomputed', init=start, perplexity=perplexity, random_state=1).fit_transform(distances)
     return TSNE(
-        metric='cosine', init=start, perplexity=perplexity, random_state=1, early_exaggeration=1, max_iter=MAP_SETTLE_STEPS
-    ).fit_transform(points.astype(np.float64))
+        metric='precomputed', init=start, perplexity=perplexity, random_state=1, early_exaggeration=1, max_iter=MAP_SETTLE_STEPS
+    ).fit_transform(distances)
 
 
 def _saved_layout():
@@ -745,8 +904,9 @@ def _work_out_map(_name):
         by_group.setdefault((name, cluster), []).append(place)
         by_person.setdefault((name, None) if name else (name, cluster), []).append(place)
     before = _saved_layout()
-    groups, centres = _map_nodes(by_group, ids, embeddings, before['groups'])
-    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings, before['people'])[0]}
+    steps = _relation_steps()
+    groups, centres = _map_nodes(by_group, ids, embeddings, before['groups'], steps)
+    result = {'groups': groups, 'people': _map_nodes(by_person, ids, embeddings, before['people'], steps)[0]}
     _save_layout(result)
     # together, so that what's near someone always goes with the map it was worked out on
     _cache['map'] = (result, centres)
@@ -760,7 +920,7 @@ def cluster_map(near=None):
     when they're one dot.  Given a name, also how alike each dot with a dot for each group is to the
     closest of that person's, out of 1, in 'near'
     """
-    entry = _comparison(MAP, '', _work_out_map)
+    entry = _map_entry()
     result, centres = _cache.get('map') or (None, None)
     found = {'working': entry['working'], 'failed': entry['failed'], 'map': result}
     if result:
@@ -907,12 +1067,12 @@ def _work_out_comparison(key, entry, work):
         entry['working'] = False
 
 
-def _comparison(kind, name, work):
+def _comparison(kind, name, work, also=None):
     """
-    What's been worked out about these faces.  Starts working it out if the names have changed, so
-    'faces' is empty while 'working' is true
+    What's been worked out about these faces.  Starts working it out if the names have changed, or
+    also has, so 'faces' is empty while 'working' is true
     """
-    stamp = _stamp()
+    stamp = (_stamp(), also)
     key = (kind, name)
     entry = _comparisons.get(key)
     if not entry or entry['stamp'] != stamp:

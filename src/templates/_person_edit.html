@@ -6,5 +6,12 @@
   <button onclick="renamePerson({{ person | tojson | forceescape }})">Rename</button>
   <button type="button" class="person-family" aria-pressed="{{ 'true' if is_family(person) else 'false' }}" onclick="toggleFamily(this, {{ person | tojson | forceescape }})">Family</button>
   <button class="person-remove" onclick="removePerson(this, {{ person | tojson | forceescape }})">Remove person</button>
-  <p class="library-hint">Using a name someone already has joins the two together. Removing sends these faces back to "Who is this?" and leaves the photos alone. Family shows them on People when it's showing only family.</p>
+  <div id="person-relatives" class="person-relatives" data-person="{{ person }}" data-family="{{ family_of(person) | tojson | forceescape }}">
+    <span class="person-parents">
+      <label>Mom <input id="person-mom" data-slot="mom" type="text" list="names" maxlength="80" placeholder="Not set" /></label>
+      <label>Dad <input id="person-dad" data-slot="dad" type="text" list="names" maxlength="80" placeholder="Not set" /></label>
+    </span>
+    <div id="person-relatives-list" class="person-relatives-list"></div>
+  </div>
+  <p class="library-hint">Using a name someone already has joins the two together. Removing sends these faces back to "Who is this?" and leaves the photos alone. Family shows them on People when it's showing only family. Children, brothers and sisters and those with a child together come from everyone's mom and dad, and the people map puts relatives closer together than their faces alone would.</p>
 </div>

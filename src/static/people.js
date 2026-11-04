@@ -59,6 +59,87 @@ async function toggleFamily(button, name) {
   }
 }
 
+// someone's mom and dad, from their Edit panel, and the relatives that follow from everyone's
+const RELATIVE_HEADINGS = {children: 'Children', siblings: 'Brothers and sisters', partners: 'Has children with'};
+const PARENT_SLOTS = ['mom', 'dad'];
+
+function showFamily(family) {
+  PARENT_SLOTS.forEach(slot => {
+    document.getElementById(`person-${slot}`).value = family.parents[slot] || '';
+  });
+  const list = document.getElementById('person-relatives-list');
+  list.replaceChildren();
+  Object.entries(RELATIVE_HEADINGS).forEach(([kind, heading]) => {
+    if (!family[kind].length) {
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'person-relatives-row';
+    const label = document.createElement('span');
+    label.className = 'person-relatives-heading';
+    label.textContent = heading;
+    row.append(label);
+    family[kind].forEach(relative => {
+      const chip = document.createElement('a');
+      chip.className = 'person-relative';
+      chip.href = `/people/${encodeURIComponent(relative.name)}`;
+      chip.textContent = relative.name;
+      if (relative.through) {
+        const through = document.createElement('span');
+        through.className = 'person-relative-through';
+        through.textContent = `through ${relative.through}`;
+        chip.append(through);
+      }
+      row.append(chip);
+    });
+    list.append(row);
+  });
+}
+
+async function setParent(slot, parent) {
+  const person = document.getElementById('person-relatives').dataset.person;
+  const {previous, family} = await postJson('/api/people/parent', {name: person, slot, parent});
+  showFamily(family);
+  return previous;
+}
+
+async function parentTyped(input) {
+  const person = document.getElementById('person-relatives').dataset.person;
+  const slot = input.dataset.slot;
+  const parent = input.value.trim() || null;
+  if (parent && ![...document.querySelectorAll('#names option')].some(option => option.value === parent)) {
+    showToast(`Nobody is called ${parent} yet`);
+    return;
+  }
+  try {
+    const previous = await setParent(slot, parent);
+    if (previous === parent) {
+      return;
+    }
+    showToast(parent ? `${parent} is ${person}'s ${slot}` : `Cleared ${person}'s ${slot}`, async () => {
+      try {
+        await setParent(slot, previous);
+      } catch (error) {
+        showToast(`Couldn't undo: ${error.message}`);
+      }
+    });
+  } catch (error) {
+    showToast(`Couldn't save: ${error.message}`);
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const relatives = document.getElementById('person-relatives');
+  if (!relatives) {
+    return;
+  }
+  showFamily(JSON.parse(relatives.dataset.family));
+  PARENT_SLOTS.forEach(slot => {
+    const input = document.getElementById(`person-${slot}`);
+    input.addEventListener('change', () => parentTyped(input));
+  });
+});
+
 window.addEventListener('DOMContentLoaded', () => {
   const pending = sessionStorage.getItem(PEOPLE_UNDO);
   if (!pending) {

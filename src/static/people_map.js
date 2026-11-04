@@ -86,7 +86,7 @@ async function loadMap() {
       return;
     }
     if (mapResult && working) {
-      setMapNote('Updating for the latest names', true);
+      setMapNote('Updating for the latest names and relatives', true);
     } else if (mapResult) {
       return;
     }

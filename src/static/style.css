@@ -1623,6 +1623,42 @@ a.movie-tile {
   border-color: var(--danger);
 }
 
+.person-relatives {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.person-parents,
+.person-relatives-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.person-relatives-heading {
+  min-width: 10em;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.person-relative {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.person-relative-through {
+  color: var(--muted);
+}
+
 .viewer-missing {
   position: absolute;
   inset: 0;

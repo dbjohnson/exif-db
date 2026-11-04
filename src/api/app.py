@@ -40,6 +40,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # for a person's Edit panel, which is on more than one page
 templates.env.globals['is_family'] = lambda name: name in people.family()
+templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(name), **people.relatives(name)}
 
 
 @app.middleware("http")
@@ -988,6 +989,24 @@ class PersonFamily(BaseModel):
 async def _set_family(choice: PersonFamily):
     people.set_family(choice.name, choice.family)
     return "saved"
+
+
+class PersonParent(BaseModel):
+    name: str
+    slot: Literal['mom', 'dad']
+    # or null or blank for nobody
+    parent: str | None
+
+
+@app.post("/api/people/parent")
+async def _set_parent(choice: PersonParent):
+    parent = clean_name(choice.parent or '') or None
+    if parent == choice.name:
+        raise HTTPException(status_code=422, detail="Someone can't be their own parent")
+    if parent is not None and parent not in people.known_names():
+        raise HTTPException(status_code=404, detail=f"There's nobody called {parent}")
+    previous = people.set_parent(choice.name, choice.slot, parent)
+    return {'previous': previous, 'family': {'parents': people.parents_of(choice.name), **people.relatives(choice.name)}}
 
 
 @app.get("/people/group/{group_id}")

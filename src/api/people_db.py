@@ -72,6 +72,9 @@ SCHEMA = """
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- people marked as family, so /people can show only them and leave friends out
     CREATE TABLE IF NOT EXISTS family (name TEXT PRIMARY KEY);
+    -- each person's mom and dad, as slot 'mom' or 'dad', from which their other relatives are worked
+    -- out, and which the map places close together
+    CREATE TABLE IF NOT EXISTS parents (name TEXT NOT NULL, slot TEXT NOT NULL, parent TEXT NOT NULL, PRIMARY KEY (name, slot));
     -- photos not to show faces from, as hidden and deleted ones are only known to the main index
     CREATE TABLE IF NOT EXISTS hidden_photos (photo_id BLOB PRIMARY KEY);
     -- dogs and cats found in photos, as fractions of the copy looked at, described by DINOv2.  Cats
