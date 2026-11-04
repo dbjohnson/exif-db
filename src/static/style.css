@@ -409,6 +409,14 @@ button:disabled {
   color: var(--text);
 }
 
+/* saved to an iPhone's home screen, the app's frame takes about a tenth of the height 100dvh
+   counts, which left the footer's buttons off the bottom of the screen */
+@media (display-mode: standalone) {
+  .review-page {
+    height: 90dvh;
+  }
+}
+
 .review-header,
 .review-footer {
   flex: none;
