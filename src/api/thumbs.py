@@ -79,35 +79,43 @@ def _rotate(im, rotation):
     return im.transpose(CLOCKWISE[rotation]) if rotation else im
 
 
-def synology_file(path, name):
+def synology_folder(path):
+    # where Synology keeps what it made from a photo or video
+    folder, filename = os.path.split(path)
+    return os.path.join(folder, '@eaDir', filename)
+
+
+def synology_file(path, name, at=None):
     """
     The path to a file Synology made from a photo or video, unless there isn't one yet or the
-    original has changed since it was made
+    original has changed since it was made.  at is where the photo was in the library, for one
+    that's been moved to the trash: Synology's copies stay behind there
     """
-    folder, filename = os.path.split(path)
-    copy = os.path.join(folder, '@eaDir', filename, name)
+    copy = os.path.join(synology_folder(at or path), name)
     try:
         return copy if os.stat(copy).st_mtime_ns >= os.stat(path).st_mtime_ns else None
     except OSError:
         return None
 
 
-def _synology_copy(path, name):
-    return synology_file(path, f"SYNOPHOTO_THUMB_{name}.jpg")
+def _synology_copy(path, name, at=None):
+    return synology_file(path, f"SYNOPHOTO_THUMB_{name}.jpg", at)
 
 
-def _cache_file(path, variant):
-    source = f"{path}:{os.stat(path).st_mtime_ns}{variant}"
+def _cache_file(path, variant, at=None):
+    # keyed on where a photo is in the library, so that it's the same once moved to the trash,
+    # which keeps its modification time
+    source = f"{at or path}:{os.stat(path).st_mtime_ns}{variant}"
     name = hashlib.sha1(source.encode('utf-8', 'surrogateescape')).hexdigest()
     return os.path.join(CACHE_DIR, name[:2], f"{name}.jpg")
 
 
-def _cached(path, variant, quality, make):
+def _cached(path, variant, quality, make, at=None):
     """
     Returns the path to a cached JPEG made from an image, creating it if needed.  make runs holding
     _decoding, so it mustn't get here again: two at once would each wait for the other for good
     """
-    cached = _cache_file(path, variant)
+    cached = _cache_file(path, variant, at)
     if os.path.exists(cached):
         return cached
     with _decoding:
@@ -123,8 +131,8 @@ def _cached(path, variant, quality, make):
     return cached
 
 
-def thumbnail(path, rotation=0):
-    copy = _synology_copy(path, SYNOLOGY_THUMB)
+def thumbnail(path, rotation=0, at=None):
+    copy = _synology_copy(path, SYNOLOGY_THUMB, at)
     if copy and not rotation:
         return copy
 
@@ -133,7 +141,7 @@ def thumbnail(path, rotation=0):
         im.thumbnail((THUMB_SIZE, THUMB_SIZE))
         return _rotate(im, rotation)
 
-    return _cached(path, f":{rotation}" if rotation else '', 80, make)
+    return _cached(path, _thumb_variant(rotation), 80, make, at)
 
 
 def video_poster(path, size):
@@ -144,12 +152,12 @@ def video_poster(path, size):
     return poster
 
 
-def display(path, rotation=0):
+def display(path, rotation=0, at=None):
     """
     A copy for showing on screen, never the original: browsers can't show every format
     the library holds, and full size photos use up the frame's memory
     """
-    copy = _synology_copy(path, SYNOLOGY_DISPLAY)
+    copy = _synology_copy(path, SYNOLOGY_DISPLAY, at)
     if copy and not rotation:
         return copy
 
@@ -157,7 +165,28 @@ def display(path, rotation=0):
         im = Image.open(copy) if copy else limit_size(_decode(path, max_image_size()))
         return _rotate(im, rotation)
 
-    return _cached(path, f":display:{rotation}", 85, make)
+    return _cached(path, _display_variant(rotation), 85, make, at)
+
+
+def _thumb_variant(rotation):
+    return f":{rotation}" if rotation else ''
+
+
+def _display_variant(rotation):
+    return f":display:{rotation}"
+
+
+def forget(path, at):
+    """
+    Delete the thumbnails and screen-sized copies made from a photo in the trash, at any rotation.
+    Not pictures of its faces, which are only found by face
+    """
+    for rotation in CLOCKWISE.keys() | {0}:
+        for variant in (_thumb_variant(rotation), _display_variant(rotation)):
+            try:
+                os.remove(_cache_file(path, variant, at))
+            except FileNotFoundError:
+                pass
 
 
 def face(path, rotation, box, face_id):

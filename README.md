@@ -37,7 +37,7 @@ Approved photos can be favorited from the gallery or kiosk (stored in `favorites
 
 Photos can be rotated from the gallery or kiosk (stored in `rotations.csv`).  Originals are never changed: a rotated copy is cached in `thumbs/` for display.
 
-Deleting moves a photo to `deleted/` in the storage volume and records it in `deletions.csv`, and can be undone straight afterwards.  `/manage` shows how much is in the trash and can empty it.
+Deleting moves a photo to `deleted/` in the storage volume and records it in `deletions.csv`, and can be undone straight afterwards, or later from the library's Recycle bin.  `/manage` shows how much is in the trash and can empty it.
 
 ## The library
 
@@ -45,9 +45,18 @@ Deleting moves a photo to `deleted/` in the storage volume and records it in `de
 
 Any month, and Undated, has a Select button for approving, favoriting, rotating, hiding, deleting or setting the date of many photos at once (shift-click selects a range).  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
+## Folders
+
+The bottom of `/library` has folders that gather photos from every month, one year at a time like a person's page.  They show even when empty.
+
+- `/library/favorites` has every favorite that isn't hidden.  Unfavoriting a photo there takes it out, with an undo.
+- `/library/hidden` has photos hidden from the library or left unchecked in the review queue.  Unhide puts a photo back in the library as unreviewed.  Copies hidden automatically as duplicates aren't here; `/duplicates` has those.
+- `/library/recycle-bin` has photos deleted from the library, by the day they were deleted (from `deletions.csv`, or for older deletions the time the file moved).  Restore moves a photo's files back; one deleted before the last scan returns to the library after the next one.  Delete forever removes its files from the NAS for good, along with the thumbnails made from them and Synology's copies in the photo's old `@eaDir`, and can't be undone.  Files deleted with a photo, such as a Live Photo's video, go with it either way.  Videos deleted on their own, and anything put in `deleted/` by hand rather than from the library, aren't shown; emptying the trash from `/manage` still removes them.
+- Screenshots (below).
+
 ## Screenshots
 
-`/screenshots`, also at the bottom of `/library`, has every screenshot from an iPhone or iPad, one year at a time, for deleting in bulk: Select, then Select all, then untick the ones to keep.  iOS marks each screenshot in its `UserComment` tag, which `scripts/exiftool.config` turns into a `Screenshot` column in the index, so new ones show up after the scan that finds them.  Screenshots stay in their months in the library too.
+`/screenshots`, also in the library's folders, has every screenshot from an iPhone or iPad, one year at a time, for deleting in bulk: Select, then Select all, then untick the ones to keep.  iOS marks each screenshot in its `UserComment` tag, which `scripts/exiftool.config` turns into a `Screenshot` column in the index, so new ones show up after the scan that finds them.  Screenshots stay in their months in the library too.
 
 Deleting from this page takes every copy of a screenshot, such as the same file backed up into two folders.  Elsewhere another copy takes a deleted photo's place.
 

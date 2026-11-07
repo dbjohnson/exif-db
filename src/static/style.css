@@ -954,6 +954,19 @@ button:disabled {
   font-size: 12px;
 }
 
+/* a folder with no photos in it to show */
+.empty-folder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-folder > .fa {
+  margin-bottom: 20px;
+  color: var(--muted);
+  font-size: 40px;
+}
+
 .library-month-header {
   position: sticky;
   top: 0;
@@ -1727,6 +1740,15 @@ a.movie-tile {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* laid out as if its buttons were in .viewer-actions themselves */
+.viewer-library-actions {
+  display: contents;
+}
+
+.viewer-library-actions[hidden] {
+  display: none;
 }
 
 .viewer-step {

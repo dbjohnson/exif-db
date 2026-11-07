@@ -3,6 +3,7 @@
   <head>
     <title>Library</title>
     {% include '_head.html' %}
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
   </head>
   <body class="library-page">
     {% include '_nav.html' %}
@@ -16,19 +17,21 @@
       {% if undated %}
       <a href="#undated">Undated</a>
       {% endif %}
-      {% if screenshots %}
-      <a href="#screenshots">Screenshots</a>
-      {% endif %}
+      <a href="#folders">Folders</a>
     </nav>
     {% macro month_tile(tile) %}
-    <a class="month-tile" href="{{ tile.url }}">
+    <a class="month-tile{{ ' empty-folder' if not tile.cover }}" href="{{ tile.url }}">
+      {% if tile.cover %}
       <img
-        src="/api/thumb{{ tile.cover.path | urlencode }}{% if tile.cover.rotation %}?rotate={{ tile.cover.rotation }}{% endif %}"
+        src="/api/{{ 'trash/' if tile.trash }}thumb{{ tile.cover.path | urlencode }}{% if tile.cover.rotation %}?rotate={{ tile.cover.rotation }}{% endif %}"
         loading="lazy"
         decoding="async"
         alt=""
         onerror="this.remove()"
       />
+      {% else %}
+      <i class="fa {{ tile.icon }}" aria-hidden="true"></i>
+      {% endif %}
       <span class="month-label">
         <span>{{ tile.name }}</span>
         <span class="month-count">{{ "{:,}".format(tile.photos) }}</span>
@@ -53,13 +56,13 @@
       </div>
     </section>
     {% endif %}
-    {% if screenshots %}
-    <section id="screenshots" class="library-year">
-      <h2>Screenshots <span>from iPhones and iPads, also in their months</span></h2>
+    <section id="folders" class="library-year">
+      <h2>Folders <span>photos from any month</span></h2>
       <div class="month-grid">
-        {{ month_tile(screenshots) }}
+        {% for tile in folders %}
+        {{ month_tile(tile) }}
+        {% endfor %}
       </div>
     </section>
-    {% endif %}
   </body>
 </html>

@@ -450,15 +450,16 @@ def library_months(with_faces=False):
     return [{'month': month, 'photos': photos, 'cover': cover} for month, photos, cover in rows]
 
 
-def _library_rows(where, params):
+def _library_rows(where, params, hidden=False):
+    # hidden photos only appear if asked for
     rows = db.execute(
         f"""
         SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned
         FROM {_with_status()}
-        WHERE ({where}) AND review_status <> ?
+        WHERE ({where}) AND (review_status <> ? OR ?)
         ORDER BY DateTimeOriginal DESC, photo_id
         """,
-        [*params, REJECTED]
+        [*params, REJECTED, hidden]
     ).fetchall()
     return [
         {
@@ -481,6 +482,72 @@ def library_photos(month, with_faces=False):
 
 def photos_with_paths(paths):
     return _library_rows("SourceFile IN (SELECT UNNEST(?::VARCHAR[]))", [list(paths)])
+
+
+def favorites():
+    # not hidden ones, as hiding a photo takes it out of the library
+    return _library_rows("favorite", [])
+
+
+def hidden_photos():
+    """
+    Photos someone has hidden, from the library or the review queue, newest first.  Not copies
+    hidden automatically as duplicates, which the duplicates page has
+    """
+    _load_log('duplicates', DUPLICATES_CSV)
+    return _library_rows(
+        "review_status = ? AND photo_id NOT IN (SELECT photo_id FROM duplicates WHERE value = ?)",
+        [REJECTED, HIDDEN_DUPLICATE],
+        hidden=True
+    )
+
+
+def rotations_by_path(paths):
+    """
+    How each of these files was turned, by path, including files deleted since the index was
+    loaded, such as those in the trash.  Those are only known until a scan leaves them out
+    """
+    _with_status()
+    return dict(db.execute(
+        """
+        SELECT SourceFile, TRY_CAST(rotations.value AS INTEGER)
+        FROM photo_files JOIN rotations USING (photo_id)
+        WHERE SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
+        """,
+        [list(paths)]
+    ).fetchall())
+
+
+def deletion_times():
+    # when each path was last deleted, in seconds since the epoch
+    if not os.path.exists(DELETIONS_CSV):
+        return {}
+    return dict(db.execute(
+        """
+        SELECT photo_id, MAX(decided_ns) / 1e9
+        FROM read_csv(
+            ?,
+            header=false,
+            delim=',',
+            quote='"',
+            escape='"',
+            columns={'photo_id': 'VARCHAR', 'value': 'VARCHAR', 'decided_ns': 'BIGINT'},
+            ignore_errors=true
+        )
+        WHERE value = ?
+        GROUP BY photo_id
+        """,
+        [DELETIONS_CSV, DELETED]
+    ).fetchall())
+
+
+def indexed(paths):
+    # whether any of these files is in the index, deleted or not
+    load_csv()
+    return db.execute(
+        "SELECT COUNT(*) > 0 FROM photo_files WHERE SourceFile IN (SELECT UNNEST(?::VARCHAR[]))",
+        [list(paths)]
+    ).fetchone()[0]
 
 
 def shown_paths():

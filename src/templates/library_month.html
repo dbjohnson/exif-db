@@ -23,6 +23,9 @@
       const MONTH = {{ month | tojson }};
       // a page not organized by date still shows a photo once its date has changed
       const KEEPS_REDATED_PHOTOS = {{ (keeps_redated_photos or false) | tojson }};
+      // which of the library's virtual folders this is, if one: 'favorites', 'hidden' or 'trash'
+      const FOLDER = {{ (folder or none) | tojson }};
+      const IN_TRASH = FOLDER === 'trash';
       const SWIPE_PX = 50;
       // moving files is slow on a NAS, so undoing a big delete mustn't be one long request
       const RESTORE_BATCH = 20;
@@ -46,7 +49,7 @@
       const fileName = photo => photo.path.split('/').pop();
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const photoUrl = (api, photo) =>
-        `/api/${api}${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+        `/api/${IN_TRASH ? 'trash/' : ''}${api}${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
 
       function renderTile(photo) {
         const tile = document.createElement('a');
@@ -120,12 +123,21 @@
       function renderTileActions(photo) {
         const actions = document.createElement('span');
         actions.className = 'tile-actions';
+        if (IN_TRASH) {
+          actions.append(
+            tileAction('fa-undo', 'Restore', () => restorePhotos([photo])),
+            tileAction('fa-trash', 'Delete forever', button => purgePhoto(photo, button))
+          );
+          return actions;
+        }
         const favorite = tileAction('fa-heart-o', 'Favorite', () => toggleFavorite(photo));
         favorite.classList.add('favorite-toggle');
         actions.append(
           favorite,
           tileAction('fa-rotate-right', 'Rotate 90° clockwise', () => rotatePhoto(photo)),
-          tileAction('fa-eye-slash', 'Hide', () => hidePhoto(photo)),
+          FOLDER === 'hidden'
+            ? tileAction('fa-eye', 'Unhide', () => unhidePhotos([photo]))
+            : tileAction('fa-eye-slash', 'Hide', () => hidePhoto(photo)),
           tileAction('fa-trash-o', 'Delete', button => deletePhoto(photo, button)),
           tileAction('fa-info-circle', 'Info', () => showInfo(photo.path))
         );
@@ -133,6 +145,9 @@
       }
 
       function renderTileFavorite(photo) {
+        if (IN_TRASH) {
+          return;
+        }
         photo.tile.querySelector('.tile-favorite').hidden = !photo.favorite;
         const button = photo.tile.querySelector('.tile-actions .favorite-toggle');
         button.setAttribute('aria-pressed', Boolean(photo.favorite));
@@ -346,6 +361,9 @@
         document.getElementById('select-toggle').textContent = selecting ? 'Done' : 'Select';
         document.getElementById('select-count').textContent = `${selected.size.toLocaleString()} selected`;
         document.querySelectorAll('.select-action').forEach(button => button.disabled = !selected.size);
+        if (IN_TRASH) {
+          return;
+        }
         document.getElementById('select-apply').disabled =
           !selected.size || !document.getElementById('select-date').value;
         const allFavorites = selected.size && [...selected].every(photo => photo.favorite);
@@ -369,7 +387,9 @@
           [...selected].forEach(photo => setPicked(photo, false));
           lastPicked = null;
           // so that one batch's date can't quietly carry over to the next
-          document.getElementById('select-date').value = '';
+          if (!IN_TRASH) {
+            document.getElementById('select-date').value = '';
+          }
         }
         renderSelection();
       }
@@ -477,6 +497,10 @@
       function favoriteSelected() {
         const favorite = ![...selected].every(photo => photo.favorite);
         const photos = [...selected].filter(photo => photo.favorite !== favorite);
+        if (FOLDER === 'favorites' && !favorite) {
+          unfavoriteFromFolder(photos);
+          return;
+        }
         const approving = favorite ? photos.filter(photo => photo.status === 'unreviewed') : [];
         run(async () => {
           clearPicks();
@@ -648,7 +672,7 @@
         // a first press was for the photo showing then, which may not be this one
         disarmButton(document.getElementById('viewer-delete'));
         // following along from photo to photo, if it's open
-        if (document.getElementById('info-card')) {
+        if (document.getElementById('info-card') && !IN_TRASH) {
           showInfo(photo.path);
         }
         current = photo;
@@ -901,6 +925,10 @@
       // a favorite that isn't approved wouldn't appear anywhere favorites are used
       function toggleFavorite(photo = current) {
         const favorite = !photo.favorite;
+        if (FOLDER === 'favorites' && !favorite) {
+          unfavoriteFromFolder([photo]);
+          return;
+        }
         run(async () => {
           await postJson('/api/favorite', {photo_id: photo.id, favorite});
           photo.favorite = favorite;
@@ -965,6 +993,115 @@
         );
       }
 
+      // in Favorites, a photo that's no longer one leaves
+      function unfavoriteFromFolder(photos) {
+        removeWithUndo(
+          photos,
+          `Unfavorited ${plural(photos.length, 'photo')}`,
+          "Couldn't save favorite",
+          async () => {
+            await postJson('/api/favorites', {photo_ids: ids(photos), favorite: false});
+            photos.forEach(photo => photo.favorite = false);
+          },
+          async () => {
+            await postJson('/api/favorites', {photo_ids: ids(photos), favorite: true});
+            photos.forEach(photo => photo.favorite = true);
+          }
+        );
+      }
+
+      // back into the library as unreviewed, which is where a photo starts out
+      function unhidePhotos(photos) {
+        removeWithUndo(
+          photos,
+          `Unhid ${plural(photos.length, 'photo')}`,
+          "Couldn't unhide",
+          () => postJson('/api/review', {unreviewed: ids(photos)}),
+          () => postJson('/api/review', {rejected: ids(photos)})
+        );
+      }
+
+      // such as "Restored 3 photos, couldn't restore 1", leaving out whichever part is none
+      function outcome(done, failed, doneVerb, failedVerb, note, after = '') {
+        const parts = [];
+        if (done) {
+          parts.push(`${doneVerb} ${plural(done, 'photo')}${after}`);
+        }
+        if (failed) {
+          parts.push(`${done ? failedVerb.toLowerCase() : failedVerb} ${done ? failed.toLocaleString() : plural(failed, 'photo')}`);
+        }
+        return parts.join(', ') + (note ? `. ${note}` : '');
+      }
+
+      // one photo at a time, as each can take a while to move on a NAS and one may fail on its own,
+      // such as if another file has taken its place.  There's no undo: it can be deleted again
+      async function restorePhotos(photos) {
+        photos.forEach(removeFromView);
+        renderSelection();
+        deletesRunning += 1;
+        const failed = [];
+        let unindexed = 0;
+        for (const [position, photo] of photos.entries()) {
+          if (photos.length > 1) {
+            showToast(`Restoring ${position + 1} of ${photos.length.toLocaleString()}…`);
+          }
+          try {
+            const {indexed} = await postJson('/api/restore', {files: photo.files});
+            unindexed += indexed ? 0 : 1;
+          } catch (error) {
+            console.log(error);
+            failed.push(photo);
+          }
+        }
+        deletesRunning -= 1;
+        failed.forEach(restored);
+        showToast(outcome(
+          photos.length - failed.length,
+          failed.length,
+          'Restored',
+          "Couldn't restore",
+          unindexed ? `${plural(unindexed, 'photo')} will be back in the library after the next scan` : ''
+        ));
+      }
+
+      async function purgeFiles(photos) {
+        deletesRunning += 1;
+        const failed = [];
+        for (const [position, photo] of photos.entries()) {
+          if (photos.length > 1) {
+            showToast(`Deleting ${position + 1} of ${photos.length.toLocaleString()} forever…`);
+          }
+          try {
+            await postJson('/api/trash/purge', {files: photo.files});
+          } catch (error) {
+            console.log(error);
+            failed.push(photo);
+          }
+        }
+        deletesRunning -= 1;
+        failed.forEach(restored);
+        showToast(outcome(photos.length - failed.length, failed.length, 'Deleted', "Couldn't delete", '', ' forever'));
+      }
+
+      function purgePhoto(photo, button) {
+        if (!pressedTwice(button, 'Delete forever?')) {
+          return;
+        }
+        removeFromView(photo);
+        renderSelection();
+        purgeFiles([photo]);
+      }
+
+      function purgeSelected(button) {
+        const photos = [...selected];
+        if (!pressedTwice(button, `Delete ${photos.length.toLocaleString()} forever?`)) {
+          return;
+        }
+        photos.forEach(photo => setRemoved(photo, true));
+        renderSelection();
+        purgeFiles(photos);
+      }
+
       function deletePhoto(photo, button) {
         if (!pressedTwice(button)) {
           return;
@@ -1004,7 +1141,7 @@
           }
           return;
         }
-        if (event.key === 'i') {
+        if (event.key === 'i' && !IN_TRASH) {
           showInfo(current.path);
         } else if (event.key === 'ArrowLeft') {
           step(-1);
@@ -1098,27 +1235,46 @@
       <span id="select-count"></span>
       <button onclick="pickAll(PHOTOS)">Select all</button>
       <span class="select-actions">
+        {% if folder == 'trash' %}
+        <button class="select-action" onclick="restorePhotos([...selected])" title="Back where they were in the library" disabled>
+          <i class="fa fa-undo" aria-hidden="true"></i> Restore
+        </button>
+        <button id="select-delete" class="select-action" onclick="purgeSelected(this)" title="Deletes the files from the NAS. This can't be undone" disabled>
+          <i class="fa fa-trash" aria-hidden="true"></i> Delete forever
+        </button>
+        {% else %}
+        {% if folder != 'hidden' %}
         <button class="select-action" onclick="approveSelected()" title="Approve for the gallery and kiosk" disabled>
           <i class="fa fa-check" aria-hidden="true"></i> Approve
         </button>
+        {% endif %}
         <button id="select-favorite" class="select-action" onclick="favoriteSelected()" disabled>
           <i class="fa fa-heart" aria-hidden="true"></i> <span id="select-favorite-label">Favorite</span>
         </button>
         <button class="select-action" onclick="rotateSelected()" title="Rotate 90° clockwise" disabled>
           <i class="fa fa-rotate-right" aria-hidden="true"></i> Rotate
         </button>
+        {% if folder == 'hidden' %}
+        <button class="select-action" onclick="unhidePhotos([...selected])" title="Back in the library, unreviewed" disabled>
+          <i class="fa fa-eye" aria-hidden="true"></i> Unhide
+        </button>
+        {% else %}
         <button class="select-action" onclick="hideSelected()" disabled>
           <i class="fa fa-eye-slash" aria-hidden="true"></i> Hide
         </button>
+        {% endif %}
         <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="They stay in the trash until it's emptied from Manage" disabled>
           <i class="fa fa-trash-o" aria-hidden="true"></i> Delete
         </button>
+        {% endif %}
       </span>
+      {% if folder != 'trash' %}
       <label>
         Date
         <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" oninput="renderSelection()" />
       </label>
       <button id="select-apply" onclick="applySelected()" disabled>Set date</button>
+      {% endif %}
     </div>
     <div id="viewer" class="library-viewer" hidden>
       <img id="viewer-image" alt="" />
@@ -1132,6 +1288,15 @@
         </button>
         <span id="viewer-caption"></span>
         <span class="viewer-actions">
+          {% if folder == 'trash' %}
+          <button onclick="restorePhotos([current])" title="Restore" aria-label="Restore">
+            <i class="fa fa-undo" aria-hidden="true"></i> <span class="viewer-word">Restore</span>
+          </button>
+          <button id="viewer-delete" onclick="purgePhoto(current, this)" title="Delete forever" aria-label="Delete forever">
+            <i class="fa fa-trash" aria-hidden="true"></i>
+          </button>
+          {% endif %}
+          <span class="viewer-library-actions"{% if folder == 'trash' %} hidden{% endif %}>
           <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the gallery and kiosk" aria-label="Approve">
             <i class="fa fa-check" aria-hidden="true"></i> <span class="viewer-word">Approve</span>
           </button>
@@ -1147,15 +1312,24 @@
           <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
             <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
           </a>
+          {% if folder == 'hidden' %}
+          <button onclick="unhidePhotos([current])" title="Unhide" aria-label="Unhide">
+            <i class="fa fa-eye" aria-hidden="true"></i>
+          </button>
+          {% else %}
           <button onclick="hidePhoto()" title="Hide" aria-label="Hide">
             <i class="fa fa-eye-slash" aria-hidden="true"></i>
           </button>
+          {% endif %}
+          {% if folder != 'trash' %}
           <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
             <i class="fa fa-trash-o" aria-hidden="true"></i>
           </button>
+          {% endif %}
           <button onclick="showInfo(current.path)" title="Info" aria-label="Info">
             <i class="fa fa-info-circle" aria-hidden="true"></i>
           </button>
+          </span>
         </span>
       </div>
       <div id="viewer-people" class="viewer-people" hidden>

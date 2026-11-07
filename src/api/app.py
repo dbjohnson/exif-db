@@ -272,17 +272,37 @@ def discard_photo(path, paths):
 
 
 @app.post("/api/restore")
-def _restore_images(request: RestoreRequest):
-    restored = trash.restore([library_path(f) for f in request.files])
+async def _restore_images(request: RestoreRequest):
+    restored = await run_in_threadpool(trash.restore, [library_path(f) for f in request.files])
     if not restored:
         raise HTTPException(status_code=404, detail="Nothing to restore")
     exif.record_restored(restored)
-    return {'files': restored}
+    # one deleted before the last scan has dropped out of the index until the next one
+    return {'files': restored, 'indexed': exif.indexed(restored)}
 
 
 @app.get("/api/trash")
 def _trash():
     return trash.summary()
+
+
+@app.post("/api/trash/purge")
+def _purge(request: RestoreRequest):
+    purged = trash.purge([library_path(f) for f in request.files])
+    if not purged:
+        raise HTTPException(status_code=404, detail="Nothing to delete")
+    return {'files': purged}
+
+
+# for a photo in the trash, by where it was in the library.  Not async, as with the library's
+@app.get("/api/trash/thumb{path:path}")
+def _trash_thumb(path: str, rotate: int = Depends(rotation_param)):
+    return cached_image(lambda found, rotation: thumbs.thumbnail(trash.trashed(found), rotation, found), path, rotate)
+
+
+@app.get("/api/trash/image{path:path}")
+def _trash_image(path: str, rotate: int = Depends(rotation_param)):
+    return cached_image(lambda found, rotation: thumbs.display(trash.trashed(found), rotation, found), path, rotate)
 
 
 @app.delete("/api/trash")
@@ -514,6 +534,24 @@ def screenshots_tile():
     return {'name': 'Screenshots', 'photos': len(photos), 'cover': photos[0], 'url': '/screenshots'}
 
 
+def folder_tiles(with_faces, binned):
+    """
+    The library's virtual folders, which gather photos from every month.  These show even when
+    empty, so that it's clear where to look
+    """
+    def tile(name, url, photos, icon):
+        return {'name': name, 'url': url, 'photos': len(photos), 'cover': photos[0] if photos else None, 'icon': icon}
+
+    tiles = [
+        tile('Favorites', '/library/favorites', exif.favorites(), 'fa-heart'),
+        tile('Hidden', '/library/hidden', exif.hidden_photos(), 'fa-eye-slash'),
+        {**tile('Recycle bin', '/library/recycle-bin', binned, 'fa-trash-o'), 'trash': True}
+    ]
+    # not with faces, as nobody wants a screenshot for its faces
+    screenshots = None if with_faces else screenshots_tile()
+    return tiles + ([screenshots] if screenshots else [])
+
+
 def library_years(tiles):
     dated = (tile for tile in tiles if tile['year'])
     years = []
@@ -644,8 +682,107 @@ async def _library(request: Request, with_faces: bool = False):
             "with_faces": with_faces,
             "years": library_years(tiles),
             "undated": next((tile for tile in tiles if not tile['year']), None),
-            # not with faces, as nobody wants a screenshot for its faces
-            "screenshots": None if with_faces else screenshots_tile()
+            "folders": folder_tiles(with_faces, await trash_photos())
+        }
+    )
+
+
+@app.get("/library/favorites")
+async def _favorites(request: Request, year: str = None):
+    photos = exif.favorites()
+    return photos_by_year_page(
+        request,
+        "Favorites",
+        photos,
+        "/library/favorites",
+        year,
+        back_url="/library",
+        back_label="Library",
+        folder='favorites',
+        hint=None if photos else "No favorites yet. The heart on a photo adds it here."
+    )
+
+
+@app.get("/library/hidden")
+async def _hidden(request: Request, year: str = None):
+    photos = exif.hidden_photos()
+    return photos_by_year_page(
+        request,
+        "Hidden",
+        photos,
+        "/library/hidden",
+        year,
+        back_url="/library",
+        back_label="Library",
+        folder='hidden',
+        hint=(
+            "Photos hidden from the library or left unchecked in the review queue. Unhiding one "
+            "puts it back in the library, unreviewed. Copies hidden as duplicates are on the "
+            "Duplicates page."
+        ) if photos else "Nothing is hidden. Copies hidden as duplicates are on the Duplicates page."
+    )
+
+
+async def trash_photos():
+    """
+    What's in the trash from the library, newest deletion first.  When each was deleted comes from
+    the log of deletions if it's there, as the trash's own times change if it's copied
+    """
+    # going through the trash is slow on a NAS, unlike the index, which is only used from here
+    photos = await run_in_threadpool(trash.library_photos)
+    rotations = exif.rotations_by_path(photo['path'] for photo in photos)
+    logged = exif.deletion_times()
+    photos = [
+        {
+            **photo,
+            'rotation': rotations.get(photo['path']) or 0,
+            'deleted': max((logged[f] for f in photo['files'] if f in logged), default=photo['deleted'])
+        }
+        for photo in photos
+    ]
+    return sorted(photos, key=lambda photo: (-photo['deleted'], photo['path']))
+
+
+def trash_photo(photo):
+    deleted = datetime.datetime.fromtimestamp(photo['deleted'])
+    day = f"{deleted:%A}, {deleted:%B} {deleted.day}, {deleted.year}"
+    return {
+        # unique, and nothing else here goes by a photo's id
+        'id': photo['path'],
+        'path': photo['path'],
+        'files': photo['files'],
+        'rotation': photo['rotation'],
+        'status': None,
+        'favorite': False,
+        'date_assigned': False,
+        'day': f"Deleted {day}",
+        'when': f"Deleted {day} · {deleted.hour % 12 or 12}:{deleted:%M %p}"
+    }
+
+
+@app.get("/library/recycle-bin")
+async def _recycle_bin(request: Request):
+    photos = [trash_photo(photo) for photo in await trash_photos()]
+    return templates.TemplateResponse(
+        request=request,
+        name="library_month.html",
+        context={
+            "title": "Recycle bin",
+            "dated": True,
+            "month": None,
+            "with_faces": False,
+            "faces_checked": 0,
+            "back_url": "/library",
+            "back_label": "Library",
+            "folder": 'trash',
+            "photos": photos,
+            "newer_url": None,
+            "older_url": None,
+            "next_url": None,
+            "hint": (
+                "Deleted photos stay here until they're deleted again from here or the trash is "
+                "emptied from Manage. Deleting from here can't be undone."
+            ) if photos else "Nothing has been deleted."
         }
     )
 
