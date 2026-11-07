@@ -712,6 +712,18 @@ async def _library(
     )
 
 
+# a link to one photo that stays right if its date changes: it goes to wherever the photo is now,
+# and opens it there
+@app.get("/photo")
+async def _photo_link(id: str):
+    found = exif.duplicate_photos([id])
+    if not found:
+        return RedirectResponse(url="/library")
+    photo = found[0]
+    place = "/library/hidden" if photo['status'] == exif.REJECTED else "/library"
+    return RedirectResponse(url=f"{place}?{urlencode({'date': timeline_month_key(photo['date']), 'open': id})}")
+
+
 @app.get("/library/folders")
 async def _folders(request: Request):
     return templates.TemplateResponse(

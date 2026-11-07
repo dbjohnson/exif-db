@@ -41,6 +41,26 @@ async function postJson(url, body) {
   return response.json();
 }
 
+// a link to send someone: the device's own way of sharing where there is one, or else copied
+async function shareLink(url, title) {
+  if (navigator.share) {
+    try {
+      await navigator.share({url, title});
+      return;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        return;
+      }
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied');
+  } catch (error) {
+    showToast(url);
+  }
+}
+
 // a delete that asks with a second press rather than stopping the page with an alert
 const SECOND_PRESS_MS = 4000;
 const armedButtons = new Map();

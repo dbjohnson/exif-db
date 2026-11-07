@@ -1746,6 +1746,11 @@
         }
       }
 
+      // a link that opens this photo wherever it is in the library, even after its date changes
+      function sharePhoto() {
+        shareLink(`${window.location.origin}/photo?${new URLSearchParams({id: current.id})}`, fileName(current));
+      }
+
       window.addEventListener('popstate', hideViewer);
 
       window.addEventListener('beforeunload', event => {
@@ -2065,6 +2070,9 @@
             <i class="fa fa-trash-o" aria-hidden="true"></i>
           </button>
           {% endif %}
+          <button onclick="sharePhoto()" title="Share a link to this photo" aria-label="Share">
+            <i class="fa fa-share-square-o" aria-hidden="true"></i>
+          </button>
           <button id="viewer-compare" class="viewer-compare" onclick="openCompare()" title="Compare with possible duplicates" aria-label="Compare with possible duplicates">
             <i class="fa fa-clone" aria-hidden="true"></i>
             <span id="viewer-compare-count" class="viewer-badge" hidden></span>

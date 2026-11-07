@@ -567,7 +567,7 @@
       }
 
       function restoredPosition() {
-        // opened on a particular movie, from a place's page
+        // opened on a particular movie, from a place's page or a shared link
         const asked = new URLSearchParams(window.location.search).get('path');
         const askedIndex = asked ? clips.findIndex(clip => clip.path === asked && !gone(clip)) : -1;
         if (askedIndex >= 0) {
@@ -813,6 +813,12 @@
         } catch (error) {
           showToast(`Couldn't save the tag: ${error.message}`);
         }
+      }
+
+      // a link that opens the player on this movie
+      function shareMovie() {
+        const clip = clips[current];
+        shareLink(`${window.location.origin}/movies?${new URLSearchParams({path: clip.path})}`, clip.title || clip.path.split('/').pop());
       }
 
       function addMovieTag() {
@@ -1167,6 +1173,9 @@
               <i class="fa fa-volume-up" aria-hidden="true"></i>
             </button>
             <input id="volume" class="movie-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume" />
+            <button id="share" onclick="shareMovie()" title="Share a link to this movie" aria-label="Share">
+              <i class="fa fa-share-square-o" aria-hidden="true"></i>
+            </button>
             <button id="airplay" onclick="chooseAirPlayReceiver()" title="AirPlay" aria-label="AirPlay" hidden>
               <svg class="movie-airplay-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V5h18v12h-4v2h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
