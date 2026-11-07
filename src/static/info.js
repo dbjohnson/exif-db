@@ -104,14 +104,37 @@ async function placeMap(box, start, picked) {
   return {map, pin};
 }
 
-// suggests towns as their names are typed, and calls picked with one once it's chosen
+// suggests places as their names are typed, and calls picked with one once it's chosen.  Returns
+// the list of suggestions, which has to be on the page beside the input: it's put there if the
+// input is already, and otherwise the caller has to
 function townSearch(input, picked) {
   const list = document.createElement('datalist');
   list.id = `towns-${Math.random().toString(36).slice(2)}`;
   input.setAttribute('list', list.id);
-  input.after(list);
+  if (input.parentNode) {
+    input.after(list);
+  }
   const found = new Map();
   let waiting = null;
+  const suggest = async () => {
+    try {
+      const response = await fetch(`/api/towns?${new URLSearchParams({q: input.value})}`);
+      const towns = response.ok ? await response.json() : [];
+      found.clear();
+      list.replaceChildren(...towns.map(town => {
+        found.set(town.label, town);
+        const option = document.createElement('option');
+        option.value = town.label;
+        // shown beside it, so that Home isn't taken for a town
+        if (town.named) {
+          option.label = 'Named place';
+        }
+        return option;
+      }));
+    } catch (error) {
+      console.log(error);
+    }
+  };
   input.addEventListener('input', () => {
     const chosen = found.get(input.value);
     if (chosen) {
@@ -119,22 +142,15 @@ function townSearch(input, picked) {
       return;
     }
     clearTimeout(waiting);
-    waiting = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/towns?${new URLSearchParams({q: input.value})}`);
-        const towns = response.ok ? await response.json() : [];
-        found.clear();
-        list.replaceChildren(...towns.map(town => {
-          found.set(town.label, town);
-          const option = document.createElement('option');
-          option.value = town.label;
-          return option;
-        }));
-      } catch (error) {
-        console.log(error);
-      }
-    }, TOWN_WAIT_MS);
+    waiting = setTimeout(suggest, TOWN_WAIT_MS);
   });
+  // the named places, before anything's typed
+  input.addEventListener('focus', () => {
+    if (!input.value) {
+      suggest();
+    }
+  });
+  return list;
 }
 
 function infoButton(label, action) {
@@ -223,11 +239,11 @@ function placeEditor(path, info) {
   editor.hidden = true;
   const search = document.createElement('input');
   search.type = 'text';
-  search.placeholder = 'Town, such as Ann Arbor';
+  search.placeholder = 'Named place or town';
   search.setAttribute('aria-label', 'Town');
   const mapBox = document.createElement('div');
   mapBox.className = 'info-map';
-  const hint = infoNote('Choose a town, or tap the map where it was taken.');
+  const hint = infoNote('Choose a named place or a town, or tap the map where it was taken.');
   let point = null;
   let map = null;
   const save = infoButton('Save place', async () => {
@@ -249,7 +265,7 @@ function placeEditor(path, info) {
     save.disabled = false;
   }
 
-  townSearch(search, town => {
+  const suggestions = townSearch(search, town => {
     choose(town.lat, town.lon);
     map?.pin(town.lat, town.lon, TOWN_ZOOM);
   });
@@ -278,7 +294,7 @@ function placeEditor(path, info) {
   const buttons = document.createElement('div');
   buttons.className = 'info-editor-buttons';
   buttons.append(...changes);
-  editor.append(search, mapBox, hint, buttons);
+  editor.append(search, suggestions, mapBox, hint, buttons);
   if (info.location?.set || (!info.location && info.own_location)) {
     const own = info.own_location;
     editor.append(infoNote(own ? `Its own place: near ${[own.city, own.state, own.country].filter(Boolean).join(', ')}` : 'Its file has no place of its own.'));

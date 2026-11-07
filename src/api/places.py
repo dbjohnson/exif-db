@@ -167,12 +167,28 @@ def _described(row):
     }
 
 
+def named_places(query=''):
+    """
+    The named places to suggest for what's been typed, such as "cot" for "Lake Cottage": every word
+    typed starts a word of the name.  All of them for nothing typed
+    """
+    words = query.casefold().split()
+    return [
+        {'label': label['name'], 'lat': label['lat'], 'lon': label['lon'], 'named': True}
+        for label in labels().values()
+        if all(any(part.startswith(word) for part in label['name'].casefold().split()) for word in words)
+    ]
+
+
 def search_towns(query):
     """
-    Towns to suggest for a name, such as "Ann Arbor" or "Paris, France": those named exactly that
-    first, and then those in the states and countries with the most photos already
+    Places to suggest for a name: named places such as Home first, and then towns such as
+    "Ann Arbor" or "Paris, France", those named exactly that first and then those in the states and
+    countries with the most photos already
     """
     name, *rest = [part.strip() for part in query.split(',')]
+    if not name:
+        return named_places()
     within = [part.casefold() for part in rest if part]
     found = [
         town for town in towns.towns().named(name, 2000)
@@ -185,12 +201,8 @@ def search_towns(query):
         -counts.get((COUNTRY, town[3]), 0),
         town[0]
     ))
-    named = [
-        {'label': label['name'], 'lat': label['lat'], 'lon': label['lon']}
-        for label in labels().values()
-        if not within and label['name'].casefold().startswith(name.casefold())
-    ]
-    return named + [
+    # "Paris, France" is a town, never a named place
+    return (named_places(name) if not within else []) + [
         {
             'label': ', '.join(part for part in (city, state, country_name(country)) if part),
             'lat': lat,

@@ -1796,7 +1796,8 @@ async def _restore_locations(restore: LocationRestore):
 
 @app.get("/api/towns")
 async def _towns(q: str = ''):
-    return await run_in_threadpool(places.search_towns, q) if q.split(',')[0].strip() else []
+    # with nothing typed, only the named places, which needs no list of towns
+    return await run_in_threadpool(places.search_towns, q)
 
 
 @app.post("/api/dates/restore")
