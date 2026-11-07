@@ -531,8 +531,9 @@ def library_photo(photo):
     day = when = None
     try:
         taken = datetime.datetime.strptime(photo['taken'][:19], '%Y:%m:%d %H:%M:%S')
-        day = f"{taken:%A}, {taken:%B} {taken.day}"
-        when = f"{day}, {taken.year}"
+        # with its year, as the list has no headings for years or months
+        day = f"{taken:%A}, {taken:%B} {taken.day}, {taken.year}"
+        when = day
         # the time of a date given by hand doesn't mean anything
         if not photo['date_assigned']:
             when += f" · {taken.hour % 12 or 12}:{taken:%M %p}"

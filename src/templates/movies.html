@@ -200,7 +200,9 @@
         let day;
         for (const index of indices) {
           const clip = clips[index];
-          const clipDay = clip.taken && clip.precision !== 'month' ? formatDay(clip) : null;
+          // with its year, as the list has no headings for years or months; a movie known only to the
+          // month goes under the month
+          const clipDay = !clip.taken ? null : clip.precision === 'month' ? formatMonth(monthKey(clip)) : `${formatDay(clip)}, ${clip.taken.slice(0, 4)}`;
           if (!grid || clipDay !== day) {
             day = clipDay;
             const section = document.createElement('section');
@@ -251,7 +253,8 @@
           load: monthClips,
           render: renderMonthClips,
           tileWidth: 170,
-          aspect: 10 / 16
+          aspect: 10 / 16,
+          headings: false
         });
         dateJumper = dateJump('jump-year', 'jump-month', timeline, key => timeline.scrollTo(key));
         sideJumper = sideDates('side-years', 'side-months', timeline, key => timeline.scrollTo(key));

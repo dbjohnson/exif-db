@@ -295,20 +295,15 @@
         selectMonths(timeline.months.map(month => month.key));
       }
 
-      function monthActions(month, heading) {
-        const button = document.createElement('button');
-        button.className = 'group-action';
-        button.textContent = 'Select month';
-        button.onclick = () => selectMonths([month.key]);
-        heading.append(button);
-      }
-
-      function yearActions(year, heading) {
-        const button = document.createElement('button');
-        button.className = 'group-action';
-        button.textContent = 'Select year';
-        button.onclick = () => selectMonths(timeline.months.filter(month => month.year === year).map(month => month.key));
-        heading.append(button);
+      // the month or year on screen, from the selection bar
+      function selectShowing(span) {
+        const month = timeline.showing();
+        if (!month) {
+          return;
+        }
+        selectMonths(span === 'year' && month.year
+          ? timeline.months.filter(other => other.year === month.year).map(other => other.key)
+          : [month.key]);
       }
 
       // the nearest month there is to one asked for, as a list filtered by something may not have it
@@ -382,8 +377,7 @@
         timeline = new Timeline(document.getElementById('days'), MONTHS, {
           load: loadMonth,
           render: renderMonth,
-          monthActions: IN_TRASH ? null : monthActions,
-          yearActions: IN_TRASH ? null : yearActions
+          headings: false
         });
         if (document.getElementById('jump-year')) {
           dateJumper = dateJump('jump-year', 'jump-month', timeline, goTo);
@@ -1681,6 +1675,10 @@
     </div>
     <div id="select-bar" class="select-bar" hidden>
       <span id="select-count"></span>
+      {% if not photos %}
+      <button onclick="selectShowing('month')" title="Every photo in the month on screen">Select month</button>
+      <button onclick="selectShowing('year')" title="Every photo in the year on screen">Select year</button>
+      {% endif %}
       <button onclick="selectEverything()">Select all</button>
       <span class="select-actions">
         {% if folder == 'trash' %}

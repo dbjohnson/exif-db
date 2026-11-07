@@ -8,8 +8,9 @@
 // render(month, items) the element showing them.  monthActions(month, heading) and
 // yearActions(year, heading) can add buttons to headings
 class Timeline {
-  // aspect is a tile's height for its width
-  constructor(container, months, {load, render, tileWidth = 140, aspect = 1, gap = 4, dayHeight = 44, monthActions, yearActions}) {
+  // aspect is a tile's height for its width.  headings says whether years and months have them:
+  // without, each day's heading says its year instead, and a month only has one if it has a label
+  constructor(container, months, {load, render, tileWidth = 140, aspect = 1, gap = 4, dayHeight = 44, headings = true, monthActions, yearActions}) {
     this.container = container;
     this.load = load;
     this.render = render;
@@ -17,6 +18,7 @@ class Timeline {
     this.aspect = aspect;
     this.gap = gap;
     this.dayHeight = dayHeight;
+    this.headings = headings;
     this.monthActions = monthActions;
     this.yearActions = yearActions;
     this.entries = new Map();
@@ -71,7 +73,7 @@ class Timeline {
     body.className = 'timeline-body';
     body.style.height = `${this.estimate(month)}px`;
     let count = null;
-    if (month.label) {
+    if (month.label && (this.headings || month.key === 'undated')) {
       const heading = document.createElement('h3');
       heading.className = 'timeline-month-heading';
       const label = document.createElement('span');
@@ -113,7 +115,7 @@ class Timeline {
       }
       // a year's heading goes before its first month
       const year = month.year;
-      const startsYear = year && (!previous || previous.year !== year);
+      const startsYear = this.headings && year && (!previous || previous.year !== year);
       const before = previous ? this.entries.get(previous.key).section.nextSibling : this.container.firstChild;
       if (startsYear) {
         const heading = this.years.get(year)?.heading || this.yearHeading(year);

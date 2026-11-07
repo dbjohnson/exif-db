@@ -41,7 +41,7 @@ Deleting moves a photo to `deleted/` in the storage volume and records it in `de
 
 ## The library
 
-`/library` shows every photo, newest first, as one long list by year, month and day, with a viewer for favoriting, rotating, hiding, deleting and downloading.  It includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, come last, under Undated, by folder.
+`/library` shows every photo, newest first, as one long list by day, each day's heading with its year, with a viewer for favoriting, rotating, hiding, deleting and downloading.  It includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, come last, under Undated, by folder.
 
 Every month takes its full height from the start and fills in as it comes near the screen, so the year and month boxes at the top go straight to a date, and scrolling either way from there carries on as usual.  They follow along while scrolling, and so does the address (`/library?date=2016-07`), so a reload stays in the same place.  In the same row, the library can be narrowed to a tag or a person, and to a place, which can be a named place, a town, a state, a country or a folder; both together show only what has both.  A filter in use shows as its name with an × that clears it.  On a phone the filters and buttons in that row are icons, so it fits across the screen.  Folders, at the end of the row, has Favorites, Hidden, the Recycle bin, Cameras, Screenshots and each tag.
 
@@ -49,7 +49,7 @@ On a screen at least 1,024 pixels wide, the dates and filters are down the side 
 
 A person's, tag's, place's or camera's photos, and Favorites, Hidden and Screenshots, are the same list narrowed to them, with the same date boxes.  The navigation bar and that one row stay at the top of every page while scrolling.
 
-Select, then Select year or Select month by a heading, or Select all by a day, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
+Select, then Select month or Select year in the bar for the month or year on screen, or Select all by a day, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
 ## Folders
 
@@ -143,7 +143,7 @@ The info button on a photo, or `i` in the viewer, shows who's in it, where it wa
 
 ## Home movies
 
-`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  Under the player, the movies are listed newest first by year, month and day, the same way as the library, with the same year and month boxes at the top for going to a date.  Pick a movie to drop in there; the stream itself always plays forward in time, and the scrubber covers the month being played.  It picks up where it left off on that device.
+`/movies` plays every home movie in the order it was filmed, as one continuous stream: each movie runs straight into the next, across months and years.  Under the player, the movies are listed newest first by day, the same way as the library, with the same year and month boxes at the top for going to a date.  Pick a movie to drop in there; the stream itself always plays forward in time, and the scrubber covers the month being played.  It picks up where it left off on that device.
 
 The list and the stream can be narrowed to a tag and to a place, as the library can.  Movies are tagged from the row under the player, which shows the tags of the one playing.
 
