@@ -414,11 +414,18 @@ def _library_rows(where, params, hidden=False):
         """,
         [*params, REJECTED, hidden]
     ).fetchall()
+    # the date in the file of each given another by hand, as a starting point for changing it again
+    assigned = [row[0] for row in rows if row[6]]
+    own = dict(db.execute(
+        "SELECT photo_id, DateTimeOriginal FROM exif WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))",
+        [assigned]
+    ).fetchall()) if assigned else {}
     return [
         {
             'id': photo_id,
             'path': path,
             'taken': taken,
+            'own_taken': own.get(photo_id) if date_assigned else taken,
             'status': status,
             'favorite': favorite,
             'rotation': rotation,

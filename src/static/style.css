@@ -3599,7 +3599,7 @@ html.navigating::before {
   .select-actions {
     flex: 1 1 100%;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
     width: 100%;
   }
   /* a line of its own, as a town's name is long */

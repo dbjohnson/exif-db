@@ -53,7 +53,7 @@ Both links first give a short page with Open Graph tags, which Messages and othe
 
 A person's, tag's, place's or camera's photos, and Favorites, Hidden and Screenshots, are the same list narrowed to them, with the same date boxes.  The navigation bar and that one row stay at the top of every page while scrolling.
 
-Select, then Select month or Select year in the bar for the month or year on screen, or Select all by a day, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
+Select, then Select all by a day or in the bar, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
 ## Folders
 
@@ -68,7 +68,7 @@ Select, then Select month or Select year in the bar for the month or year on scr
 
 ## Changing a date or place
 
-A photo's info card has Change date, for an exact date and time, and Change place, for a town found by name or a point tapped on the map.  Either can go back to what the photo's file says, and each change can be undone.  In any month or folder, Select, then Own date, takes photos back to their files' dates, and Place sets a town or a point tapped on its map for many photos at once, says they have none, or goes back to their own.
+A photo's info card has Change date, for an exact date and time, and Change place, for a town found by name or a point tapped on the map.  Either can go back to what the photo's file says, and each change can be undone.  In any month or folder, Select, then the calendar, sets one date for many photos at once. It starts at the first photo's date in its file, and offers Reset date, back to their files' dates, when any of them had a date set by hand. Place sets a town or a point tapped on its map for many photos at once, says they have none, or goes back to their own.
 
 A place can also be given a name, such as Home or Cottage: open a photo taken there, then its info card, then Name this place, and choose how far around it counts, from 100 m to 5 km.  Every photo and movie located within that distance, by its own location or one set by hand, is then at that place.  Named places come first on `/places` and in its search, show as circles on its map, appear on a photo's info card, and are offered first when setting a place by name: all of them as soon as the box is clicked, and then those with a word starting with what's typed, so "cot" finds Lake Cottage.  A named place's page has an Edit button for renaming it, changing its distance, or deleting the name.  They're kept in `place_labels.json` in the storage volume.
 
@@ -82,7 +82,7 @@ The same row in the viewer has Add someone, for a person who's in a photo withou
 
 ## Screenshots
 
-`/screenshots`, also in the library's folders, has every screenshot from an iPhone or iPad, for deleting in bulk: Select, then Select year or Select month, then untick the ones to keep.  iOS marks each screenshot in its `UserComment` tag, which `scripts/exiftool.config` turns into a `Screenshot` column in the index, so new ones show up after the scan that finds them.  Screenshots stay in their months in the library too.
+`/screenshots`, also in the library's folders, has every screenshot from an iPhone or iPad, for deleting in bulk: Select, then Select all, then untick the ones to keep.  iOS marks each screenshot in its `UserComment` tag, which `scripts/exiftool.config` turns into a `Screenshot` column in the index, so new ones show up after the scan that finds them.  Screenshots stay in their months in the library too.
 
 Deleting from this page takes every copy of a screenshot, such as the same file backed up into two folders.  Elsewhere another copy takes a deleted photo's place.
 
