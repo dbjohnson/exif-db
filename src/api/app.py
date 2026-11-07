@@ -700,7 +700,7 @@ async def _library(
     }
     return timeline_page(
         request,
-        "Library",
+        "Photos",
         filters,
         empty_hint="Nothing matches these filters." if filters else "No photos yet.",
         filtering=True,

@@ -39,9 +39,9 @@ Photos can be rotated from the library or kiosk (stored in `rotations.csv`).  Or
 
 Deleting moves a photo to `deleted/` in the storage volume and records it in `deletions.csv`, and can be undone straight afterwards, or later from the library's Recycle bin.  `/manage` shows how much is in the trash and can empty it.
 
-## The library
+## Photos
 
-`/library` shows every photo, newest first, as one long list by day, each day's heading with its year, with a viewer for favoriting, rotating, hiding, deleting and downloading.  It includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, come last, under Undated, by folder.
+`/library`, Photos in the navigation bar, shows every photo, newest first, as one long list by day, each day's heading with its year, with a viewer for favoriting, rotating, hiding, deleting and downloading.  It includes photos that haven't been reviewed, since that's most of a library, but not hidden ones.  An unreviewed photo can be approved from the viewer, and favoriting one approves it too.  Photos with no date or an impossible one, such as from a camera whose clock was never set, come last, under Undated, by folder.
 
 Every month takes its full height from the start and fills in as it comes near the screen, so the year and month boxes at the top go straight to a date (Undated is the month box's last choice), and scrolling either way from there carries on as usual.  They follow along while scrolling, and so does the address (`/library?date=2016-07`), so a reload stays in the same place.  In the same row, the library can be narrowed to tags and people, from one list, and to a place, which can be a named place, a town, a state, a country or a folder.  Each tag or person added narrows it further: Jane and Lucy shows only photos with both.  A filter in use shows as its name with an × that takes just that one off.  On a phone the filters and buttons in that row are icons, so it fits across the screen.  Folders, at the end of the row, has Favorites, Hidden, the Recycle bin, Cameras, Screenshots and each tag.
 
@@ -151,11 +151,13 @@ The info button on a photo, or `i` in the viewer, shows who's in it, where it wa
 
 The list and the stream can be narrowed to a tag and to a place, as the library can.  Movies are tagged from the row under the player, which shows the tags of the one playing.
 
-Keyboard: Space plays and pauses, ←/→ moves 10 seconds and carries over into the next or previous movie, Shift+←/→ moves by movie, ↑/↓ moves by month, F is full screen and M mutes.
+Keyboard: Space plays and pauses, ←/→ moves 10 seconds and carries over into the next or previous movie, Shift+←/→ moves by movie, ↑/↓ moves by month, F is full screen, M mutes and R rotates.
 
 Safari shows an AirPlay button when it can see a receiver.  The receiver fetches each movie itself, so it needs to reach the same address as the page: a `ts.net` name only resolves on the tailnet, so an Apple TV needs Tailscale installed or a local DNS entry for that name.
 
 Movies are read by the end of each scan into `movies.csv` in the storage volume, which is safe to delete: the next scan rebuilds it, though reading every video takes a while (about 20 minutes for 11,000 on a Synology DS224+).  After that a scan only reads new ones.  Live Photos' motion clips, the same clip filed in several folders, and anything in `videos/Work movies` are left out.  Where a movie's name starts with a date, like `2009.10 Lucy's Birth.mp4`, or its folder's does, that says when it was filmed and is shown as its title, since an edited movie's own date is when it was exported.
+
+Rotating turns a movie a quarter turn clockwise each press, for one filmed sideways (stored in `movie_rotations.csv` by movie).  The player turns the video and its pictures as it shows them, and the file isn't changed, so AirPlay and shared links still play it as filmed.
 
 Hiding takes a movie out of the stream (stored in `movies_hidden.csv`) and can be undone from the list at the bottom of the page.  Deleting takes two presses and moves the movie and any other copies of it to `deleted/` in the storage volume, with the same undo and `/manage` trash as photos.  A same-named photo is left alone.  A large movie can take minutes to reach the trash, as it's copied there, and only then can the delete be undone.
 

@@ -1,5 +1,5 @@
 <nav class="site-nav" aria-label="Main">
-  {% for url, label in [('/library', 'Library'), ('/movies', 'Movies'), ('/people', 'People'), ('/places', 'Places'), ('/manage', 'Manage')] %}
+  {% for url, label in [('/library', 'Photos'), ('/movies', 'Movies'), ('/people', 'People'), ('/places', 'Places'), ('/manage', 'Manage')] %}
   <a href="{{ url }}"{% if request.url.path == url or request.url.path.startswith(url + '/') %} aria-current="page"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
