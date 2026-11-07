@@ -53,7 +53,7 @@ Both links first give a short page with Open Graph tags, which Messages and othe
 
 A person's, tag's, place's or camera's photos, and Favorites, Hidden and Screenshots, are the same list narrowed to them, with the same date boxes.  The navigation bar and that one row stay at the top of every page while scrolling.
 
-Select, then Select all by a day or in the bar, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
+Select, then photos one by one or Select all in the bar, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
 ## Folders
 

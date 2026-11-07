@@ -1438,11 +1438,6 @@ button:disabled {
   }
 }
 
-/* a day's button only matters once selecting, but a folder's is the way to start */
-.library-page:not(.selecting) .library-day .select-group.day-only {
-  display: none;
-}
-
 .library-tile .tile-check {
   display: none;
   position: absolute;

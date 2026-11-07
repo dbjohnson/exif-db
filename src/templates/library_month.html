@@ -176,11 +176,14 @@
         group.label = label;
         heading.append(label);
 
-        const selectAll = document.createElement('button');
-        selectAll.className = 'group-action select-group';
-        selectAll.textContent = 'Select all';
-        selectAll.onclick = () => pickGroup(group);
-        heading.append(selectAll);
+        // only for one of Undated's folders, to date its photos together; a day is picked by hand
+        if (group.month === UNDATED) {
+          const selectAll = document.createElement('button');
+          selectAll.className = 'group-action select-group';
+          selectAll.textContent = 'Select all';
+          selectAll.onclick = () => pickGroup(group);
+          heading.append(selectAll);
+        }
 
         if (group.suggested) {
           const dateAll = document.createElement('button');
