@@ -8,6 +8,7 @@
     <script src="/static/faces.js"></script>
     <script src="/static/info.js"></script>
     {% if person %}<script src="/static/people.js"></script>{% endif %}
+    <script src="/static/tags.js"></script>
     <script>
       const PHOTOS = {{ photos | tojson }};
       // whose page this is, or null
@@ -26,6 +27,8 @@
       // which of the library's virtual folders this is, if one: 'favorites', 'hidden' or 'trash'
       const FOLDER = {{ (folder or none) | tojson }};
       const IN_TRASH = FOLDER === 'trash';
+      // the tag whose folder this is, or null
+      const TAG = {{ (tag or none) | tojson }};
       const SWIPE_PX = 50;
       // moving files is slow on a NAS, so undoing a big delete mustn't be one long request
       const RESTORE_BATCH = 20;
@@ -44,6 +47,7 @@
       let showingFaces = PERSON !== null;
       let chosenFace = null;
       const photoFaces = new Map();
+      const photoTags = new Map();
 
       const shown = () => PHOTOS.filter(photo => !photo.removed);
       const fileName = photo => photo.path.split('/').pop();
@@ -141,6 +145,9 @@
           tileAction('fa-trash-o', 'Delete', button => deletePhoto(photo, button)),
           tileAction('fa-info-circle', 'Info', () => showInfo(photo.path))
         );
+        if (TAG) {
+          actions.append(tileAction('fa-times', `Take off ${TAG}`, () => changeTags([photo], TAG, false)));
+        }
         return actions;
       }
 
@@ -695,6 +702,17 @@
         return photoFaces.get(photo.id);
       }
 
+      async function tagsIn(photo) {
+        if (!photoTags.has(photo.id)) {
+          const response = await fetch(`/api/photo-tags?${new URLSearchParams({photo_id: photo.id})}`);
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          photoTags.set(photo.id, await response.json());
+        }
+        return photoTags.get(photo.id);
+      }
+
       const faceLabel = face => face.name || (face.name === '' ? 'Skipped' : 'Who is this?');
 
       function fitFaceLayer() {
@@ -712,11 +730,15 @@
           return;
         }
         document.getElementById('viewer-face-name').value = face.name || '';
-        document.getElementById('viewer-face-clear').hidden = face.name === null;
+        const clear = document.getElementById('viewer-face-clear');
+        clear.hidden = face.name === null;
+        // someone tagged by hand has no face to go back to Who is this?
+        clear.textContent = face.tagged ? 'Remove' : 'Remove name';
+        clear.title = face.tagged ? `${face.name} isn't in this photo` : 'This face goes back to Who is this?';
         // a wrong name comes off first, since a name and skipping are different mistakes
-        document.getElementById('viewer-face-skip').hidden = face.name !== null;
+        document.getElementById('viewer-face-skip').hidden = face.name !== null || face.tagged;
         const cover = document.getElementById('viewer-face-cover');
-        cover.hidden = !face.name;
+        cover.hidden = !face.name || face.tagged;
         cover.textContent = face.cover ? 'Automatic cover' : 'Use as cover';
       }
 
@@ -734,11 +756,12 @@
           return;
         }
         let faces = [];
+        let tagged = [];
         try {
-          faces = await facesIn(photo);
+          [faces, tagged] = IN_TRASH ? [[], []] : await Promise.all([facesIn(photo), tagsIn(photo)]);
         } catch (error) {
           console.log(error);
-          showToast(`Couldn't load this photo's faces: ${error.message}`);
+          showToast(`Couldn't load who's in this photo: ${error.message}`);
         }
         if (photo !== current || !showingFaces) {
           return;
@@ -750,17 +773,25 @@
           chip.className = 'face-chip';
           chip.setAttribute('aria-pressed', face.id === chosenFace);
           chip.onclick = () => chooseFace(face.id);
-          const crop = document.createElement('img');
-          crop.src = `/api/face/${face.id}`;
-          crop.alt = '';
-          crop.loading = 'lazy';
+          // tagged by hand, so there's no face to show
+          const crop = document.createElement(face.tagged ? 'i' : 'img');
+          if (face.tagged) {
+            crop.className = 'fa fa-user face-chip-tagged';
+            crop.setAttribute('aria-hidden', 'true');
+            chip.title = 'Tagged without a face';
+          } else {
+            crop.src = `/api/face/${face.id}`;
+            crop.alt = '';
+            crop.loading = 'lazy';
+          }
           const label = document.createElement('span');
           label.textContent = (face.cover ? '★ ' : '') + faceLabel(face);
           chip.append(crop, label);
           return chip;
         }));
         document.getElementById('viewer-no-faces').hidden = faces.length > 0;
-        boxes.replaceChildren(...faces.map(face => {
+        renderPhotoTags(tagged);
+        boxes.replaceChildren(...faces.filter(face => !face.tagged).map(face => {
           const box = makeFaceBox(turnedBox(face.box, photo.rotation - face.rotation), faceLabel(face));
           box.classList.toggle('mine', Boolean(PERSON) && face.name === PERSON);
           box.classList.toggle('named', Boolean(face.name));
@@ -801,11 +832,14 @@
       async function changeFaceName(name) {
         const photo = current;
         const faceId = chosenFace;
+        const face = (photoFaces.get(photo.id) || []).find(other => other.id === faceId);
         try {
           const {previous} = await (name === null
             ? postJson('/api/people/faces/clear', {face_ids: [faceId]})
             : postJson('/api/people/faces', {face_ids: [faceId], name}));
-          const said = name === null ? 'Name removed' : name ? `Named ${name.trim()}` : 'Skipped';
+          const said = name === null
+            ? (face?.tagged ? `Took ${face.name} off this photo` : 'Name removed')
+            : name ? `Named ${name.trim()}` : 'Skipped';
           chosenFace = null;
           await facesChanged(photo);
           showToast(said, () => run(async () => {
@@ -845,6 +879,144 @@
         } catch (error) {
           console.log(error);
           showToast(`Couldn't save: ${error.message}`);
+        }
+      }
+
+      function renderPhotoTags(tagged) {
+        document.getElementById('viewer-tag-list').replaceChildren(...tagged.map(name => {
+          const chip = document.createElement('span');
+          chip.className = 'tag-chip';
+          const link = document.createElement('a');
+          link.href = tagUrl(name);
+          link.textContent = name;
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.title = `Take off ${name}`;
+          remove.setAttribute('aria-label', `Take off ${name}`);
+          remove.textContent = '×';
+          remove.onclick = () => changeTags([current], name, false);
+          chip.append(link, remove);
+          return chip;
+        }));
+      }
+
+      function addKnown(listId, name) {
+        const list = document.getElementById(listId);
+        if (![...list.options].some(option => option.value === name)) {
+          const option = document.createElement('option');
+          option.value = name;
+          list.append(option);
+        }
+      }
+
+      // tags these photos, or takes a tag off.  In that tag's folder, those it comes off leave
+      function changeTags(photos, name, tagged) {
+        const leaving = !tagged && name === TAG;
+        const apply = async (on, ids) => {
+          await postJson('/api/tags/photos', {name, photo_ids: ids, tagged: on});
+          photos.forEach(photo => photoTags.delete(photo.id));
+          if (current && photos.includes(current)) {
+            renderFaces();
+          }
+        };
+        const said = changed => tagged
+          ? `Tagged ${plural(changed.length, 'photo')} ${name}`
+          : `Took ${name} off ${plural(changed.length, 'photo')}`;
+        if (leaving) {
+          let changed = [];
+          removeWithUndo(
+            photos,
+            `Took ${name} off ${plural(photos.length, 'photo')}`,
+            "Couldn't save",
+            async () => {
+              changed = (await postJson('/api/tags/photos', {name, photo_ids: ids(photos), tagged: false})).changed;
+              photos.forEach(photo => photoTags.delete(photo.id));
+            },
+            () => apply(true, changed)
+          );
+          return;
+        }
+        run(async () => {
+          const {name: saved, changed} = await postJson('/api/tags/photos', {name, photo_ids: ids(photos), tagged});
+          name = saved;
+          addKnown('tags', saved);
+          photos.forEach(photo => photoTags.delete(photo.id));
+          if (current && photos.includes(current)) {
+            renderFaces();
+          }
+          if (!changed.length) {
+            showToast(tagged ? `Already tagged ${saved}` : `Not tagged ${saved}`);
+            return;
+          }
+          showToast(said(changed), () => run(() => apply(!tagged, changed), "Couldn't undo"));
+        }, "Couldn't save the tag");
+      }
+
+      // someone who's in these photos without a face to go on, or taking that back off
+      function changePeople(photos, name, tagged) {
+        run(async () => {
+          const result = await postJson('/api/photo-people', {name, photo_ids: ids(photos), tagged});
+          const saved = result.name;
+          addKnown('names', saved);
+          const changed = tagged ? result.added.length : Object.keys(result.previous).length;
+          const settle = () => Promise.all(photos.map(facesChanged));
+          await settle();
+          if (!changed) {
+            showToast(tagged ? `${saved} is already in ${photos.length === 1 ? 'this photo' : 'those photos'}` : `${saved} wasn't tagged by hand there`);
+            return;
+          }
+          showToast(
+            tagged ? `Tagged ${saved} in ${plural(changed, 'photo')}` : `Took ${saved} off ${plural(changed, 'photo')}`,
+            () => run(async () => {
+              await (tagged
+                ? postJson('/api/people/faces/clear', {face_ids: result.added})
+                : postJson('/api/people/faces/restore', {previous: result.previous}));
+              photos.filter(photo => photo.removed).forEach(restored);
+              await settle();
+            }, "Couldn't undo")
+          );
+        }, "Couldn't save");
+      }
+
+      function addFromViewer(kind) {
+        const input = document.getElementById(kind === 'person' ? 'viewer-add-person' : 'viewer-add-tag');
+        const name = input.value.trim();
+        if (!name) {
+          return;
+        }
+        input.value = '';
+        if (kind === 'person') {
+          changePeople([current], name, true);
+        } else {
+          changeTags([current], name, true);
+        }
+      }
+
+      function toggleTagging() {
+        const row = document.getElementById('select-tagging');
+        row.hidden = !row.hidden;
+        if (!row.hidden && TAG && !document.getElementById('select-tag-name').value) {
+          document.getElementById('select-tag-name').value = TAG;
+        }
+      }
+
+      function tagKindChanged() {
+        const kind = document.getElementById('select-tag-kind').value;
+        const input = document.getElementById('select-tag-name');
+        input.setAttribute('list', kind === 'person' ? 'names' : 'tags');
+        input.placeholder = kind === 'person' ? 'Name' : 'Tag';
+      }
+
+      function tagSelected(tagged) {
+        const name = document.getElementById('select-tag-name').value.trim();
+        const photos = [...selected];
+        if (!name || !photos.length) {
+          return;
+        }
+        if (document.getElementById('select-tag-kind').value === 'person') {
+          changePeople(photos, name, tagged);
+        } else {
+          changeTags(photos, name, tagged);
         }
       }
 
@@ -1191,6 +1363,7 @@
         {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
         {% if map_url %}<a href="{{ map_url }}">Map</a>{% endif %}
         {% if person %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
+        {% if tag %}<button onclick="toggleTagEdit()">Edit</button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
         {% if faces_checked %}<a id="filter-link" href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         <a id="older-link" href="{{ older_url or '' }}" title="Older month"{% if not older_url %} hidden{% endif %}>‹ Older</a>
@@ -1198,6 +1371,17 @@
       </span>
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
+    {% if tag %}
+    <div id="tag-edit" class="person-edit" hidden>
+      <label>
+        Name
+        <input id="tag-new-name" type="text" list="tags" maxlength="80" value="{{ tag }}" aria-label="New name for {{ tag }}" onkeydown="if (event.key === 'Enter') renameTag(TAG);" />
+      </label>
+      <button onclick="renameTag(TAG)">Rename</button>
+      <button class="person-remove" onclick="deleteTag(this, TAG)">Delete tag</button>
+      <p class="library-hint">Using the name of another tag joins the two together. Deleting a tag takes it off its photos and leaves the photos alone.</p>
+    </div>
+    {% endif %}
     {% if years_rail and years_rail | length > 1 %}
     <nav class="year-rail" aria-label="Years">
       {% for entry in years_rail %}
@@ -1205,6 +1389,11 @@
       {% endfor %}
     </nav>
     {% endif %}
+    <datalist id="tags">
+      {% for known in tag_names() %}
+      <option value="{{ known }}"></option>
+      {% endfor %}
+    </datalist>
     <datalist id="names">
       {% for known in known_names or [] %}
       <option value="{{ known }}"></option>
@@ -1266,6 +1455,9 @@
         <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="They stay in the trash until it's emptied from Manage" disabled>
           <i class="fa fa-trash-o" aria-hidden="true"></i> Delete
         </button>
+        <button class="select-action" onclick="toggleTagging()" title="Tag these, or say who's in them" disabled>
+          <i class="fa fa-tags" aria-hidden="true"></i> Tag
+        </button>
         {% endif %}
       </span>
       {% if folder != 'trash' %}
@@ -1274,6 +1466,15 @@
         <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" oninput="renderSelection()" />
       </label>
       <button id="select-apply" onclick="applySelected()" disabled>Set date</button>
+      <div id="select-tagging" class="select-tagging" hidden>
+        <select id="select-tag-kind" aria-label="What to tag" onchange="tagKindChanged()">
+          <option value="tag">Tag</option>
+          <option value="person">Person</option>
+        </select>
+        <input id="select-tag-name" type="text" list="tags" maxlength="80" placeholder="Tag" aria-label="Tag or name" onkeydown="if (event.key === 'Enter') tagSelected(true);" />
+        <button class="select-action" onclick="tagSelected(true)" disabled>Add</button>
+        <button class="select-action" onclick="tagSelected(false)" title="A person comes off only where they were tagged by hand" disabled>Take off</button>
+      </div>
       {% endif %}
     </div>
     <div id="viewer" class="library-viewer" hidden>
@@ -1303,8 +1504,8 @@
           <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">
             <i class="fa fa-heart-o" aria-hidden="true"></i>
           </button>
-          <button id="viewer-faces" onclick="toggleFaces()" title="Show who's where" aria-label="Show faces" aria-pressed="false">
-            <i class="fa fa-user-o" aria-hidden="true"></i>
+          <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
+            <i class="fa fa-tags" aria-hidden="true"></i>
           </button>
           <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
             <i class="fa fa-rotate-right" aria-hidden="true"></i>
@@ -1334,13 +1535,18 @@
       </div>
       <div id="viewer-people" class="viewer-people" hidden>
         <div id="viewer-people-list" class="viewer-people-list"></div>
-        <div id="viewer-no-faces" class="people-hint" hidden>No faces have been matched in this photo.</div>
+        <div id="viewer-no-faces" class="people-hint" hidden>Nobody has been found or tagged in this photo.</div>
         <div id="viewer-face-editor" class="viewer-face-editor" hidden>
           <input id="viewer-face-name" type="text" list="names" maxlength="80" placeholder="Name" aria-label="Name for this face" onkeydown="if (event.key === 'Enter') saveFaceName();" />
           <button onclick="saveFaceName()">Save</button>
           <button id="viewer-face-clear" onclick="changeFaceName(null)" title="This face goes back to Who is this?">Remove name</button>
           <button id="viewer-face-skip" onclick="changeFaceName('')" title="Not someone worth naming">Skip</button>
           <button id="viewer-face-cover" onclick="setFaceCover()" title="Show this face on this person's folder">Use as cover</button>
+        </div>
+        <div class="viewer-tagging">
+          <input id="viewer-add-person" type="text" list="names" maxlength="80" placeholder="Add someone" aria-label="Add someone who's here, such as with their face turned away" title="Someone who's here, such as with their face turned away" onkeydown="if (event.key === 'Enter') addFromViewer('person');" />
+          <span id="viewer-tag-list" class="viewer-tag-list"></span>
+          <input id="viewer-add-tag" type="text" list="tags" maxlength="80" placeholder="Add tag" aria-label="Add a tag" onkeydown="if (event.key === 'Enter') addFromViewer('tag');" />
         </div>
       </div>
     </div>

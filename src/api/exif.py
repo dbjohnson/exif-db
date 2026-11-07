@@ -562,8 +562,8 @@ def photo_details(path):
     return dict(zip((column[0] for column in cursor.description), row)) if row else None
 
 
-def photos_with_ids(photo_ids):
-    return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids])
+def photos_with_ids(photo_ids, hidden=False):
+    return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids], hidden)
 
 
 def copies_of(path):

@@ -33,6 +33,11 @@ NAME_VOTES = 6
 NAME_VOTE_SHARE = 0.9
 # who a face is when it's been looked at and isn't anyone worth naming
 NOBODY = ''
+# someone said to be in a photo without a face to go on, such as one turned away, is kept as a face
+# with no box and this score, so that it's never compared or offered for naming either
+TAGGED_FACE_SCORE = 0.0
+# how to tell those faces apart, as found faces always have a size
+TAGGED = 'faces.width = 0'
 # a dog, once it's been given a name, is kept as a face with this score: below what faces need to
 # be compared or offered for naming, so it never joins a group of faces or a comparison of them
 DOG_FACE_SCORE = 0.5

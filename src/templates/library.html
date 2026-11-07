@@ -4,6 +4,8 @@
     <title>Library</title>
     {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+    <script src="/static/toast.js"></script>
+    <script src="/static/tags.js"></script>
   </head>
   <body class="library-page">
     {% include '_nav.html' %}
@@ -57,7 +59,11 @@
     </section>
     {% endif %}
     <section id="folders" class="library-year">
-      <h2>Folders <span>photos from any month</span></h2>
+      <h2>Folders <span>photos from any month, and a folder for each tag</span></h2>
+      <form class="new-tag" onsubmit="createTag(event)">
+        <input id="new-tag" type="text" maxlength="80" placeholder="New tag" aria-label="Name for a new tag" />
+        <button>Add tag</button>
+      </form>
       <div class="month-grid">
         {% for tile in folders %}
         {{ month_tile(tile) }}

@@ -8,6 +8,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import Counter, deque
 
 import numpy as np
@@ -26,6 +27,7 @@ NOBODY = ''
 MIN_SCORE = people_db.MIN_SCORE
 MIN_PIXELS = people_db.MIN_PIXELS
 USABLE = f"(score >= {MIN_SCORE} AND pixels >= {MIN_PIXELS})"
+TAGGED = people_db.TAGGED
 # how alike a face has to be to a named one, out of 1, to count towards being that person
 SUGGEST_SIMILARITY = 0.45
 # how many of a group's best faces its row shows, and get compared with named faces
@@ -429,7 +431,7 @@ def photo_faces(photo_id):
     """
     rows = _db().execute(
         f"""
-        SELECT faces.id, left, top, width, height, rotation, names.name, covers.face_id IS NOT NULL
+        SELECT faces.id, left, top, width, height, rotation, names.name, covers.face_id IS NOT NULL, {TAGGED}
         FROM faces
         LEFT JOIN names ON names.face_id = faces.id
         LEFT JOIN covers ON covers.face_id = faces.id AND covers.name = names.name
@@ -443,9 +445,11 @@ def photo_faces(photo_id):
             'box': {'Left': left, 'Top': top, 'Width': width, 'Height': height},
             'rotation': rotation,
             'name': name,
-            'cover': bool(cover)
+            'cover': bool(cover),
+            # tagged by hand, with no box
+            'tagged': bool(tagged)
         }
-        for face_id, left, top, width, height, rotation, name, cover in rows
+        for face_id, left, top, width, height, rotation, name, cover, tagged in rows
     ]
 
 
@@ -683,8 +687,8 @@ def _summary():
         marked = family()
         people = db.execute(
             f"""
-            SELECT name, COUNT(*), COUNT(DISTINCT photo_id), MAX(pixels * score), id FROM (
-                SELECT names.name AS name, faces.id AS id, photo_id, pixels, score
+            SELECT name, SUM(width > 0), COUNT(DISTINCT photo_id), MAX(pixels * score), id FROM (
+                SELECT names.name AS name, faces.id AS id, photo_id, pixels, score, width
                 FROM names JOIN faces ON faces.id = names.face_id
                 WHERE names.name <> ? AND {SHOWN}
             )
@@ -1020,7 +1024,7 @@ def person_faces(name):
     return [(face_id, from_db(photo_id)) for face_id, photo_id in _db().execute(
         f"""
         SELECT faces.id, faces.photo_id FROM names JOIN faces ON faces.id = names.face_id
-        WHERE names.name = ? AND names.name <> ? AND {SHOWN}
+        WHERE names.name = ? AND names.name <> ? AND {SHOWN} AND NOT {TAGGED}
         ORDER BY pixels * score DESC
         """,
         (name, NOBODY)
@@ -1189,6 +1193,51 @@ def person_photo_ids(name):
     )]
 
 
+def tag_person(photos, name):
+    """
+    Says someone is in these photos without a face to go on, such as when theirs is turned away.
+    photos are {'id', 'path'}, and those the person is already named in are left alone.  Returns the
+    ids of the faces this adds, which clear_names takes back off
+    """
+    db = _db()
+    already = {from_db(row[0]) for row in db.execute(
+        'SELECT DISTINCT faces.photo_id FROM faces JOIN names ON names.face_id = faces.id WHERE names.name = ?',
+        (name,)
+    )}
+    added = [(uuid.uuid4().hex, photo) for photo in photos if photo['id'] not in already]
+    nothing = np.zeros(people_db.EMBEDDING_SIZE, dtype=np.float32).tobytes()
+    with db:
+        db.executemany(
+            """
+            INSERT INTO faces (id, photo_id, path, rotation, left, top, width, height, score, pixels, norm, embedding)
+            VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, ?)
+            """,
+            [(face_id, to_db(photo['id']), to_db(photo['path']), people_db.TAGGED_FACE_SCORE, nothing) for face_id, photo in added]
+        )
+    _record_names([(face_id, name) for face_id, _ in added])
+    return [face_id for face_id, _ in added]
+
+
+def untag_person(photo_ids, name):
+    """
+    Takes someone tagged by hand off these photos, leaving their faces alone.  Returns what each was
+    called before, for restore_names.  The faces stay, with no name, which nothing shows
+    """
+    db = _db()
+    face_ids = []
+    for start in range(0, len(photo_ids), 500):
+        part = [to_db(photo_id) for photo_id in photo_ids[start:start + 500]]
+        marks = ','.join('?' * len(part))
+        face_ids += [row[0] for row in db.execute(
+            f"""
+            SELECT faces.id FROM faces JOIN names ON names.face_id = faces.id
+            WHERE names.name = ? AND {TAGGED} AND faces.photo_id IN ({marks})
+            """,
+            (name, *part)
+        )]
+    return clear_names(face_ids)
+
+
 def known_names():
     return [row[0] for row in _db().execute('SELECT DISTINCT name FROM names WHERE name <> ? ORDER BY name', (NOBODY,))]
 
@@ -1200,6 +1249,9 @@ def crop(face_id):
     row = _db().execute('SELECT path, rotation, left, top, width, height FROM faces WHERE id = ?', (face_id,)).fetchone()
     if row is None:
         return None
+    if not row[4]:
+        # tagged by hand, so the whole photo is all there is
+        return thumbs.thumbnail(from_db(row[0]), row[1])
     box = dict(zip(('Left', 'Top', 'Width', 'Height'), row[2:]))
     return thumbs.face(from_db(row[0]), row[1], box, face_id)
 

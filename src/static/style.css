@@ -106,6 +106,7 @@ button:disabled {
 .library-month-header a,
 .library-month-header button,
 .select-bar button,
+.new-tag button,
 .people button,
 .toast button,
 .group-action {
@@ -143,6 +144,7 @@ button:disabled {
   .library-month-header a:hover,
   .library-month-header button:hover:not(:disabled),
   .select-bar button:hover:not(:disabled),
+  .new-tag button:hover:not(:disabled),
   .people button:hover:not(:disabled),
   .toast button:hover,
   .group-action:hover:not(:disabled) {
@@ -188,8 +190,11 @@ button:disabled {
 .people input[type="text"],
 .person-edit input[type="text"],
 .viewer-face-editor input[type="text"],
+.viewer-tagging input[type="text"],
+.new-tag input[type="text"],
 .select-bar input[type="text"],
 .select-bar input[type="date"],
+.select-bar select,
 .manage select,
 .manage input[type="time"],
 .date-controls input[type="date"] {
@@ -1368,6 +1373,83 @@ button:disabled {
   border: 1px solid var(--border);
   background: none;
   font-size: var(--control-font);
+}
+
+/* who's here without a face, and tags, under a photo's faces */
+.viewer-tagging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.viewer-tagging input[type="text"] {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.viewer-tag-list {
+  display: contents;
+}
+
+.tag-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: var(--control-height);
+  padding-left: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.tag-chip a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tag-chip button {
+  align-self: stretch;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.face-chip .face-chip-tagged {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.new-tag {
+  display: flex;
+  gap: 8px;
+  max-width: 400px;
+  margin-bottom: 8px;
+}
+
+.new-tag input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.select-tagging {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.select-tagging[hidden] {
+  display: none;
 }
 
 .viewer-bar #viewer-faces[aria-pressed="true"] {
@@ -3053,8 +3135,12 @@ html.navigating::before {
   .select-actions {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
     width: 100%;
+  }
+  .select-tagging {
+    grid-column: 1 / -1;
   }
   .select-actions button {
     flex-direction: column;

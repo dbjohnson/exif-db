@@ -53,6 +53,13 @@ The bottom of `/library` has folders that gather photos from every month, one ye
 - `/library/hidden` has photos hidden from the library or left unchecked in the review queue.  Unhide puts a photo back in the library as unreviewed.  Copies hidden automatically as duplicates aren't here; `/duplicates` has those.
 - `/library/recycle-bin` has photos deleted from the library, by the day they were deleted (from `deletions.csv`, or for older deletions the time the file moved).  Restore moves a photo's files back; one deleted before the last scan returns to the library after the next one.  Delete forever removes its files from the NAS for good, along with the thumbnails made from them and Synology's copies in the photo's old `@eaDir`, and can't be undone.  Files deleted with a photo, such as a Live Photo's video, go with it either way.  Videos deleted on their own, and anything put in `deleted/` by hand rather than from the library, aren't shown; emptying the trash from `/manage` still removes them.
 - Screenshots (below).
+- A folder for each tag, after those.
+
+## Tags
+
+Tags are names given to photos by hand, each with a folder in the library.  The tag button in a photo's viewer shows who's in it and its tags: type in Add tag to tag it, or press × on a tag to take it off.  In any month or folder, Select, then Tag, adds a tag to many photos at once or takes it off.  A tag can also be made empty from the library, under Folders.  A tag's folder has an Edit button for renaming it, which joins it with another tag of that name, and for deleting it, which leaves the photos alone.  Tags are kept in `tags.db` in the storage volume, by photo id, so they survive a full rebuild.
+
+The same row in the viewer has Add someone, for a person who's in a photo without a face to go on, such as one turned away.  They show on the person's page like any other photo of them, and in the viewer as a chip with no face, which can be removed or renamed like a face.  Select, then Tag, with Person chosen, does the same for many photos, and Take off removes only those tagged this way.  In `people.db` they're faces with no box and a score of 0, so they're never compared, grouped or offered for naming, and renaming, joining or removing a person carries them along.
 
 ## Screenshots
 

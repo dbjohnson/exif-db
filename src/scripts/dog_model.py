@@ -231,6 +231,8 @@ def _who_each_animal_is(connection):
         SELECT faces.photo_id, faces.rotation, faces.left, faces.top, faces.width, faces.height, names.name
         FROM faces JOIN names ON names.face_id = faces.id
         WHERE names.name <> ? AND faces.id NOT IN (SELECT id FROM animals)
+            -- someone tagged by hand has no box to be inside a dog's
+            AND faces.width > 0
         """,
         (people_db.NOBODY,)
     ).fetchall()

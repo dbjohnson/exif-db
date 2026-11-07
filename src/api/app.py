@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from api import duplicates, exif, faces, info, movies, people, places, scans, thumbs, trash
+from api import duplicates, exif, faces, info, movies, people, places, scans, tags, thumbs, trash
 
 
 @asynccontextmanager
@@ -41,6 +41,8 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # for a person's Edit panel, which is on more than one page
 templates.env.globals['is_family'] = lambda name: name in people.family()
 templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(name), **people.relatives(name)}
+# for suggesting tags wherever photos can be tagged
+templates.env.globals['tag_names'] = tags.names
 
 
 @app.middleware("http")
@@ -549,7 +551,15 @@ def folder_tiles(with_faces, binned):
     ]
     # not with faces, as nobody wants a screenshot for its faces
     screenshots = None if with_faces else screenshots_tile()
-    return tiles + ([screenshots] if screenshots else [])
+    tagged = [
+        {**tile(name, tag_url(name), exif.photos_with_ids(tags.photo_ids(name)), 'fa-tag'), 'tag': True}
+        for name in tags.names()
+    ]
+    return tiles + ([screenshots] if screenshots else []) + tagged
+
+
+def tag_url(name):
+    return f"/library/tags/{quote(name, safe='')}"
 
 
 def library_years(tiles):
@@ -700,6 +710,28 @@ async def _favorites(request: Request, year: str = None):
         back_label="Library",
         folder='favorites',
         hint=None if photos else "No favorites yet. The heart on a photo adds it here."
+    )
+
+
+@app.get("/library/tags/{name}")
+async def _tag(request: Request, name: str, year: str = None):
+    if not tags.exists(name):
+        return RedirectResponse(url='/library#folders')
+    photos = exif.photos_with_ids(tags.photo_ids(name))
+    return photos_by_year_page(
+        request,
+        name,
+        photos,
+        tag_url(name),
+        year,
+        back_url="/library#folders",
+        back_label="Library",
+        folder='tag',
+        tag=name,
+        hint=None if photos else (
+            "No photos have this tag yet. To add some, open a photo and press the tag button, or "
+            "select photos in any month and use Tag."
+        )
     )
 
 
@@ -1385,6 +1417,93 @@ async def _set_person_cover(choice: PersonCover):
 @app.get("/api/photo-faces")
 async def _photo_faces(photo_id: str):
     return people.photo_faces(photo_id)
+
+
+class PhotoPeople(BaseModel):
+    name: str
+    photo_ids: list[str]
+    tagged: bool = True
+
+
+# someone in photos without a face to go on, or taking that back off
+@app.post("/api/photo-people")
+async def _tag_person(change: PhotoPeople):
+    name = clean_name(change.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="A name can't be blank")
+    if not change.tagged:
+        return {'name': name, 'previous': people.untag_person(change.photo_ids, name)}
+    # hidden ones too, which can be tagged from the Hidden folder
+    photos = exif.photos_with_ids(change.photo_ids, hidden=True)
+    return {'name': name, 'added': people.tag_person(photos, name)}
+
+
+class TagName(BaseModel):
+    name: str
+
+
+class TagPhotos(BaseModel):
+    name: str
+    photo_ids: list[str]
+    tagged: bool = True
+
+
+class TagRename(BaseModel):
+    name: str
+    new_name: str
+
+
+class TagRestore(BaseModel):
+    # as the change being undone gave it: each tag's photos, or None for one that didn't exist
+    previous: list[dict]
+
+
+def tag_name(name):
+    name = clean_name(name)
+    if not name:
+        raise HTTPException(status_code=422, detail="A tag can't be blank")
+    return name
+
+
+@app.post("/api/tags")
+async def _create_tag(tag: TagName):
+    name = tag_name(tag.name)
+    tags.create(name)
+    return {'name': name}
+
+
+@app.get("/api/photo-tags")
+async def _photo_tags(photo_id: str):
+    return tags.of_photo(photo_id)
+
+
+@app.post("/api/tags/photos")
+async def _tag_photos(change: TagPhotos):
+    name = tag_name(change.name)
+    return {'name': name, 'changed': tags.set_photos(name, change.photo_ids, change.tagged)}
+
+
+@app.post("/api/tags/rename")
+async def _rename_tag(rename: TagRename):
+    new_name = tag_name(rename.new_name)
+    previous = tags.rename(rename.name, new_name)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="There's no tag by that name")
+    return {'name': new_name, 'previous': previous}
+
+
+@app.post("/api/tags/delete")
+async def _delete_tag(tag: TagName):
+    previous = tags.delete(tag.name)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="There's no tag by that name")
+    return {'previous': previous}
+
+
+@app.post("/api/tags/restore")
+async def _restore_tags(restore: TagRestore):
+    tags.restore(restore.previous)
+    return "saved"
 
 
 @app.post("/api/people/faces/checked")
