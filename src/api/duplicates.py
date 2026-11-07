@@ -3,9 +3,12 @@ Hides copies of photos that scripts/find_duplicates.py is sure about, and offers
 for a person to decide.  It runs after any scan that changes the index, so new photos are covered
 without being asked, and nothing is deleted: a hidden copy can always be brought back.
 """
+import csv
 import json
 import logging
 import os
+
+import numpy as np
 
 from api import copies, exif, scans, worklog
 from api.jobs import Job
@@ -19,6 +22,13 @@ RESULTS = '/storage/duplicates.json'
 APPLIED = '/storage/duplicates_applied.json'
 logger = logging.getLogger('uvicorn.error')
 _resumed = False
+# bits out of 64 that can differ for photos to be worth showing side by side, as
+# scripts/find_duplicates.py compares them
+CANDIDATE_DISTANCE = 10
+CANDIDATES_SHOWN = 24
+# what the duplicate check concluded about a pair, best first
+VERDICT_ORDER = {copies.SAME: 0, copies.POSSIBLE: 1, None: 2, copies.DIFFERENT: 3}
+_cache = {}
 
 
 def _read_json(path):
@@ -197,3 +207,133 @@ def show(photo_ids):
     photos = exif.duplicate_photos(photo_ids)
     exif.record_duplicates([(photo['id'], copies.KEPT) for photo in photos])
     exif.record_reviews(unreviewed=[photo['id'] for photo in photos if photo['status'] == copies.REJECTED])
+
+
+# ---- possible duplicates of one photo, to compare side by side
+
+def _log(path):
+    # an append-only "<key>,<value>,<time>" log, of which the latest row for each key counts
+    found = {}
+    if os.path.exists(path):
+        with open(path, newline='', encoding='utf-8', errors='surrogateescape') as fh:
+            for row in csv.reader(fh):
+                if len(row) >= 2:
+                    found[row[0]] = row[1]
+    return found
+
+
+def _fingerprints():
+    # every photo's two hashes, as numbers, and where each path's are
+    stamp = exif._file_stamps(FINGERPRINTS)
+    if _cache.get('fingerprints_stamp') != stamp:
+        paths, whole, content = [], [], []
+        for path, value in _log(FINGERPRINTS).items():
+            try:
+                first, second = (int(part, 16) for part in value.split())
+            except ValueError:
+                continue
+            paths.append(path)
+            whole.append(first)
+            content.append(second)
+        _cache.update(
+            fingerprints_stamp=stamp,
+            fingerprints=(paths, {path: place for place, path in enumerate(paths)}, np.array(whole, dtype=np.uint64), np.array(content, dtype=np.uint64))
+        )
+    return _cache['fingerprints']
+
+
+def _comparisons():
+    # what the check concluded about each pair it compared, by their paths in order
+    stamp = exif._file_stamps(PAIRS)
+    if _cache.get('pairs_stamp') != stamp:
+        found = {}
+        for key, value in _log(PAIRS).items():
+            parts = value.split()
+            if '\t' in key and len(parts) == 2:
+                found[tuple(sorted(key.split('\t', 1)))] = parts[0]
+        _cache.update(pairs_stamp=stamp, pairs=found)
+    return _cache['pairs']
+
+
+def _near(path):
+    # the paths whose fingerprints are close to this one's, with how many bits apart
+    paths, where, whole, content = _fingerprints()
+    place = where.get(path)
+    if place is None:
+        return None
+    distance = np.minimum.reduce([
+        np.bitwise_count(values ^ one)
+        for values in (whole, content)
+        for one in (whole[place], content[place])
+    ])
+    close = np.nonzero(distance <= CANDIDATE_DISTANCE)[0]
+    return {paths[other]: int(distance[other]) for other in close if other != place}
+
+
+def _pixels(photo):
+    return (photo['width'] or 0) * (photo['height'] or 0)
+
+
+def _better(a, b, details):
+    # which of two copies to keep, as the duplicate check would choose
+    if a['id'] in details and b['id'] in details:
+        return copies.best_copy([a, b], details)
+    if _pixels(a) != _pixels(b):
+        return a if _pixels(a) > _pixels(b) else b
+    return max((a, b), key=copies._preference)
+
+
+def _described(photo, cameras):
+    return {
+        **photo,
+        'folder': os.path.relpath(os.path.dirname(photo['path']), exif.LIBRARY_ROOT),
+        'camera_name': cameras.get(photo['id']),
+        'screenshot': copies.looks_like_screenshot(photo),
+        'hidden_as_copy': photo['status'] == copies.REJECTED and exif.handled_duplicates().get(photo['id']) == copies.HIDDEN
+    }
+
+
+def candidates(photo_id):
+    """
+    Photos that may be copies of this one, for comparing it with each side by side: those whose
+    fingerprints are close, and any the check grouped with it.  Each says what the check made of
+    the pair, if it compared them, and which of the two looks like the copy to keep.  None for a
+    photo that isn't in the index
+    """
+    found = exif.duplicate_photos([photo_id])
+    if not found:
+        return None
+    photo = found[0]
+    near = _near(photo['path'])
+    group = next((group for group in _groups() if photo_id in group['photos']), None)
+    others = [
+        other for other in exif.duplicate_photos(group['photos'] if group else (), near or {})
+        if other['id'] != photo_id
+    ]
+    details = group['photos'] if group and isinstance(group['photos'], dict) else {}
+    pairs = _comparisons()
+    cameras = exif.cameras_of([photo_id, *(other['id'] for other in others)])
+    shown = []
+    for other in others:
+        verdict = pairs.get(tuple(sorted((photo['path'], other['path']))))
+        better = _better(photo, other, details)
+        shown.append({
+            **_described(other, cameras),
+            'verdict': verdict,
+            'distance': (near or {}).get(other['path']),
+            'in_group': bool(group and other['id'] in group['photos']),
+            'better': better is other
+        })
+    shown.sort(key=lambda other: (
+        VERDICT_ORDER.get(other['verdict'], 2),
+        not other['in_group'],
+        other['distance'] if other['distance'] is not None else CANDIDATE_DISTANCE + 1
+    ))
+    return {
+        'photo': _described(photo, cameras),
+        # the photo's other files, such as the same file backed up in another folder, which take its
+        # place if only this one is deleted
+        'other_files': [path for path in exif.copies_of(photo['path']) if path != photo['path']],
+        'checked': near is not None,
+        'candidates': shown[:CANDIDATES_SHOWN]
+    }

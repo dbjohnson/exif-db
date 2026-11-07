@@ -163,6 +163,8 @@ After a scan changes the index, the server looks for photos that are copies of e
 
 `/duplicates` shows what was hidden, where another copy can be kept instead or a hidden one brought back, which sticks through later checks.  Photos that may be copies but aren't certain, like annotated or brighter versions, wait there for a decision.  Shots from a camera's burst or timer are never treated as copies, and a copy is only hidden if it matches the one that's kept.
 
+The photo viewer's compare button, with a count of what may be copies of the open photo, shows it side by side with each of them, for deleting duplicates with confidence.  Candidates are every photo whose fingerprint is within 10 of 64 bits of this one's, and any the check grouped with it, including copies already hidden.  For each pair it says what the check concluded (the same photo, possibly the same, or compared and found different, or not compared, as with a burst), marks the better copy by the same rules the check keeps one by, and shows each one's size, file, date, camera, folder, name and status, with whatever differs picked out.  Either side can be deleted, with an undo, or opened at full size.  ←/→ go through the candidates and Esc closes it.
+
 Each photo's fingerprint comes from its thumbnail, and only photos with similar fingerprints get compared, by lining them up and comparing them block by block.  Results are kept in `duplicate_fingerprints.csv` and `duplicate_pairs.csv` in the storage volume, so later checks only do what's new.  What's been dealt with is in `duplicates.csv`.  The first check takes a little over an hour per 60,000 photos on a Celeron J4125.
 
 ## The kiosk

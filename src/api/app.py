@@ -1877,6 +1877,15 @@ async def _stop_duplicates():
     return "stopping"
 
 
+# what may be copies of a photo, to compare it with side by side
+@app.get("/api/duplicates/candidates")
+async def _duplicate_candidates(photo_id: str):
+    found = duplicates.candidates(photo_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That photo isn't in the index")
+    return found
+
+
 @app.post("/api/duplicates/keep")
 async def _keep_duplicate(choice: DuplicateChoice):
     duplicates.keep(choice.keep, choice.photo_ids)

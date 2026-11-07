@@ -796,8 +796,8 @@ def shown_photos():
     return stamp, {row[0] for row in db.execute(f"SELECT photo_id FROM {table} WHERE review_status <> ?", [REJECTED]).fetchall()}
 
 
-def duplicate_photos(photo_ids=None):
-    # what deciding between copies of a photo goes on, for these photos or all of them
+def duplicate_photos(photo_ids=None, paths=()):
+    # what deciding between copies of a photo goes on, for these photos, those at these paths, or all of them
     table = _with_status()
     rows = db.execute(
         f"""
@@ -809,9 +809,9 @@ def duplicate_photos(photo_ids=None):
             date_assigned,
             DateTimeOriginal, review_status, favorite, rotation
         FROM {table}
-        WHERE ? OR photo_id IN (SELECT UNNEST(?::VARCHAR[]))
+        WHERE ? OR photo_id IN (SELECT UNNEST(?::VARCHAR[])) OR SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
         """,
-        [photo_ids is None, list(photo_ids or ())]
+        [photo_ids is None and not paths, list(photo_ids or ()), list(paths)]
     ).fetchall()
     return [
         {
@@ -834,6 +834,18 @@ def duplicate_photos(photo_ids=None):
         for photo_id, path, name, file_type, size, width, height, camera, dated, assigned, taken, status, favorite, rotation
         in rows
     ]
+
+
+def cameras_of(photo_ids):
+    # what each of these photos was taken with, by its id
+    rows = db.execute(
+        f"""
+        SELECT photo_id, CONCAT_WS(' ', {CAMERA_MAKE}, {CAMERA_MODEL})
+        FROM {_with_status()} WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))
+        """,
+        [list(photo_ids)]
+    ).fetchall()
+    return {photo_id: camera for photo_id, camera in rows if camera}
 
 
 def handled_duplicates():

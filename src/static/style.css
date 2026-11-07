@@ -3660,6 +3660,189 @@ html.navigating::before {
   }
 }
 
+/* ---- the open photo beside what may be copies of it */
+
+.viewer-compare {
+  position: relative;
+}
+
+.viewer-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--highlight);
+  color: #000;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 16px;
+}
+
+.viewer-badge[hidden] {
+  display: none;
+}
+
+.compare {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: #000;
+  color: var(--text);
+}
+
+.compare[hidden] {
+  display: none;
+}
+
+.compare-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px var(--page-margin);
+}
+
+.compare-bar button {
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.compare-steps {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.compare-verdict {
+  margin: 0 var(--page-margin) 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compare-sides {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 0 var(--page-margin);
+}
+
+.compare-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compare-side img {
+  width: 100%;
+  height: 55vh;
+  object-fit: contain;
+  background: var(--surface);
+  border-radius: var(--radius-tile);
+}
+
+.compare-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compare-better {
+  padding: 1px 8px;
+  border-radius: var(--radius);
+  background: var(--highlight);
+  color: #000;
+  font-size: 12px;
+}
+
+.compare-side dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.compare-side dt {
+  color: var(--muted);
+}
+
+.compare-side dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* what isn't the same on both sides */
+.compare-side dd.differs {
+  color: var(--highlight);
+}
+
+.compare-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.compare-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 12px var(--page-margin);
+}
+
+.compare-strip button {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+}
+
+.compare-strip button[aria-current] {
+  border-color: var(--highlight);
+}
+
+.compare-strip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 768px) {
+  /* still side by side, which is the point, with the details under each other */
+  .compare-sides {
+    gap: 6px;
+  }
+  .compare-side img {
+    height: 32vh;
+  }
+  .compare-side dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    font-size: 12px;
+  }
+  .compare-side dd {
+    margin-bottom: 4px;
+  }
+  .compare-actions {
+    flex-wrap: wrap;
+  }
+}
+
 /* last, so that an armed delete is red whichever kind of button it is */
 button.confirming,
 button.confirming:hover,
