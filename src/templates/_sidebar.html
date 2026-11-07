@@ -2,7 +2,7 @@
 <aside class="library-sidebar" aria-label="Find">
   <section class="side-section" aria-label="Go to a date">
     <div id="side-years" class="side-years"></div>
-    <div id="side-months" class="side-months"></div>
+    <div id="side-months" class="side-months"{% if day_steps %} style="display: none"{% endif %}></div>
   </section>
   {% if filtering %}
   <section class="side-section" aria-label="{{ 'Tags and people' if side_people else 'Tags' }}">
@@ -24,6 +24,7 @@
   {% if side_folders %}
   <section class="side-section side-folders">
     <h3>Folders</h3>
+    <a href="/onthisday"><i class="fa fa-calendar" aria-hidden="true"></i>On this day</a>
     <a href="/library/favorites"><i class="fa fa-heart" aria-hidden="true"></i>Favorites</a>
     <a href="/library/hidden"><i class="fa fa-eye-slash" aria-hidden="true"></i>Hidden</a>
     <a href="/library/recycle-bin"><i class="fa fa-trash-o" aria-hidden="true"></i>Recycle bin</a>

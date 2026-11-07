@@ -311,10 +311,46 @@ async def _dump():
     )
 
 
-# On this day is gone: the library goes to any date
+def day_of_year(text):
+    # a day of the year written MM-DD, as a date in a leap year so that Feb 29 is one, or None
+    if not re.fullmatch(r'\d{2}-\d{2}', text or ''):
+        return None
+    try:
+        return datetime.date(2000, int(text[:2]), int(text[3:]))
+    except ValueError:
+        return None
+
+
+def day_label(day):
+    return f"{day:%B} {day.day}"
+
+
+# photos taken on a day of the year in every year, today's unless another day is asked for.  Its
+# own address, since the library's date is the month on screen
 @app.get("/onthisday")
-async def _onthisday():
-    return RedirectResponse(url="/library")
+async def _onthisday(request: Request, day: str = None):
+    today = datetime.date.today()
+    shown = day_of_year(day) or day_of_year(f"{today:%m-%d}")
+    # the year wraps around, with Feb 29 between Feb 28 and Mar 1
+    previous = shown - datetime.timedelta(days=1) if (shown.month, shown.day) != (1, 1) else datetime.date(2000, 12, 31)
+    following = shown + datetime.timedelta(days=1) if (shown.month, shown.day) != (12, 31) else datetime.date(2000, 1, 1)
+    return timeline_page(
+        request,
+        f"On this day, {day_label(shown)}",
+        {'day': f"{shown:%m-%d}"},
+        empty_hint=f"No photos from {day_label(shown)} in any year.",
+        back_url="/library/folders",
+        back_label="Folders",
+        folder='onthisday',
+        day_steps={
+            'label': day_label(shown),
+            'previous': f"/onthisday?day={previous:%m-%d}",
+            'previous_label': day_label(previous),
+            'next': f"/onthisday?day={following:%m-%d}",
+            'next_label': day_label(following),
+            'today': (shown.month, shown.day) != (today.month, today.day)
+        }
+    )
 
 
 class ReviewDecisions(BaseModel):
@@ -457,7 +493,9 @@ def folder_tiles(binned):
     def tile(name, url, photos, icon):
         return {'name': name, 'url': url, 'photos': len(photos), 'cover': photos[0] if photos else None, 'icon': icon}
 
+    today = datetime.date.today()
     tiles = [
+        tile('On this day', '/onthisday', exif.photos_on_day(f"{today:%m:%d}"), 'fa-calendar'),
         tile('Favorites', '/library/favorites', exif.favorites(), 'fa-heart'),
         tile('Hidden', '/library/hidden', exif.hidden_photos(), 'fa-eye-slash'),
         {**tile('Recycle bin', '/library/recycle-bin', binned, 'fa-trash-o'), 'trash': True}
@@ -564,7 +602,7 @@ def undated_photos(photos):
 
 # what a timeline can be narrowed to, as query parameters.  camera is there for a camera's photos,
 # as "No camera" has no make or model to go by
-TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make', 'model', 'folder')
+TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make', 'model', 'folder', 'day')
 UNDATED_KEY = 'undated'
 
 
@@ -607,6 +645,10 @@ def timeline_spec(filters):
     if filters.get('camera'):
         where.append(f"{exif.CAMERA_MAKE} IS NOT DISTINCT FROM ? AND {exif.CAMERA_MODEL} IS NOT DISTINCT FROM ?")
         params += [filters.get('make') or None, filters.get('model') or None]
+    if filters.get('day'):
+        day = day_of_year(filters['day'])
+        where.append(exif.ON_DAY_FILTER if day else 'false')
+        params.append(f"{day:%m:%d}" if day else None)
     folder = filters.get('folder')
     if folder == 'favorites':
         where.append('favorite')

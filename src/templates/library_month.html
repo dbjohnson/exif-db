@@ -1864,11 +1864,17 @@
     {% include '_nav.html' %}
     <div class="library-month-header library-toolbar">
       {% if back_url %}<a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹<span class="toolbar-word"> {{ back_label }}</span></a>{% endif %}
-      {% if not filtering %}<span class="toolbar-title">{{ title }}</span>{% endif %}
+      {% if day_steps %}
+      <a href="{{ day_steps.previous }}" title="{{ day_steps.previous_label }}" aria-label="{{ day_steps.previous_label }}"><i class="fa fa-chevron-left" aria-hidden="true"></i></a>
+      <span class="toolbar-title">{{ day_steps.label }}</span>
+      <a href="{{ day_steps.next }}" title="{{ day_steps.next_label }}" aria-label="{{ day_steps.next_label }}"><i class="fa fa-chevron-right" aria-hidden="true"></i></a>
+      {% if day_steps.today %}<a href="/onthisday" title="Today" aria-label="Today"><i class="fa fa-calendar-check-o" aria-hidden="true"></i></a>{% endif %}
+      {% elif not filtering %}<span class="toolbar-title">{{ title }}</span>{% endif %}
       {% if months and not photos %}
       <span class="date-jump">
         <select id="jump-year" aria-label="Go to a year"></select>
-        <select id="jump-month" aria-label="Go to a month"></select>
+        {# every year has the one month on this day, so only the year is a choice #}
+        <select id="jump-month" aria-label="Go to a month"{% if day_steps %} style="display: none"{% endif %}></select>
       </span>
       {% endif %}
       {% if filtering %}

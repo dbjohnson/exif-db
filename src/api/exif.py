@@ -479,6 +479,14 @@ def timeline_months(where='true', params=(), hidden=False):
     return [{'month': month, 'photos': photos, 'days': days} for month, photos, days in rows]
 
 
+# photos taken on a day of the year, given as "MM:DD", in any year
+ON_DAY_FILTER = f"({LIBRARY_MONTH}) IS NOT NULL AND SUBSTRING(DateTimeOriginal, 6, 5) = ?"
+
+
+def photos_on_day(month_day):
+    return _library_rows(ON_DAY_FILTER, [month_day])
+
+
 def timeline_photos(month, where='true', params=(), hidden=False):
     # month as in timeline_months, where None is the undated photos
     return _library_rows(f"({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND ({where})", [month, *params], hidden)
