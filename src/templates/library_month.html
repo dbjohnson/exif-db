@@ -1952,10 +1952,10 @@
     <div id="select-bar" class="select-bar" hidden>
       <span id="select-count"></span>
       {% if not photos %}
-      <button onclick="selectShowing('month')" title="Every photo in the month on screen">Select month</button>
-      <button onclick="selectShowing('year')" title="Every photo in the year on screen">Select year</button>
+      <button onclick="selectShowing('month')" title="Select month. Every photo in the month on screen" aria-label="Select month"><i class="fa fa-calendar-o" aria-hidden="true"></i></button>
+      <button onclick="selectShowing('year')" title="Select year. Every photo in the year on screen" aria-label="Select year"><i class="fa fa-calendar" aria-hidden="true"></i></button>
       {% endif %}
-      <button onclick="selectEverything()">Select all</button>
+      <button onclick="selectEverything()" title="Select all" aria-label="Select all"><i class="fa fa-th" aria-hidden="true"></i></button>
       <span class="select-actions">
         {% if folder == 'trash' %}
         <button class="select-action" onclick="restorePhotos([...selected])" title="Restore. Back where they were in the library" aria-label="Restore" disabled>
@@ -1997,17 +1997,17 @@
         {% endif %}
       </span>
       {% if folder != 'trash' %}
-      <label>
-        Date
-        <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" oninput="renderSelection()" />
+      <label title="Date">
+        <i class="fa fa-calendar" aria-hidden="true"></i>
+        <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" oninput="renderSelection()" />
       </label>
-      <button id="select-apply" onclick="applySelected()" disabled>Set date</button>
-      <button class="select-action" onclick="ownDatesSelected()" title="Back to the dates in their files, for any given a date by hand" disabled>Own date</button>
+      <button id="select-apply" onclick="applySelected()" title="Set date" aria-label="Set date" disabled><i class="fa fa-check" aria-hidden="true"></i></button>
+      <button class="select-action" onclick="ownDatesSelected()" title="Own date. Back to the dates in their files, for any given a date by hand" aria-label="Own date" disabled><i class="fa fa-history" aria-hidden="true"></i></button>
       <div id="select-placing" class="select-tagging" hidden>
         <input id="select-place" type="text" maxlength="120" placeholder="Named place or town" aria-label="Named place or town" />
-        <button id="select-place-set" onclick="placeSelected('town')" disabled>Set place</button>
-        <button class="select-action" onclick="placeSelected('none')" title="Say these have no place" disabled>No place</button>
-        <button class="select-action" onclick="placeSelected('own')" title="Back to what their files say" disabled>Own place</button>
+        <button id="select-place-set" onclick="placeSelected('town')" title="Set place" aria-label="Set place" disabled><i class="fa fa-check" aria-hidden="true"></i></button>
+        <button class="select-action" onclick="placeSelected('none')" title="No place. Say these have no place" aria-label="No place" disabled><i class="fa fa-ban" aria-hidden="true"></i></button>
+        <button class="select-action" onclick="placeSelected('own')" title="Own place. Back to what their files say" aria-label="Own place" disabled><i class="fa fa-history" aria-hidden="true"></i></button>
         <button id="select-place-map-toggle" onclick="toggleSelectMap()" aria-pressed="false" title="Tap the map where they were taken" aria-label="Map">
           <i class="fa fa-map-o" aria-hidden="true"></i>
         </button>
@@ -2019,8 +2019,8 @@
           <option value="person">Person</option>
         </select>
         <input id="select-tag-name" type="text" list="tags" maxlength="80" placeholder="Tag" aria-label="Tag or name" onkeydown="if (event.key === 'Enter') tagSelected(true);" />
-        <button class="select-action" onclick="tagSelected(true)" disabled>Add</button>
-        <button class="select-action" onclick="tagSelected(false)" title="A person comes off only where they were tagged by hand" disabled>Take off</button>
+        <button class="select-action" onclick="tagSelected(true)" title="Add" aria-label="Add" disabled><i class="fa fa-plus" aria-hidden="true"></i></button>
+        <button class="select-action" onclick="tagSelected(false)" title="Take off. A person comes off only where they were tagged by hand" aria-label="Take off" disabled><i class="fa fa-minus" aria-hidden="true"></i></button>
       </div>
       {% endif %}
     </div>

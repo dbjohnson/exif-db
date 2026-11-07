@@ -3592,21 +3592,15 @@ html.navigating::before {
     text-align: center;
   }
   /* a phone's selection bar for photos: what's selected, then the actions, then the date */
-  .select-bar:has(.select-actions) {
-    display: grid;
-    grid-template-columns: 1fr auto;
-  }
   .select-bar:has(.select-actions) #select-count {
+    flex: 1;
     text-align: left;
   }
   .select-actions {
-    grid-column: 1 / -1;
+    flex: 1 1 100%;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
     width: 100%;
-  }
-  .select-tagging {
-    grid-column: 1 / -1;
   }
   /* a line of its own, as a town's name is long */
   .select-bar #select-place {
