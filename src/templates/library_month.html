@@ -142,12 +142,12 @@
           FOLDER === 'hidden'
             ? tileAction('fa-eye', 'Unhide', () => unhidePhotos([photo]))
             : tileAction('fa-eye-slash', 'Hide', () => hidePhoto(photo)),
-          tileAction('fa-trash-o', 'Delete', button => deletePhoto(photo, button)),
           tileAction('fa-info-circle', 'Info', () => showInfo(photo.path))
         );
         if (TAG) {
           actions.append(tileAction('fa-times', `Take off ${TAG}`, () => changeTags([photo], TAG, false)));
         }
+        actions.append(tileAction('fa-trash-o', 'Delete', button => deletePhoto(photo, button)));
         return actions;
       }
 
@@ -1982,9 +1982,6 @@
         <button id="select-favorite" class="select-action" onclick="favoriteSelected()" title="Favorite" aria-label="Favorite" disabled>
           <i class="fa fa-heart" aria-hidden="true"></i>
         </button>
-        <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="Delete. They stay in the trash until it's emptied from Manage" aria-label="Delete" disabled>
-          <i class="fa fa-trash-o" aria-hidden="true"></i>
-        </button>
         {% if folder != 'hidden' %}
         <button class="select-action" onclick="approveSelected()" title="Approve for the kiosk" aria-label="Approve" disabled>
           <i class="fa fa-check" aria-hidden="true"></i>
@@ -2014,6 +2011,9 @@
           </button>
           <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" onclick="openDatePicker(this)" onchange="datePicked(this)" disabled />
         </span>
+        <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="Delete. They stay in the trash until it's emptied from Manage" aria-label="Delete" disabled>
+          <i class="fa fa-trash-o" aria-hidden="true"></i>
+        </button>
         {% endif %}
       </span>
       {% if folder != 'trash' %}
@@ -2062,11 +2062,6 @@
           <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">
             <i class="fa fa-heart-o" aria-hidden="true"></i>
           </button>
-          {% if folder != 'trash' %}
-          <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
-            <i class="fa fa-trash-o" aria-hidden="true"></i>
-          </button>
-          {% endif %}
           <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the kiosk" aria-label="Approve">
             <i class="fa fa-check" aria-hidden="true"></i>
           </button>
@@ -2098,6 +2093,11 @@
           <button onclick="showInfo(current.path)" title="Info" aria-label="Info">
             <i class="fa fa-info-circle" aria-hidden="true"></i>
           </button>
+          {% if folder != 'trash' %}
+          <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
+            <i class="fa fa-trash-o" aria-hidden="true"></i>
+          </button>
+          {% endif %}
           </span>
         </span>
       </div>
