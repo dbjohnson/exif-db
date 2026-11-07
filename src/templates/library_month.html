@@ -403,8 +403,9 @@
         }
         const left = key => monthPhotos.has(key) ? monthPhotos.get(key).filter(photo => !photo.removed).length : null;
         timeline.counted(left);
+        // what's left of the list, for the page's title
         const total = timeline.months.reduce((sum, month) => sum + (left(month.key) ?? month.count), 0);
-        document.getElementById('summary').textContent = `${TITLE} · ${plural(total, 'photo')}`;
+        document.title = `${TITLE} · ${plural(total, 'photo')}`;
         for (const group of groups) {
           // folders can be told apart by size; every photo on a day is on screen anyway
           const count = group.month === UNDATED ? ` · ${plural(group.photos.filter(photo => !photo.removed).length, 'photo')}` : '';
@@ -417,7 +418,10 @@
         disarmButton(document.getElementById('select-delete'));
         document.body.classList.toggle('selecting', selecting);
         document.getElementById('select-bar').hidden = !selecting;
-        document.getElementById('select-toggle').textContent = selecting ? 'Done' : 'Select';
+        const toggle = document.getElementById('select-toggle');
+        toggle.querySelector('.toolbar-word').textContent = selecting ? 'Done' : 'Select';
+        toggle.querySelector('i').className = `fa ${selecting ? 'fa-check' : 'fa-check-square-o'}`;
+        toggle.setAttribute('aria-pressed', selecting);
         document.getElementById('select-count').textContent = `${selected.size.toLocaleString()} selected`;
         document.querySelectorAll('.select-action').forEach(button => button.disabled = !selected.size);
         if (IN_TRASH) {
@@ -1545,55 +1549,66 @@
   <body class="library-page">
     <header class="app-header">
     {% include '_nav.html' %}
-    <div class="library-month-header">
-      {% if back_url %}<a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹ {{ back_label }}</a>{% endif %}
+    <div class="library-month-header library-toolbar">
+      {% if back_url %}<a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹<span class="toolbar-word"> {{ back_label }}</span></a>{% endif %}
+      {% if not filtering %}<span class="toolbar-title">{{ title }}</span>{% endif %}
       {% if months and not photos %}
       <span class="date-jump">
         <select id="jump-year" aria-label="Go to a year"></select>
         <select id="jump-month" aria-label="Go to a month"></select>
       </span>
       {% endif %}
+      {% if filtering %}
+      {% if filter_tag or filter_person %}
+      <span class="filter-chip">
+        <i class="fa {{ 'fa-tag' if filter_tag else 'fa-user' }}" aria-hidden="true"></i>
+        {{ filter_tag or filter_person }}
+        <button type="button" onclick="filterTo({tag: null, person: null})" title="Clear" aria-label="Show every tag and person">×</button>
+      </span>
+      {% else %}
+      <label class="filter-pick" title="Show only a tag or a person">
+      <i class="fa fa-tag" aria-hidden="true"></i>
+      <select id="filter-who" class="toolbar-filter" aria-label="Show only a tag or a person" onchange="filterChanged()">
+        <option value="">Tag or person</option>
+        {% if tag_names_shown %}
+        <optgroup label="Tags">
+          {% for name in tag_names_shown %}
+          <option value="tag:{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+        <optgroup label="People">
+          {% for name in known_names %}
+          <option value="person:{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </optgroup>
+      </select>
+      </label>
+      {% endif %}
+      {% if place %}
+      <span class="filter-chip">
+        <i class="fa fa-map-marker" aria-hidden="true"></i>
+        {{ place.label }}
+        <button type="button" onclick="setPlace(null)" title="Clear" aria-label="Show photos from any place">×</button>
+      </span>
+      {% else %}
+      <label class="filter-pick filter-place" title="Show only a place">
+        <i class="fa fa-map-marker" aria-hidden="true"></i>
+        <input id="filter-place" class="toolbar-filter" type="text" maxlength="120" placeholder="Place" aria-label="Show only a place" />
+      </label>
+      {% endif %}
+      {% endif %}
       <span class="month-steps">
-        {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
-        {% if map_url %}<a href="{{ map_url }}">Map</a>{% endif %}
-        {% if person %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
-        {% if tag %}<button onclick="toggleTagEdit()">Edit</button>{% endif %}
-        {% if place_label %}<button onclick="toggleLabelEdit()">Edit</button>{% endif %}
-        <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
-        {% if filtering %}<a href="/library/folders">Folders</a>{% endif %}
+        {% if faces_url %}<a href="{{ faces_url }}" title="Faces"><i class="fa fa-smile-o" aria-hidden="true"></i><span class="toolbar-word">Faces</span></a>{% endif %}
+        {% if map_url %}<a href="{{ map_url }}" title="Map"><i class="fa fa-map-o" aria-hidden="true"></i><span class="toolbar-word">Map</span></a>{% endif %}
+        {% if person %}<button onclick="togglePersonEdit()" title="Edit"><i class="fa fa-pencil" aria-hidden="true"></i><span class="toolbar-word">Edit</span></button>{% endif %}
+        {% if tag %}<button onclick="toggleTagEdit()" title="Edit"><i class="fa fa-pencil" aria-hidden="true"></i><span class="toolbar-word">Edit</span></button>{% endif %}
+        {% if place_label %}<button onclick="toggleLabelEdit()" title="Edit"><i class="fa fa-pencil" aria-hidden="true"></i><span class="toolbar-word">Edit</span></button>{% endif %}
+        <button id="select-toggle" onclick="setSelecting(!selecting)" title="Select" aria-pressed="false"><i class="fa fa-check-square-o" aria-hidden="true"></i><span class="toolbar-word">Select</span></button>
+        {% if filtering %}<a href="/library/folders" title="Folders"><i class="fa fa-folder-o" aria-hidden="true"></i><span class="toolbar-word">Folders</span></a>{% endif %}
       </span>
     </div>
     </header>
-    <div class="library-title">
-      <h1 id="summary">{{ title }}</h1>
-      {% if filtering %}
-      <div class="library-filters">
-        <select id="filter-who" aria-label="Show only a tag or a person" onchange="filterChanged()">
-          <option value="">Any tag or person</option>
-          {% if tag_names_shown %}
-          <optgroup label="Tags">
-            {% for name in tag_names_shown %}
-            <option value="tag:{{ name }}"{% if name == filter_tag %} selected{% endif %}>{{ name }}</option>
-            {% endfor %}
-          </optgroup>
-          {% endif %}
-          <optgroup label="People">
-            {% for name in known_names %}
-            <option value="person:{{ name }}"{% if name == filter_person %} selected{% endif %}>{{ name }}</option>
-            {% endfor %}
-          </optgroup>
-        </select>
-        {% if place %}
-        <span class="filter-chip">
-          {{ place.label }}
-          <button type="button" onclick="setPlace(null)" title="Any place" aria-label="Show photos from any place">×</button>
-        </span>
-        {% else %}
-        <input id="filter-place" type="text" maxlength="120" placeholder="Any place" aria-label="Show only a place" />
-        {% endif %}
-      </div>
-      {% endif %}
-    </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
     {% if place_label %}
     <div id="label-edit" class="person-edit" hidden>

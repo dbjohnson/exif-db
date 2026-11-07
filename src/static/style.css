@@ -197,8 +197,7 @@ button:disabled {
 .select-bar select,
 .person-edit select,
 .date-jump select,
-.library-filters select,
-.library-filters input[type="text"],
+.toolbar-filter,
 .info-editor select,
 .manage select,
 .manage input[type="time"],
@@ -301,35 +300,56 @@ button:disabled {
   display: none;
 }
 
-.app-header .library-month-header {
-  justify-content: space-between;
+/* everything on one row, which on a narrow screen scrolls sideways rather than taking more */
+.app-header .library-toolbar {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-/* what a list is, under the header and scrolling away with the page */
-.library-title {
-  padding: 4px var(--page-margin) 0;
+.app-header .library-toolbar > * {
+  flex: none;
 }
 
-.library-title #summary {
-  margin: 4px 0 8px;
+.library-toolbar .month-steps {
+  margin-left: auto;
+  overflow: visible;
+}
+
+.toolbar-title {
+  max-width: 14em;
+  overflow: hidden;
   color: var(--text-strong);
-  font-size: 22px;
-  font-weight: normal;
-  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.library-filters {
-  display: flex;
-  flex-wrap: wrap;
+.library-toolbar .toolbar-filter {
+  width: 170px;
+}
+
+/* a filter to choose: an icon beside it, which on a phone is all there is until it's used */
+.filter-pick {
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  gap: 6px 8px;
-  padding-bottom: 4px;
+  gap: 6px;
+  color: var(--muted);
 }
 
-.library-filters select,
-.library-filters input[type="text"] {
-  flex: 0 1 220px;
-  min-width: 0;
+.library-toolbar a .fa,
+.library-toolbar button .fa {
+  margin-right: 6px;
+}
+
+.library-toolbar .filter-chip {
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.library-toolbar .filter-chip .fa {
+  color: var(--muted);
 }
 
 .filter-chip {
@@ -342,13 +362,16 @@ button:disabled {
   font-size: 13px;
 }
 
+/* bigger than it looks, as it's the way to clear a filter */
+.library-toolbar .filter-chip button,
 .filter-chip button {
   align-self: stretch;
+  min-height: 0;
   padding: 0 10px;
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .site-nav a {
@@ -3280,12 +3303,46 @@ html.navigating::before {
   /* the sticky row stays one row where it can, with the date first */
   .app-header .month-steps,
   .app-header .month-steps:has(> :nth-child(3)) {
-    flex: 0 1 auto;
+    flex: none;
     justify-content: flex-end;
   }
-  .library-filters select,
-  .library-filters input[type="text"] {
-    flex: 1 1 140px;
+  /* icons only, so that the whole row fits across a phone */
+  .library-toolbar .toolbar-word {
+    display: none;
+  }
+  .library-toolbar a .fa,
+  .library-toolbar button .fa {
+    margin-right: 0;
+  }
+  .filter-pick {
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: var(--control-height);
+    min-height: var(--control-height);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+  }
+  /* the list opens from the icon */
+  .library-toolbar .filter-pick select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    opacity: 0;
+  }
+  /* the place box opens out from its icon while it's being typed in */
+  .library-toolbar .filter-place input {
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    border: none;
+  }
+  .filter-place:focus-within {
+    padding-left: 10px;
+  }
+  .library-toolbar .filter-place:focus-within input {
+    width: 150px;
+    padding: 0 8px;
   }
   .viewer-actions {
     flex: 1 1 100%;

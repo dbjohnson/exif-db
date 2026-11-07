@@ -642,14 +642,6 @@
 
       // ---- hiding and deleting
 
-      function renderSummary() {
-        const visible = clips.filter(clip => !gone(clip));
-        const total = visible.reduce((sum, clip) => sum + clip.duration, 0);
-        const count = visible.length;
-        byId('summary').textContent =
-          `Home movies · ${count.toLocaleString()} movie${count === 1 ? '' : 's'} · ${formatLength(total)}`;
-      }
-
       function renderHidden() {
         const hidden = clips.flatMap((clip, index) => clip.hidden ? [index] : []).reverse();
         byId('hidden').hidden = !hidden.length;
@@ -664,7 +656,6 @@
 
       function renderRemaining() {
         organize();
-        renderSummary();
         renderHidden();
         relist();
         // the same month can have different movies in it now
@@ -1064,7 +1055,6 @@
           return;
         }
         organize();
-        renderSummary();
         startList();
 
         active = byId('video-a');
@@ -1084,32 +1074,42 @@
   <body class="library-page">
     <header class="app-header">
     {% include '_nav.html' %}
-    <div class="library-month-header">
+    <div class="library-month-header library-toolbar">
       <span class="date-jump">
         <select id="jump-year" aria-label="Go to a year"></select>
         <select id="jump-month" aria-label="Go to a month"></select>
       </span>
+      {% if filter_tag %}
+      <span class="filter-chip">
+        <i class="fa fa-tag" aria-hidden="true"></i>
+        {{ filter_tag }}
+        <button type="button" onclick="filterTo({tag: null})" title="Clear" aria-label="Show every tag">×</button>
+      </span>
+      {% else %}
+      <label class="filter-pick" title="Show only a tag">
+      <i class="fa fa-tag" aria-hidden="true"></i>
+      <select id="filter-tag" class="toolbar-filter" aria-label="Show only a tag" onchange="filterTo({tag: this.value})">
+        <option value="">Tag</option>
+        {% for name in tag_names_shown %}
+        <option value="{{ name }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+      </label>
+      {% endif %}
+      {% if place %}
+      <span class="filter-chip">
+        <i class="fa fa-map-marker" aria-hidden="true"></i>
+        {{ place.label }}
+        <button type="button" onclick="setPlace(null)" title="Clear" aria-label="Show movies from any place">×</button>
+      </span>
+      {% else %}
+      <label class="filter-pick filter-place" title="Show only a place">
+        <i class="fa fa-map-marker" aria-hidden="true"></i>
+        <input id="filter-place" class="toolbar-filter" type="text" maxlength="120" placeholder="Place" aria-label="Show only a place" />
+      </label>
+      {% endif %}
     </div>
     </header>
-    <div class="library-title">
-      <h1 id="summary">Home movies</h1>
-      <div class="library-filters">
-        <select id="filter-tag" aria-label="Show only a tag" onchange="filterTo({tag: this.value})">
-          <option value="">Any tag</option>
-          {% for name in tag_names_shown %}
-          <option value="{{ name }}"{% if name == filter_tag %} selected{% endif %}>{{ name }}</option>
-          {% endfor %}
-        </select>
-        {% if place %}
-        <span class="filter-chip">
-          {{ place.label }}
-          <button type="button" onclick="setPlace(null)" title="Any place" aria-label="Show movies from any place">×</button>
-        </span>
-        {% else %}
-        <input id="filter-place" type="text" maxlength="120" placeholder="Any place" aria-label="Show only a place" />
-        {% endif %}
-      </div>
-    </div>
     <div id="empty" class="no-images" hidden>
       {% if filters %}No movies match these filters.{% else %}No movies yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
     </div>
