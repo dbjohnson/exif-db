@@ -185,7 +185,7 @@
 
         const label = document.createElement('span');
         label.className = 'movie-tile-label';
-        label.textContent = clip.title || (clip.precision === 'time' ? formatClock(clip) : '');
+        label.textContent = clip.title || '';
         const length = document.createElement('span');
         length.className = 'movie-tile-length';
         length.textContent = formatDuration(clip.duration);
