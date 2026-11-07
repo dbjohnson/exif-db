@@ -73,6 +73,33 @@ function loadLeaflet() {
   return leafletLoading;
 }
 
+// a map to choose a point on, starting at start if there is one.  Its pin moves to each point
+// tapped, which picked is given, and to wherever pin is asked to put it
+async function placeMap(box, start, picked) {
+  await loadLeaflet();
+  const map = L.map(box, {worldCopyJump: true}).setView(start ? [start.lat, start.lon] : [20, 0], start ? TOWN_ZOOM : 2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  let marker = null;
+  const pin = (lat, lon, zoom) => {
+    marker = marker || L.marker([lat, lon]).addTo(map);
+    marker.setLatLng([lat, lon]);
+    if (zoom) {
+      map.setView([lat, lon], zoom);
+    }
+  };
+  map.on('click', event => {
+    // a map that's been scrolled round the world gives longitudes past 180
+    const lat = event.latlng.lat;
+    const lon = L.Util.wrapNum(event.latlng.lng, [-180, 180], true);
+    pin(lat, lon);
+    picked(lat, lon);
+  });
+  return {map, pin};
+}
+
 // suggests towns as their names are typed, and calls picked with one once it's chosen
 function townSearch(input, picked) {
   const list = document.createElement('datalist');
@@ -199,7 +226,6 @@ function placeEditor(path, info) {
   const hint = infoNote('Choose a town, or tap the map where it was taken.');
   let point = null;
   let map = null;
-  let marker = null;
   const save = infoButton('Save place', async () => {
     if (!point) {
       return;
@@ -214,19 +240,15 @@ function placeEditor(path, info) {
   });
   save.disabled = true;
 
-  function choose(lat, lon, zoom) {
+  function choose(lat, lon) {
     point = {lat, lon};
     save.disabled = false;
-    if (map) {
-      marker = marker || L.marker([lat, lon]).addTo(map);
-      marker.setLatLng([lat, lon]);
-      if (zoom) {
-        map.setView([lat, lon], zoom);
-      }
-    }
   }
 
-  townSearch(search, town => choose(town.lat, town.lon, TOWN_ZOOM));
+  townSearch(search, town => {
+    choose(town.lat, town.lon);
+    map?.pin(town.lat, town.lon, TOWN_ZOOM);
+  });
   const changes = [save];
   if (info.location) {
     changes.push(infoButton('No place', async () => {
@@ -263,21 +285,14 @@ function placeEditor(path, info) {
       return;
     }
     try {
-      await loadLeaflet();
+      map = await placeMap(mapBox, info.location || info.own_location || lastPlace(), choose);
     } catch (error) {
       mapBox.replaceWith(infoNote(error.message));
       return;
     }
-    const start = info.location || info.own_location || lastPlace();
-    map = L.map(mapBox, {worldCopyJump: true}).setView(start ? [start.lat, start.lon] : [20, 0], start ? TOWN_ZOOM : 2);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
     if (info.location) {
-      marker = L.marker([info.location.lat, info.location.lon]).addTo(map);
+      map.pin(info.location.lat, info.location.lon);
     }
-    map.on('click', event => choose(event.latlng.lat, L.Util.wrapNum(event.latlng.lng, [-180, 180], true)));
   };
   return editor;
 }

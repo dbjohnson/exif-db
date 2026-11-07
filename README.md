@@ -58,7 +58,7 @@ The bottom of `/library` has folders that gather photos from every month, one ye
 
 ## Changing a date or place
 
-A photo's info card has Change date, for an exact date and time, and Change place, for a town found by name or a point tapped on the map.  Either can go back to what the photo's file says, and each change can be undone.  In any month or folder, Select, then Own date, takes photos back to their files' dates, and Place sets a town for many photos at once, says they have none, or goes back to their own.
+A photo's info card has Change date, for an exact date and time, and Change place, for a town found by name or a point tapped on the map.  Either can go back to what the photo's file says, and each change can be undone.  In any month or folder, Select, then Own date, takes photos back to their files' dates, and Place sets a town or a point tapped on its map for many photos at once, says they have none, or goes back to their own.
 
 Dates set by hand go in `dates.csv` like those set by Select.  Places set by hand go in `locations_set.csv` by photo id, as a point or as having none, and take the place of what `locations.csv` says everywhere places are used: the info card, `/places` and its map.  Neither changes the original files.
 

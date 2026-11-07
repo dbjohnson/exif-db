@@ -1055,6 +1055,39 @@
       }
 
       let selectedTown = null;
+      let selectMap = null;
+
+      // a town from the search, or a point on the map
+      function pickPlace(place) {
+        selectedTown = place;
+        document.getElementById('select-place-set').disabled = !place;
+      }
+
+      async function toggleSelectMap() {
+        const box = document.getElementById('select-place-map');
+        box.hidden = !box.hidden;
+        document.getElementById('select-place-map-toggle').setAttribute('aria-pressed', !box.hidden);
+        if (box.hidden) {
+          return;
+        }
+        if (selectMap) {
+          // it can't tell its size while hidden
+          selectMap.map.invalidateSize();
+          return;
+        }
+        try {
+          selectMap = await placeMap(box, selectedTown || lastPlace(), (lat, lon) => {
+            document.getElementById('select-place').value = '';
+            pickPlace({lat, lon, label: 'the point on the map'});
+          });
+          if (selectedTown) {
+            selectMap.pin(selectedTown.lat, selectedTown.lon);
+          }
+        } catch (error) {
+          box.hidden = true;
+          showToast(error.message);
+        }
+      }
 
       function placeSelected(kind) {
         const photos = [...selected];
@@ -1427,13 +1460,12 @@
         const place = document.getElementById('select-place');
         if (place) {
           townSearch(place, town => {
-            selectedTown = town;
-            document.getElementById('select-place-set').disabled = false;
+            pickPlace(town);
+            selectMap?.pin(town.lat, town.lon, TOWN_ZOOM);
           });
           place.addEventListener('input', () => {
             if (selectedTown && place.value !== selectedTown.label) {
-              selectedTown = null;
-              document.getElementById('select-place-set').disabled = true;
+              pickPlace(null);
             }
           });
         }
@@ -1587,6 +1619,10 @@
         <button id="select-place-set" onclick="placeSelected('town')" disabled>Set place</button>
         <button class="select-action" onclick="placeSelected('none')" title="Say these have no place" disabled>No place</button>
         <button class="select-action" onclick="placeSelected('own')" title="Back to what their files say" disabled>Own place</button>
+        <button id="select-place-map-toggle" onclick="toggleSelectMap()" aria-pressed="false" title="Tap the map where they were taken">
+          <i class="fa fa-map-o" aria-hidden="true"></i> Map
+        </button>
+        <div id="select-place-map" class="select-place-map" hidden></div>
       </div>
       <div id="select-tagging" class="select-tagging" hidden>
         <select id="select-tag-kind" aria-label="What to tag" onchange="tagKindChanged()">

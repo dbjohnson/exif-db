@@ -1505,6 +1505,12 @@ button:disabled {
   border-radius: var(--radius);
 }
 
+.select-place-map {
+  flex: 1 1 100%;
+  height: 240px;
+  border-radius: var(--radius);
+}
+
 .select-tagging[hidden] {
   display: none;
 }
@@ -3198,6 +3204,10 @@ html.navigating::before {
   }
   .select-tagging {
     grid-column: 1 / -1;
+  }
+  /* a line of its own, as a town's name is long */
+  .select-bar #select-place {
+    flex: 1 1 100%;
   }
   .select-actions button {
     flex-direction: column;
