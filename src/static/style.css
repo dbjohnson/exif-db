@@ -311,8 +311,30 @@ button:disabled {
   gap: 2px;
 }
 
-.side-years .side-undated {
-  grid-column: span 2;
+.side-undated {
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.side-undated[hidden] {
+  display: none;
+}
+
+.side-undated[aria-current] {
+  background: var(--selected);
+  color: var(--text-strong);
+}
+
+@media (hover: hover) {
+  .side-undated:hover {
+    background: var(--hover);
+  }
 }
 
 .side-section .filter-chip {
@@ -397,10 +419,6 @@ button:disabled {
   margin-top: 6px;
 }
 
-.side-months[hidden] {
-  display: none;
-}
-
 .side-months button {
   padding: 4px 0;
   border: none;
@@ -467,6 +485,11 @@ button:disabled {
 .timeline-month,
 .timeline-body {
   display: flow-root;
+}
+
+/* room for the last month, however short, to be scrolled to the top like any other */
+.timeline-month:last-child {
+  min-height: calc(100vh - var(--header-height, 100px));
 }
 
 .timeline-month[hidden],

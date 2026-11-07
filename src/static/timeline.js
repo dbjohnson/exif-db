@@ -261,43 +261,41 @@ function dateJump(years, months, timeline, chosen) {
   const monthSelect = document.getElementById(months);
   // short, so that the date fits in a phone's header beside the buttons
   const NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let present = new Map();
+  let hasUndated = false;
+  let filledYear = null;
 
   function fill() {
-    const present = new Map();
-    for (const month of timeline.months) {
-      const year = month.key === 'undated' ? 'undated' : month.year;
-      if (!year) {
-        continue;
-      }
-      if (!present.has(year)) {
-        present.set(year, []);
-      }
-      present.get(year).push(month);
-    }
+    present = datedYears(timeline);
+    hasUndated = timeline.months.some(month => month.key === 'undated');
     yearSelect.replaceChildren(...[...present.keys()].map(year => {
       const option = document.createElement('option');
       option.value = year;
-      option.textContent = year === 'undated' ? 'Undated' : year;
+      option.textContent = year;
       return option;
     }));
-    return present;
+    filledYear = null;
   }
 
-  let present = fill();
-  let filledYear = null;
-
+  // a year's months, newest first, and then Undated, which isn't in any year
   function fillMonths(year) {
     filledYear = year;
     const has = new Set((present.get(year) || []).map(month => month.key));
-    monthSelect.hidden = year === 'undated';
-    monthSelect.replaceChildren(...NAMES.map((name, index) => {
+    const options = NAMES.map((name, index) => {
       const key = `${year}-${String(index + 1).padStart(2, '0')}`;
       const option = document.createElement('option');
       option.value = key;
       option.textContent = name;
       option.disabled = !has.has(key);
       return option;
-    }).reverse());
+    }).reverse();
+    if (hasUndated) {
+      const undated = document.createElement('option');
+      undated.value = 'undated';
+      undated.textContent = 'Undated';
+      options.push(undated);
+    }
+    monthSelect.replaceChildren(...options);
   }
 
   // follows along with scrolling
@@ -305,36 +303,53 @@ function dateJump(years, months, timeline, chosen) {
     if (!month) {
       return;
     }
-    const year = month.key === 'undated' ? 'undated' : month.year;
-    if (!year) {
+    if (month.key === 'undated') {
+      if (!filledYear) {
+        fillMonths(yearSelect.value);
+      }
+      monthSelect.value = 'undated';
       return;
     }
-    if (yearSelect.value !== year || filledYear !== year) {
-      yearSelect.value = year;
-      fillMonths(year);
+    if (!month.year) {
+      return;
     }
-    if (year !== 'undated') {
-      monthSelect.value = month.key;
+    if (yearSelect.value !== month.year || filledYear !== month.year) {
+      yearSelect.value = month.year;
+      fillMonths(month.year);
     }
+    monthSelect.value = month.key;
   }
 
   yearSelect.addEventListener('change', () => {
     const year = yearSelect.value;
     fillMonths(year);
-    // the newest month of the year, which is where its heading is
+    // the newest month of the year
     const first = present.get(year)?.[0];
     if (first) {
       chosen(first.key);
     }
   });
   monthSelect.addEventListener('change', () => chosen(monthSelect.value));
+  fill();
   return {
     show,
-    refill() {
-      present = fill();
-      filledYear = null;
-    }
+    refill: fill
   };
+}
+
+// the dated months, by year, newest first
+function datedYears(timeline) {
+  const years = new Map();
+  for (const month of timeline.months) {
+    if (month.key === 'undated' || !month.year) {
+      continue;
+    }
+    if (!years.has(month.year)) {
+      years.set(month.year, []);
+    }
+    years.get(month.year).push(month);
+  }
+  return years;
 }
 
 // ---- narrowing a list, which loads the page again with the change in its address
@@ -439,29 +454,30 @@ function sideDates(yearsId, monthsId, timeline, chosen) {
   const yearsList = document.getElementById(yearsId);
   const monthsGrid = document.getElementById(monthsId);
   const NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // Undated isn't in any year, so it goes under the months
+  const undated = document.createElement('button');
+  undated.type = 'button';
+  undated.className = 'side-undated';
+  undated.textContent = 'Undated';
+  undated.onclick = () => chosen('undated');
+  monthsGrid.after(undated);
   let present = new Map();
   let shownYear = null;
 
   function fill() {
-    present = new Map();
-    for (const month of timeline.months) {
-      const year = month.key === 'undated' ? 'undated' : month.year;
-      if (!year) {
-        continue;
-      }
-      if (!present.has(year)) {
-        present.set(year, []);
-      }
-      present.get(year).push(month);
+    present = datedYears(timeline);
+    const undatedMonth = timeline.months.find(month => month.key === 'undated');
+    undated.hidden = !undatedMonth;
+    if (undatedMonth) {
+      undated.title = `${undatedMonth.count.toLocaleString()} with no usable date`;
     }
     yearsList.replaceChildren(...[...present].map(([year, months]) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.year = year;
-      button.textContent = year === 'undated' ? 'Undated' : year;
-      button.title = `${months.reduce((sum, month) => sum + month.count, 0).toLocaleString()} in ${button.textContent}`;
-      button.classList.toggle('side-undated', year === 'undated');
-      // the newest month of the year, which is where its heading is
+      button.textContent = year;
+      button.title = `${months.reduce((sum, month) => sum + month.count, 0).toLocaleString()} in ${year}`;
+      // the newest month of the year
       button.onclick = () => chosen(months[0].key);
       return button;
     }));
@@ -471,7 +487,6 @@ function sideDates(yearsId, monthsId, timeline, chosen) {
   function fillMonths(year) {
     shownYear = year;
     const has = new Set((present.get(year) || []).map(month => month.key));
-    monthsGrid.hidden = year === 'undated';
     monthsGrid.replaceChildren(...NAMES.map((name, index) => {
       const key = `${year}-${String(index + 1).padStart(2, '0')}`;
       const button = document.createElement('button');
@@ -485,7 +500,17 @@ function sideDates(yearsId, monthsId, timeline, chosen) {
   }
 
   function show(month) {
-    const year = month?.key === 'undated' ? 'undated' : month?.year;
+    if (!month) {
+      return;
+    }
+    undated.toggleAttribute('aria-current', month.key === 'undated');
+    if (month.key === 'undated') {
+      for (const button of [...yearsList.children, ...monthsGrid.children]) {
+        button.removeAttribute('aria-current');
+      }
+      return;
+    }
+    const year = month.year;
     if (!year) {
       return;
     }
@@ -512,9 +537,7 @@ function sideDates(yearsId, monthsId, timeline, chosen) {
   fill();
   return {
     show,
-    refill() {
-      fill();
-    }
+    refill: fill
   };
 }
 
