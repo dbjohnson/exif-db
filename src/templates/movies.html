@@ -60,13 +60,17 @@
       let idleTimer;
       let captionTimer;
       let wasIdle = false;
+      // one at a time, so that pressing rotate quickly can't save the turns out of order
+      let savingRotation = Promise.resolve();
 
       const byId = id => document.getElementById(id);
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const monthKey = clip => clip.taken ? clip.taken.slice(0, 7) : UNDATED;
       // kept in the list either way, so that bringing one back only takes clearing this
       const gone = clip => clip.hidden || clip.deleted;
-      const posterUrl = (clip, size = 'M') => `/api/poster${encodePath(clip.path)}?size=${size}`;
+      // turned as the movie is, except for a video's own poster, which turns with the video
+      const posterUrl = (clip, size = 'M', turned = true) =>
+        `/api/poster${encodePath(clip.path)}?size=${size}${turned && clip.rotation ? `&rotate=${clip.rotation}` : ''}`;
 
       function movieUrl(clip) {
         const params = new URLSearchParams();
@@ -381,9 +385,17 @@
         wake();
       }
 
+      // the file plays as filmed, and the page turns it
+      function turnVideo(video) {
+        const rotation = clips[video.clipIndex]?.rotation || 0;
+        video.style.setProperty('--turn', `${rotation}deg`);
+        video.classList.toggle('quarter-turn', rotation % 180 !== 0);
+      }
+
       function setSource(video, index, offset = 0) {
         video.clipIndex = index;
         video.startOffset = offset;
+        turnVideo(video);
         // a media fragment rather than setting the time, which needs the movie's details first
         video.src = `${movieUrl(clips[index])}${offset > 0 ? `#t=${offset.toFixed(2)}` : ''}`;
       }
@@ -439,7 +451,7 @@
             }
           } else {
             active.preload = play ? 'auto' : 'metadata';
-            active.poster = posterUrl(clips[index], 'XL');
+            active.poster = posterUrl(clips[index], 'XL', false);
             setSource(active, index, offset);
             // what was coming next may no longer be, and would carry on downloading
             if (prepared !== -1 && prepared !== usable(index + 1, 1)) {
@@ -753,6 +765,36 @@
         );
       }
 
+      function showRotation(clip) {
+        for (const video of [active, standby]) {
+          if (clips[video.clipIndex] === clip) {
+            turnVideo(video);
+          }
+        }
+        const tile = shownTiles.get(clips.indexOf(clip));
+        const image = tile?.querySelector('img');
+        if (image) {
+          image.src = posterUrl(clip);
+        }
+        // the hover preview keeps what it showed last
+        byId('scrub-preview').querySelector('img').dataset.url = '';
+      }
+
+      function rotateCurrent() {
+        const clip = clips[current];
+        const rotation = ((clip.rotation || 0) + 90) % 360;
+        clip.rotation = rotation;
+        showRotation(clip);
+        savingRotation = savingRotation
+          .then(() => postJson('/api/movies/rotation', {id: clip.id, rotation}))
+          .catch(error => {
+            console.log(error);
+            clip.rotation = (clip.rotation + 270) % 360;
+            showRotation(clip);
+            showToast(`Couldn't rotate: ${error.message}`);
+          });
+      }
+
       async function unhide(clip) {
         try {
           await postJson('/api/movies/hidden', {id: clip.id, hidden: false});
@@ -1041,6 +1083,7 @@
             k: togglePlay,
             f: toggleFullscreen,
             m: toggleMute,
+            r: rotateCurrent,
             ArrowLeft: () => event.shiftKey ? stepClip(-1) : seekBy(-SEEK_SECS),
             ArrowRight: () => event.shiftKey ? stepClip(1) : seekBy(SEEK_SECS),
             ArrowUp: () => stepMonth(1),
@@ -1168,6 +1211,9 @@
             </button>
             <button id="delete" onclick="deleteCurrent()" title="Delete" aria-label="Delete">
               <i class="fa fa-trash-o" aria-hidden="true"></i>
+            </button>
+            <button id="rotate" onclick="rotateCurrent()" title="Rotate 90° clockwise (R)" aria-label="Rotate">
+              <i class="fa fa-rotate-right" aria-hidden="true"></i>
             </button>
             <button id="mute" onclick="toggleMute()" title="Mute (M)" aria-label="Mute">
               <i class="fa fa-volume-up" aria-hidden="true"></i>

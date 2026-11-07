@@ -2321,6 +2321,8 @@ a.movie-tile {
   overflow: hidden;
   background: #000;
   cursor: pointer;
+  /* for the size of a movie turned on its side */
+  container-type: size;
 }
 
 .movie-player:fullscreen,
@@ -2369,6 +2371,17 @@ a.movie-tile {
   height: 100%;
   object-fit: contain;
   opacity: 0;
+  transform: rotate(var(--turn, 0deg));
+}
+
+/* a quarter turn swaps the width and height it has to fit in */
+.movie-video.quarter-turn {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(var(--turn));
 }
 
 .movie-video.shown {

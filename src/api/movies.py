@@ -224,7 +224,8 @@ def clips():
     """
     _load()
     hidden = exif.hidden_movies()
-    return [{**clip, 'hidden': clip['id'] in hidden} for clip in _clips]
+    rotations = exif.movie_rotations()
+    return [{**clip, 'hidden': clip['id'] in hidden, 'rotation': rotations.get(clip['id'], 0)} for clip in _clips]
 
 
 def files_of(path):

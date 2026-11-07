@@ -791,8 +791,8 @@ async def _movie_link(request: Request, path: str):
     description = ' · '.join(part for part in (when if clip['title'] else None, place_words(path), f"{minutes}:{seconds:02d}") if part)
     poster = None
     try:
-        thumbs.video_poster(library_path(path), 'XL')
-        poster = f"/api/poster{quote(path)}?size=XL"
+        thumbs.video_poster(library_path(path), 'XL', clip['rotation'])
+        poster = f"/api/poster{quote(path)}?size=XL" + (f"&rotate={clip['rotation']}" if clip['rotation'] else '')
     except Exception:
         pass
     return share_page(
@@ -1918,6 +1918,18 @@ async def _set_movie_hidden(change: MovieHidden):
     return "saved"
 
 
+class MovieRotation(BaseModel):
+    id: str
+    rotation: Rotation
+
+
+# turned only where it's shown here: the file itself, and what a shared link plays, stay as filmed
+@app.post("/api/movies/rotation")
+async def _set_movie_rotation(change: MovieRotation):
+    exif.set_movie_rotation(change.id, change.rotation)
+    return "saved"
+
+
 @app.delete("/api/movie{path:path}")
 async def _delete_movie(path: str):
     files = movies.files_of(library_path(path))
@@ -1933,8 +1945,8 @@ async def _delete_movie(path: str):
 
 
 @app.get("/api/poster{path:path}")
-def _poster(path: str, size: Literal['M', 'XL'] = 'M'):
-    return cached_image(lambda video, _: thumbs.video_poster(video, size), path, 0)
+def _poster(path: str, size: Literal['M', 'XL'] = 'M', rotate: int = Depends(rotation_param)):
+    return cached_image(lambda video, rotation: thumbs.video_poster(video, size, rotation), path, rotate)
 
 
 # declared after /api/movies, which this would otherwise also match

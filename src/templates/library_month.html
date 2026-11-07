@@ -1955,7 +1955,7 @@
       <div class="movie-grid">
         {% for movie in movies %}
         <a class="movie-tile" href="{{ movie.url }}" aria-label="{{ movie.title or movie.path.split('/')[-1] }}">
-          <img src="/api/poster{{ movie.path | urlencode }}" loading="lazy" decoding="async" alt="" onerror="this.remove()" />
+          <img src="/api/poster{{ movie.path | urlencode }}{% if movie.rotation %}?rotate={{ movie.rotation }}{% endif %}" loading="lazy" decoding="async" alt="" onerror="this.remove()" />
           {% if movie.title %}<span class="movie-tile-label">{{ movie.title }}</span>{% endif %}
         </a>
         {% endfor %}

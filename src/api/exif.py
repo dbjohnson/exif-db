@@ -21,6 +21,8 @@ NO_LOCATION = 'none'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
 MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
+# how far each movie is turned clockwise to play upright, by movie ID
+MOVIE_ROTATIONS_CSV = '/storage/movie_rotations.csv'
 # which photos have been dealt with as duplicates, as in api/copies.py
 DUPLICATES_CSV = '/storage/duplicates.csv'
 # what each photo looks like, by path, written by scripts/find_duplicates.py
@@ -214,6 +216,19 @@ def hidden_movies():
     return {
         movie_id
         for movie_id, in db.execute("SELECT photo_id FROM movies_hidden WHERE value = ?", [HIDDEN]).fetchall()
+    }
+
+
+def set_movie_rotation(movie_id, rotation):
+    _append_log(MOVIE_ROTATIONS_CSV, [(movie_id, rotation)])
+
+
+def movie_rotations():
+    _load_log('movie_rotations', MOVIE_ROTATIONS_CSV)
+    return {
+        movie_id: int(value)
+        for movie_id, value in db.execute("SELECT photo_id, value FROM movie_rotations").fetchall()
+        if value in ('90', '180', '270')
     }
 
 

@@ -144,12 +144,14 @@ def thumbnail(path, rotation=0, at=None):
     return _cached(path, _thumb_variant(rotation), 80, make, at)
 
 
-def video_poster(path, size):
+def video_poster(path, size, rotation=0):
     # there's nothing here that can read a video, so without Synology's there's no picture
     poster = _synology_copy(path, size)
     if not poster:
         raise FileNotFoundError(path)
-    return poster
+    if not rotation:
+        return poster
+    return _cached(path, f":poster:{size}:{rotation}", 85, lambda: _rotate(Image.open(poster), rotation))
 
 
 def display(path, rotation=0, at=None):
