@@ -3596,6 +3596,12 @@ html.navigating::before {
     flex: 1 1 100%;
     justify-content: space-between;
   }
+  /* up to ten buttons, which at full width run off a 390px phone */
+  .viewer-actions button,
+  .viewer-actions .viewer-link {
+    flex: 0 1 var(--control-height);
+    min-width: 0;
+  }
   /* room for the two rows of controls under the middle of the movie */
   .movie-stage {
     min-height: 300px;
@@ -3679,6 +3685,10 @@ html.navigating::before {
   .site-nav {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+  }
+  .viewer-actions button,
+  .viewer-actions .viewer-link {
+    padding: 8px 4px;
   }
 }
 
