@@ -8,7 +8,7 @@
   <body class="library-page">
     {% include '_nav.html' %}
     <section class="library-year">
-      <h2><a class="section-back" href="/library#folders">Library</a> › Cameras <span>{{ "{:,}".format(cameras | length) }}, most photos first</span></h2>
+      <h2><a class="section-back" href="/library/folders">Folders</a> › Cameras <span>{{ "{:,}".format(cameras | length) }}, most photos first</span></h2>
       {% if not cameras %}
       <p class="library-hint">No photos yet.</p>
       {% endif %}

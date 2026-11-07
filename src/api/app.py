@@ -59,7 +59,6 @@ async def _check_static_files(request: Request, call_next):
 
 exif.load_csv()
 scans.start_scheduler()
-DEFAULT_NUM_IMAGES = int(os.getenv('DEFAULT_NUM_IMAGES', 20))
 ReviewStatus = Literal['unreviewed', 'rejected', 'reviewed']
 logger = logging.getLogger('uvicorn.error')
 # lets a browser reuse a photo instead of having the NAS read and convert it again
@@ -89,32 +88,10 @@ def page_build():
 PAGE_BUILD = page_build()
 
 
-def most_recent_date(month, day):
-    # the latest past date with this month and day; Feb 29 doesn't exist every year
-    today = datetime.date.today()
-    year = today.year
-    while True:
-        try:
-            date = datetime.date(month=month, day=day, year=year)
-            if date <= today:
-                return date
-        except ValueError:
-            pass
-        year -= 1
-
-
 def rotation_param(rotate: int = 0):
     if rotate not in (0, 90, 180, 270):
         raise HTTPException(status_code=422, detail="rotate must be 0, 90, 180 or 270")
     return rotate
-
-
-def background_url():
-    photo = exif.background_photo()
-    if photo is None:
-        return None
-    path, rotation = photo
-    return f"/api/image{quote(path)}" + (f"?rotate={rotation}" if rotation else "")
 
 
 def library_path(path):
@@ -174,35 +151,6 @@ def sample_across_years(pics, n):
     shuffled = pics.sample(frac=1)
     turn = shuffled.groupby(shuffled['DateTimeOriginal'].str[:4]).cumcount()
     return shuffled.assign(turn=turn).sort_values('turn', kind='stable').head(n).drop(columns='turn')
-
-
-def gallery(request, date, all_years, n):
-    datestring = date_filter(date, all_years)
-    counts = exif.review_counts(datestring)
-    pics = exif.select_photos(datestring)
-    if len(pics) > n:
-        pics = sample_across_years(pics, n)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="gallery.html",
-        context={
-            "picked_date": date.isoformat(),
-            "all_years": all_years,
-            "counts": counts,
-            "background": None if counts[exif.APPROVED] else background_url(),
-            "review_url": review_url(date, all_years),
-            "edit_url": review_url(date, all_years, status='reviewed'),
-            "images": pics.assign(
-                date=pics['DateTimeOriginal'].map(
-                    lambda d: d.split(' ')[0].replace(':', '/')
-                )
-            ).sort_values(
-                by='DateTimeOriginal',
-                ascending=False
-            ).to_dict(orient='records')
-        }
-    )
 
 
 @app.get("/api/ping")
@@ -363,22 +311,10 @@ async def _dump():
     )
 
 
+# On this day is gone: the library goes to any date
 @app.get("/onthisday")
-async def _onthisday(
-    request: Request,
-    month: int = -1,
-    day: int = -1,
-    year: int = None,
-    all_years: bool = True,
-    n: int = DEFAULT_NUM_IMAGES
-):
-    if min(month, day) <= 0:
-        date = datetime.date.today()
-    elif year:
-        date = datetime.date(month=month, day=day, year=year)
-    else:
-        date = most_recent_date(month, day)
-    return gallery(request, date, all_years, n)
+async def _onthisday():
+    return RedirectResponse(url="/library")
 
 
 class ReviewDecisions(BaseModel):
@@ -485,12 +421,7 @@ async def _review(
         scope = f"{date:%B} {date.day}" + ("" if all_years else f", {date.year}")
         if recent_days:
             scope += f" and the past {recent_days} days"
-        done_url = "/onthisday?" + urlencode({
-            'year': date.year,
-            'month': date.month,
-            'day': date.day,
-            'all_years': str(all_years).lower()
-        })
+        done_url = "/library?" + urlencode({'date': f"{date:%Y-%m}"})
     if kiosk is not None:
         done_url = f"/kiosk?{kiosk}" if kiosk else "/kiosk"
     return templates.TemplateResponse(
@@ -511,25 +442,6 @@ async def _review(
     )
 
 
-def library_query(with_faces):
-    return '?with_faces=true' if with_faces else ''
-
-
-def library_url(month, with_faces):
-    return '/library/' + (month.replace(':', '/') if month else 'undated') + library_query(with_faces)
-
-
-def library_tile(entry, with_faces):
-    # an entry from exif.library_months, with what the page shows for it
-    year, number = entry['month'].split(':') if entry['month'] else (None, None)
-    return {
-        **entry,
-        'year': year,
-        'name': datetime.date(2000, int(number), 1).strftime('%B') if number else 'Undated',
-        'url': library_url(entry['month'], with_faces)
-    }
-
-
 def screenshots_tile():
     photos = exif.screenshots()
     if not photos:
@@ -537,7 +449,7 @@ def screenshots_tile():
     return {'name': 'Screenshots', 'photos': len(photos), 'cover': photos[0], 'url': '/screenshots'}
 
 
-def folder_tiles(with_faces, binned):
+def folder_tiles(binned):
     """
     The library's virtual folders, which gather photos from every month.  These show even when
     empty, so that it's clear where to look
@@ -550,8 +462,7 @@ def folder_tiles(with_faces, binned):
         tile('Hidden', '/library/hidden', exif.hidden_photos(), 'fa-eye-slash'),
         {**tile('Recycle bin', '/library/recycle-bin', binned, 'fa-trash-o'), 'trash': True}
     ]
-    # not with faces, as nobody wants a screenshot for its faces
-    screenshots = None if with_faces else screenshots_tile()
+    screenshots = screenshots_tile()
     cameras = exif.cameras()
     tiles.append({
         'name': 'Cameras',
@@ -569,15 +480,6 @@ def folder_tiles(with_faces, binned):
 
 def tag_url(name):
     return f"/library/tags/{quote(name, safe='')}"
-
-
-def library_years(tiles):
-    dated = (tile for tile in tiles if tile['year'])
-    years = []
-    for year, group in itertools.groupby(dated, key=lambda tile: tile['year']):
-        months = list(group)
-        years.append({'year': year, 'months': months, 'photos': sum(tile['photos'] for tile in months)})
-    return years
 
 
 def folder_date(path, dated_folders):
@@ -650,97 +552,192 @@ def undated_photo(photo, dated_folders):
     }
 
 
-def library_month_photos(month, with_faces):
-    photos = exif.library_photos(month, with_faces)
-    if month is None:
-        dated_folders = exif.dated_folders()
-        by_folder = sorted((undated_photo(photo, dated_folders) for photo in photos), key=lambda photo: photo['day'])
-        # newest first like everything else, by what a folder's name suggests; those with no date go last
-        return sorted(by_folder, key=lambda photo: (photo['suggested'] or {}).get('date', ''), reverse=True)
-    return list(map(library_photo, photos))
+def undated_photos(photos):
+    # by folder, newest first by what a folder's name suggests, and those with no date last
+    dated_folders = exif.dated_folders()
+    by_folder = sorted((undated_photo(photo, dated_folders) for photo in photos), key=lambda photo: photo['day'])
+    return sorted(by_folder, key=lambda photo: (photo['suggested'] or {}).get('date', ''), reverse=True)
 
 
-def library_month_page(request, month, title, with_faces):
-    months = [entry['month'] for entry in exif.library_months(with_faces)]
-    # a month can empty out while its page is open, such as by deleting everything in it
-    if month not in months:
-        return RedirectResponse(url=f"/library{library_query(with_faces)}")
-    position = months.index(month)
+# ---- the timeline: every list of photos, newest first, a month at a time as it's scrolled to
+
+# what a timeline can be narrowed to, as query parameters.  camera is there for a camera's photos,
+# as "No camera" has no make or model to go by
+TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make', 'model', 'folder')
+UNDATED_KEY = 'undated'
+
+
+def timeline_filters(query):
+    return {key: query[key] for key in TIMELINE_FILTERS if query.get(key)}
+
+
+def timeline_spec(filters):
+    """
+    What filters pick out of the library, as SQL for exif's timeline queries, its parameters, and
+    whether it's hidden photos that are wanted
+    """
+    where, params, hidden = [], [], False
+    by_id = "photo_id IN (SELECT UNNEST(?::VARCHAR[]))"
+    if filters.get('tag'):
+        where.append(by_id)
+        params.append(tags.photo_ids(filters['tag']))
+    if filters.get('person'):
+        update_hidden_faces()
+        where.append(by_id)
+        params.append(people.person_photo_ids(filters['person']))
+    if filters.get('place_kind') and filters.get('place_key'):
+        where.append("SourceFile IN (SELECT UNNEST(?::VARCHAR[]))")
+        params.append(list(places.paths_at(filters['place_kind'], filters['place_key'])))
+    if filters.get('camera'):
+        where.append(f"{exif.CAMERA_MAKE} IS NOT DISTINCT FROM ? AND {exif.CAMERA_MODEL} IS NOT DISTINCT FROM ?")
+        params += [filters.get('make') or None, filters.get('model') or None]
+    folder = filters.get('folder')
+    if folder == 'favorites':
+        where.append('favorite')
+    elif folder == 'hidden':
+        clause, values = exif.hidden_filter()
+        where.append(clause)
+        params += values
+        hidden = True
+    elif folder == 'screenshots':
+        where.append(exif.screenshot_filter() or 'false')
+    return ' AND '.join(f'({clause})' for clause in where) or 'true', params, hidden
+
+
+def timeline_month_key(taken):
+    # which month of a timeline a photo with this date is in
+    dated = re.match(r'(\d{4}):(0[1-9]|1[0-2]):', taken or '')
+    return f"{dated[1]}-{dated[2]}" if dated and int(dated[1]) >= exif.LIBRARY_EARLIEST_YEAR else UNDATED_KEY
+
+
+def timeline_months(filters):
+    """
+    The months a timeline has, newest first and undated last, as the page lays them out before
+    any of their photos have loaded
+    """
+    months = []
+    for entry in exif.timeline_months(*timeline_spec(filters)):
+        month = entry['month']
+        if month:
+            first = datetime.date(int(month[:4]), int(month[5:7]), 1)
+            months.append({'key': f"{month[:4]}-{month[5:7]}", 'label': f"{first:%B %Y}", 'year': month[:4], 'count': entry['photos'], 'days': entry['days']})
+        else:
+            months.append({'key': UNDATED_KEY, 'label': 'Undated', 'year': None, 'count': entry['photos'], 'days': entry['days']})
+    return months
+
+
+def timeline_month_photos(key, filters):
+    if key != UNDATED_KEY and not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', key):
+        raise HTTPException(status_code=422, detail="A month is YYYY-MM, or undated")
+    month = None if key == UNDATED_KEY else key.replace('-', ':')
+    photos = exif.timeline_photos(month, *timeline_spec(filters))
+    return undated_photos(photos) if month is None else list(map(library_photo, photos))
+
+
+def timeline_page(request, title, filters, empty_hint=None, **context):
+    """
+    A list of photos from anywhere in the library, newest first, filled in a month at a time as it's
+    scrolled to.  filters are what it's narrowed to, which the page also asks for each month by
+    """
+    months = timeline_months(filters)
     return templates.TemplateResponse(
         request=request,
         name="library_month.html",
         context={
             "title": title,
-            "dated": month is not None,
-            "with_faces": with_faces,
-            "faces_checked": exif.face_counts()['checked'],
-            "back_url": f"/library{library_query(with_faces)}",
-            "back_label": "Library",
-            "other_filter_url": library_url(month, not with_faces),
-            "month": month.replace(':', '-') if month else None,
+            "months": months,
+            "filters": filters,
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
-            "photos": library_month_photos(month, with_faces),
             "known_names": people.known_names(),
-            "newer_url": library_url(months[position - 1], with_faces) if position else None,
-            "older_url": library_url(months[position + 1], with_faces) if position + 1 < len(months) else None,
-            # what scrolling off the end carries on into: not undated photos, which go by folder
-            "next_url": library_url(months[position + 1], with_faces) if month and position + 1 < len(months) and months[position + 1] else None
+            **({"hint": empty_hint} if not months and empty_hint else {}),
+            **context
         }
     )
+
+
+@app.get("/api/timeline")
+async def _timeline_month(request: Request, month: str):
+    return timeline_month_photos(month, timeline_filters(request.query_params))
+
+
+# after a change of date, which can move photos into a month the page didn't have
+@app.get("/api/timeline/months")
+async def _timeline_months(request: Request):
+    return timeline_months(timeline_filters(request.query_params))
 
 
 @app.get("/library")
-async def _library(request: Request, with_faces: bool = False):
-    tiles = [library_tile(entry, with_faces) for entry in exif.library_months(with_faces)]
-    return templates.TemplateResponse(
-        request=request,
-        name="library.html",
-        context={
-            "total": sum(tile['photos'] for tile in tiles),
-            "with_faces": with_faces,
-            "years": library_years(tiles),
-            "undated": next((tile for tile in tiles if not tile['year']), None),
-            "folders": folder_tiles(with_faces, await trash_photos())
-        }
+async def _library(request: Request, tag: str = None, person: str = None, place_kind: str = None, place_key: str = None):
+    place = places.describe(place_kind, place_key) if place_kind and place_key else None
+    filters = {
+        key: value
+        for key, value in (('tag', tag), ('person', person), ('place_kind', place and place_kind), ('place_key', place and place_key))
+        if value
+    }
+    return timeline_page(
+        request,
+        "Library",
+        filters,
+        empty_hint="Nothing matches these filters." if filters else "No photos yet.",
+        filtering=True,
+        place=place,
+        tag_names_shown=tags.names(),
+        person=None,
+        filter_person=person,
+        filter_tag=tag
     )
 
 
+@app.get("/library/folders")
+async def _folders(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="library.html",
+        context={"folders": folder_tiles(await trash_photos())}
+    )
+
+
+# where the month pages used to be, for anything that still links to one
+@app.get("/library/undated")
+async def _library_undated():
+    return RedirectResponse(url=f"/library?date={UNDATED_KEY}")
+
+
+@app.get("/library/{year}/{month}")
+async def _library_month(year: int, month: int):
+    return RedirectResponse(url=f"/library?date={year:04d}-{month:02d}" if 1 <= month <= 12 else "/library")
+
+
 @app.get("/library/favorites")
-async def _favorites(request: Request, year: str = None):
-    photos = exif.favorites()
-    return photos_by_year_page(
+async def _favorites(request: Request):
+    return timeline_page(
         request,
         "Favorites",
-        photos,
-        "/library/favorites",
-        year,
-        back_url="/library",
-        back_label="Library",
-        folder='favorites',
-        hint=None if photos else "No favorites yet. The heart on a photo adds it here."
+        {'folder': 'favorites'},
+        empty_hint="No favorites yet. The heart on a photo adds it here.",
+        back_url="/library/folders",
+        back_label="Folders",
+        folder='favorites'
     )
 
 
 @app.get("/library/tags/{name}")
-async def _tag(request: Request, name: str, year: str = None):
+async def _tag(request: Request, name: str):
     if not tags.exists(name):
-        return RedirectResponse(url='/library#folders')
-    photos = exif.photos_with_ids(tags.photo_ids(name))
-    return photos_by_year_page(
+        return RedirectResponse(url='/library/folders')
+    return timeline_page(
         request,
         name,
-        photos,
-        tag_url(name),
-        year,
-        back_url="/library#folders",
-        back_label="Library",
-        folder='tag',
-        tag=name,
-        hint=None if photos else (
+        {'tag': name},
+        empty_hint=(
             "No photos have this tag yet. To add some, open a photo and press the tag button, or "
-            "select photos in any month and use Tag."
-        )
+            "select photos and use Tag."
+        ),
+        back_url="/library/folders",
+        back_label="Folders",
+        folder='tag',
+        tag=name
     )
 
 
@@ -777,17 +774,14 @@ async def _cameras(request: Request):
 
 
 @app.get("/library/camera")
-async def _camera(request: Request, make: str = None, model: str = None, year: str = None):
-    photos = exif.camera_photos(make or None, model or None)
-    if not photos:
+async def _camera(request: Request, make: str = None, model: str = None):
+    filters = {'camera': '1', **({'make': make} if make else {}), **({'model': model} if model else {})}
+    if not timeline_months(filters):
         return RedirectResponse(url='/library/cameras')
-    name = camera_name(make, model)
-    return photos_by_year_page(
+    return timeline_page(
         request,
-        name,
-        photos,
-        info.camera_url(make, model),
-        year,
+        camera_name(make, model),
+        filters,
         back_url="/library/cameras",
         back_label="Cameras",
         hint="Photos with no camera in their details, such as screenshots, scans and saved pictures." if not make and not model else None
@@ -795,22 +789,20 @@ async def _camera(request: Request, make: str = None, model: str = None, year: s
 
 
 @app.get("/library/hidden")
-async def _hidden(request: Request, year: str = None):
-    photos = exif.hidden_photos()
-    return photos_by_year_page(
+async def _hidden(request: Request):
+    return timeline_page(
         request,
         "Hidden",
-        photos,
-        "/library/hidden",
-        year,
-        back_url="/library",
-        back_label="Library",
+        {'folder': 'hidden'},
+        empty_hint="Nothing is hidden. Copies hidden as duplicates are on the Duplicates page.",
+        back_url="/library/folders",
+        back_label="Folders",
         folder='hidden',
         hint=(
             "Photos hidden from the library or left unchecked in the review queue. Unhiding one "
             "puts it back in the library, unreviewed. Copies hidden as duplicates are on the "
             "Duplicates page."
-        ) if photos else "Nothing is hidden. Copies hidden as duplicates are on the Duplicates page."
+        )
     )
 
 
@@ -859,17 +851,13 @@ async def _recycle_bin(request: Request):
         name="library_month.html",
         context={
             "title": "Recycle bin",
-            "dated": True,
-            "month": None,
-            "with_faces": False,
-            "faces_checked": 0,
-            "back_url": "/library",
-            "back_label": "Library",
-            "folder": 'trash',
+            # one list, laid out by the day each was deleted, with nothing to load
+            "months": [{'key': 'bin', 'label': None, 'year': None, 'count': len(photos), 'days': 0}] if photos else [],
             "photos": photos,
-            "newer_url": None,
-            "older_url": None,
-            "next_url": None,
+            "filters": {},
+            "back_url": "/library/folders",
+            "back_label": "Folders",
+            "folder": 'trash',
             "hint": (
                 "Deleted photos stay here until they're deleted again from here or the trash is "
                 "emptied from Manage. Deleting from here can't be undone."
@@ -879,38 +867,20 @@ async def _recycle_bin(request: Request):
 
 
 @app.get("/screenshots")
-async def _screenshots(request: Request, year: str = None):
-    photos = exif.screenshots()
-    return photos_by_year_page(
+async def _screenshots(request: Request):
+    return timeline_page(
         request,
         "Screenshots",
-        photos or [],
-        "/screenshots",
-        year,
-        back_url="/library",
-        back_label="Library",
-        # or another copy, such as one in a different backup folder, would take its place
-        delete_every_copy=True,
-        hint=(
+        {'folder': 'screenshots'},
+        empty_hint=(
             "Screenshots show up here after the next scan, which reads every photo again to find them."
-            if photos is None else
-            None if photos else "No screenshots."
-        )
+            if exif.screenshot_filter() is None else "No screenshots."
+        ),
+        back_url="/library/folders",
+        back_label="Folders",
+        # or another copy, such as one in a different backup folder, would take its place
+        delete_every_copy=True
     )
-
-
-@app.get("/library/undated")
-async def _library_undated(request: Request, with_faces: bool = False):
-    return library_month_page(request, None, "Undated", with_faces)
-
-
-@app.get("/library/{year}/{month}")
-async def _library_month(request: Request, year: int, month: int, with_faces: bool = False):
-    try:
-        title = f"{datetime.date(year, month, 1):%B} {year}"
-    except ValueError:
-        return RedirectResponse(url=f"/library{library_query(with_faces)}")
-    return library_month_page(request, f"{year:04d}:{month:02d}", title, with_faces)
 
 
 def check_photos_after_scan():
@@ -1278,60 +1248,14 @@ async def _person_faces(request: Request, name: str, year: str = None, page: int
     )
 
 
-def photos_by_year_page(request, title, photos, url, year, **context):
-    """
-    A page of photos from anywhere in the library, one year at a time, as a person can be in tens of
-    thousands of them
-    """
-    by_year = {}
-    for photo in photos:
-        by_year.setdefault(photo_year(photo), []).append(photo)
-    years = years_newest_first(by_year)
-    shown_year = year if year in by_year else years[0] if years else None
-    year_url = lambda key: f"{url}{'&' if '?' in url else '?'}year={key}"
-    following = years[years.index(shown_year) + 1:] if shown_year else []
-    return templates.TemplateResponse(
-        request=request,
-        name="library_month.html",
-        context={
-            "title": title,
-            "dated": True,
-            "month": None,
-            "keeps_redated_photos": True,
-            "with_faces": False,
-            "faces_checked": 0,
-            "years_rail": [
-                {'year': key, 'photos': len(by_year[key]), 'url': year_url(key)}
-                for key in years
-            ],
-            "shown_year": shown_year,
-            "next_url": year_url(following[0]) if following else None,
-            "known_names": people.known_names(),
-            "today": datetime.date.today().isoformat(),
-            "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
-            "photos": [
-                {**library_photo(photo), 'day': month_heading(photo)}
-                for photo in sorted(by_year.get(shown_year, []), key=lambda photo: photo['taken'], reverse=True)
-            ],
-            "newer_url": None,
-            "older_url": None,
-            **context
-        }
-    )
-
-
 @app.get("/people/{name}")
-async def _person(request: Request, name: str, year: str = None):
-    update_hidden_faces()
-    photos = exif.photos_with_ids(people.person_photo_ids(name))
-    if not photos:
+async def _person(request: Request, name: str):
+    if not timeline_months({'person': name}):
         return RedirectResponse(url='/people')
-    return photos_by_year_page(
+    return timeline_page(
         request,
         name,
-        photos,
-        f"/people/{quote(name)}",
-        year,
+        {'person': name},
         back_url="/people",
         back_label="People",
         faces_url=f"/people/{quote(name)}/faces",
@@ -1456,7 +1380,7 @@ async def _map_area(key: str):
         'photos': len(photos),
         'movies': len(clips),
         'shown_photos': [
-            {'id': photo['id'], 'path': photo['path'], 'rotation': photo['rotation'], 'year': photo_year(photo)}
+            {'id': photo['id'], 'path': photo['path'], 'rotation': photo['rotation'], 'month': timeline_month_key(photo['taken'])}
             for photo in photos[:places.AREA_PHOTOS]
         ],
         'shown_movies': [{'path': clip['path'], 'title': clip.get('title')} for clip in clips[:places.AREA_MOVIES]]
@@ -1464,17 +1388,15 @@ async def _map_area(key: str):
 
 
 @app.get("/places/photos")
-async def _place_photos(request: Request, kind: str, key: str, year: str = None):
+async def _place_photos(request: Request, kind: str, key: str):
     place = places.describe(kind, key)
     if place is None:
         return RedirectResponse(url='/places')
     paths = places.paths_at(kind, key)
-    return photos_by_year_page(
+    return timeline_page(
         request,
         place['label'],
-        exif.photos_with_paths(paths),
-        f"/places/photos?{urlencode({'kind': kind, 'key': key})}",
-        year,
+        {'place_kind': kind, 'place_key': key},
         back_url="/places/map" if kind == places.AREA else "/places",
         back_label="Map" if kind == places.AREA else "Places",
         # a named place can be renamed, made bigger or smaller, or have its name taken away
@@ -1506,14 +1428,6 @@ UNDATED_YEAR = 'Undated'
 def photo_year(photo):
     year = (photo['taken'] or '')[:4]
     return year if year.isdigit() and int(year) >= exif.LIBRARY_EARLIEST_YEAR else UNDATED_YEAR
-
-
-def month_heading(photo):
-    # a person's photos can span years, so days would make for a very long page
-    try:
-        return f"{datetime.datetime.strptime(photo['taken'][:7], '%Y:%m'):%B %Y}"
-    except ValueError:
-        return 'Undated'
 
 
 def clean_name(name):
@@ -1828,14 +1742,37 @@ async def _stop_faces():
     return "stopping"
 
 
+def movie_filters(tag, place_kind, place_key):
+    # as the library's, with no people, as nobody's found in movies
+    place = places.describe(place_kind, place_key) if place_kind and place_key else None
+    return {
+        key: value
+        for key, value in (('tag', tag), ('place_kind', place and place_kind), ('place_key', place and place_key))
+        if value
+    }, place
+
+
 @app.get("/movies")
-async def _movies_page(request: Request):
-    return templates.TemplateResponse(request=request, name="movies.html")
+async def _movies_page(request: Request, tag: str = None, place_kind: str = None, place_key: str = None):
+    filters, place = movie_filters(tag, place_kind, place_key)
+    return templates.TemplateResponse(
+        request=request,
+        name="movies.html",
+        context={"filters": filters, "place": place, "filter_tag": tag, "tag_names_shown": tags.names()}
+    )
 
 
 @app.get("/api/movies")
-async def _movies():
-    return movies.clips()
+async def _movies(tag: str = None, place_kind: str = None, place_key: str = None):
+    filters, _ = movie_filters(tag, place_kind, place_key)
+    clips = movies.clips()
+    if filters.get('tag'):
+        tagged = set(tags.photo_ids(filters['tag']))
+        clips = [clip for clip in clips if clip['id'] in tagged]
+    if filters.get('place_kind'):
+        located = places.paths_at(filters['place_kind'], filters['place_key'])
+        clips = [clip for clip in clips if clip['path'] in located]
+    return clips
 
 
 class MovieHidden(BaseModel):

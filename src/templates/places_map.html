@@ -42,7 +42,7 @@
       function photoTile(photo, area) {
         const tile = document.createElement('a');
         tile.className = 'library-tile';
-        tile.href = `/places/photos?${new URLSearchParams({kind: 'area', key: area, year: photo.year, open: photo.id})}`;
+        tile.href = `/places/photos?${new URLSearchParams({kind: 'area', key: area, date: photo.month, open: photo.id})}`;
         const image = document.createElement('img');
         image.alt = '';
         image.loading = 'lazy';

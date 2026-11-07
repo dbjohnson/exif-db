@@ -106,7 +106,7 @@
       let reviewedPhotos = 0;
 
       function resetApprovals() {
-        if (confirm(`Reset all ${reviewedPhotos.toLocaleString()} reviewed photos to unreviewed? Nothing will show in the gallery, and the kiosk will only show photos from the past few days, until photos are reviewed again. Favorites are kept.`)) {
+        if (confirm(`Reset all ${reviewedPhotos.toLocaleString()} reviewed photos to unreviewed? The kiosk will only show photos from the past few days, until photos are reviewed again. Favorites are kept.`)) {
           send('/api/review', 'DELETE');
         }
       }

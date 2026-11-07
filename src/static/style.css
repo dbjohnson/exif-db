@@ -196,6 +196,9 @@ button:disabled {
 .select-bar input[type="date"],
 .select-bar select,
 .person-edit select,
+.date-jump select,
+.library-filters select,
+.library-filters input[type="text"],
 .info-editor select,
 .manage select,
 .manage input[type="time"],
@@ -212,12 +215,140 @@ button:disabled {
 }
 
 .site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   justify-content: center;
   gap: 4px;
   box-sizing: border-box;
   width: 100%;
   padding: 8px;
+  background: var(--bg);
+}
+
+/* the site's links and a page's own controls, which stay at the top together */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--bg);
+}
+
+.app-header .site-nav,
+.app-header .library-month-header,
+.app-header ~ .year-rail {
+  position: static;
+}
+
+/* ---- the timeline of photos or movies, from timeline.js */
+
+.timeline-year {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 28px 0 4px;
+  font-size: 26px;
+  font-weight: normal;
+}
+
+.timeline-month-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 18px 0 0;
+  font-size: 18px;
+  font-weight: normal;
+}
+
+.timeline-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.timeline-year .group-action,
+.timeline-month-heading .group-action {
+  align-self: center;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+/* margins stay inside, so that a month's height is all the room it takes, which keeping the view
+   still while months above fill in goes by */
+.timeline-month,
+.timeline-body {
+  display: flow-root;
+}
+
+.timeline-month[hidden],
+.timeline-year[hidden] {
+  display: none;
+}
+
+.movie-tags {
+  padding: 0 var(--page-margin);
+}
+
+.date-jump {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.date-jump select[hidden] {
+  display: none;
+}
+
+.app-header .library-month-header {
+  justify-content: space-between;
+}
+
+/* what a list is, under the header and scrolling away with the page */
+.library-title {
+  padding: 4px var(--page-margin) 0;
+}
+
+.library-title #summary {
+  margin: 4px 0 8px;
+  color: var(--text-strong);
+  font-size: 22px;
+  font-weight: normal;
+  text-align: left;
+}
+
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-bottom: 4px;
+}
+
+.library-filters select,
+.library-filters input[type="text"] {
+  flex: 0 1 220px;
+  min-width: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  padding-left: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.filter-chip button {
+  align-self: stretch;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
 }
 
 .site-nav a {
@@ -3142,6 +3273,19 @@ html.navigating::before {
   }
   .month-steps:has(> :nth-child(3)) > * {
     padding: 0 8px;
+  }
+  .date-jump select {
+    padding: 0 4px;
+  }
+  /* the sticky row stays one row where it can, with the date first */
+  .app-header .month-steps,
+  .app-header .month-steps:has(> :nth-child(3)) {
+    flex: 0 1 auto;
+    justify-content: flex-end;
+  }
+  .library-filters select,
+  .library-filters input[type="text"] {
+    flex: 1 1 140px;
   }
   .viewer-actions {
     flex: 1 1 100%;

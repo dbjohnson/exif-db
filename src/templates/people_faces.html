@@ -264,6 +264,8 @@
       </button>
     </div>
     {% endmacro %}
+    <header class="app-header">
+    {% include '_nav.html' %}
     <div class="library-month-header">
       <a href="{{ photos_url or '/people' }}">‹ {{ 'Photos' if photos_url else 'People' }}</a>
       <span id="summary">{{ title }} · <span id="count"></span></span>
@@ -272,6 +274,7 @@
         <button onclick="toggleAll()">Select all</button>
       </span>
     </div>
+    </header>
     {% if name %}{% set person = name %}{% include '_person_edit.html' %}{% endif %}
     {% if years_rail %}
     <nav class="year-rail" aria-label="Years">

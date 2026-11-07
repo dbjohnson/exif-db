@@ -39,7 +39,7 @@ async function deleteTag(button, name) {
   }
   try {
     const {previous} = await postJson('/api/tags/delete', {name});
-    leaveWithTagUndo('/library#folders', `Deleted the tag ${name}`, previous, tagUrl(name));
+    leaveWithTagUndo('/library/folders', `Deleted the tag ${name}`, previous, tagUrl(name));
   } catch (error) {
     showToast(`Couldn't delete: ${error.message}`);
   }

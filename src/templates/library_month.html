@@ -7,24 +7,22 @@
     <script src="/static/toast.js"></script>
     <script src="/static/faces.js"></script>
     <script src="/static/info.js"></script>
+    <script src="/static/timeline.js"></script>
     {% if person %}<script src="/static/people.js"></script>{% endif %}
     <script src="/static/tags.js"></script>
     {% if place_label %}<script src="/static/labels.js"></script>{% endif %}
     <script>
-      const PHOTOS = {{ photos | tojson }};
+      // the months there are, newest first, which fill in as they're scrolled to
+      const MONTHS = {{ months | tojson }};
+      // a list with nothing to load, such as the recycle bin, or null
+      const PRELOADED_PHOTOS = {{ (photos or none) | tojson }};
+      // what this list is narrowed to, which each month is asked for by
+      const FILTERS = {{ filters | tojson }};
       // whose page this is, or null
       const PERSON = {{ (person or none) | tojson }};
       const TITLE = {{ title | tojson }};
-      // on a page going through someone's or somewhere's photos a year at a time
-      const YEAR = {{ (shown_year or none) | tojson }};
-      // what to carry on into at the end of this page
-      const NEXT_URL = {{ (next_url or none) | tojson }};
       // whether deleting takes every copy of a photo, rather than letting another take its place
       const DELETE_EVERY_COPY = {{ (delete_every_copy or false) | tojson }};
-      // this page's "YYYY-MM", or null for undated photos
-      const MONTH = {{ month | tojson }};
-      // a page not organized by date still shows a photo once its date has changed
-      const KEEPS_REDATED_PHOTOS = {{ (keeps_redated_photos or false) | tojson }};
       // which of the library's virtual folders this is, if one: 'favorites', 'hidden' or 'trash'
       const FOLDER = {{ (folder or none) | tojson }};
       const IN_TRASH = FOLDER === 'trash';
@@ -51,7 +49,7 @@
       const photoFaces = new Map();
       const photoTags = new Map();
 
-      const shown = () => PHOTOS.filter(photo => !photo.removed);
+      const shown = () => loadedPhotos().filter(photo => !photo.removed);
       const fileName = photo => photo.path.split('/').pop();
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const photoUrl = (api, photo) =>
@@ -174,7 +172,7 @@
         heading.append(label);
 
         const selectAll = document.createElement('button');
-        selectAll.className = `group-action select-group${MONTH ? " day-only" : ""}`;
+        selectAll.className = 'group-action select-group';
         selectAll.textContent = 'Select all';
         selectAll.onclick = () => pickGroup(group);
         heading.append(selectAll);
@@ -195,169 +193,221 @@
         return section;
       }
 
-      function addGroups(photos) {
+      // ---- the timeline, a month at a time as it's scrolled to
+
+      const UNDATED = 'undated';
+      // each loaded month's photos, by its key
+      const monthPhotos = new Map();
+      let timeline = null;
+      let dateJumper = null;
+      let showingKey = null;
+
+      const filterQuery = (extra = {}) => new URLSearchParams({...FILTERS, ...extra});
+
+      // which month a date as the index has it, "YYYY:MM:DD HH:MM:SS", belongs in
+      function monthOf(taken) {
+        const dated = /^\d{4}:(0[1-9]|1[0-2]):/.test(taken || '') && taken.slice(0, 4) >= String(EARLIEST_YEAR);
+        return dated ? taken.slice(0, 7).replace(':', '-') : UNDATED;
+      }
+
+      async function loadMonth(month) {
+        let photos;
+        if (PRELOADED_PHOTOS) {
+          photos = PRELOADED_PHOTOS;
+        } else {
+          const response = await fetch(`/api/timeline?${filterQuery({month: month.key})}`);
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          photos = await response.json();
+        }
+        // a month loaded again has new photos, which take over from the old ones in the selection
+        for (const photo of monthPhotos.get(month.key) || []) {
+          selected.delete(photo);
+        }
+        photos.forEach(photo => photo.month = month.key);
+        monthPhotos.set(month.key, photos);
+        return photos;
+      }
+
+      function renderMonth(month, photos) {
+        const content = document.createElement('div');
+        // a month loaded again leaves its old days behind
+        for (let index = groups.length - 1; index >= 0; index--) {
+          if (groups[index].month === month.key) {
+            groups.splice(index, 1);
+          }
+        }
+        if (month.key === UNDATED) {
+          const hint = document.createElement('p');
+          hint.className = 'library-hint';
+          hint.textContent = "These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.";
+          content.append(hint);
+        }
         const added = [];
         for (const photo of photos) {
           const group = added[added.length - 1];
           if (group && group.name === photo.day) {
             group.photos.push(photo);
           } else {
-            added.push({name: photo.day, suggested: photo.suggested, photos: [photo]});
+            added.push({name: photo.day, suggested: photo.suggested, photos: [photo], month: month.key});
           }
         }
         groups.push(...added);
-        document.getElementById('days').append(...added.map(renderGroup));
+        content.append(...added.map(renderGroup));
+        // the viewer goes on to whatever's loaded now
+        if (current) {
+          current = monthPhotos.get(current.month)?.find(photo => photo.id === current.id) || current;
+          renderViewerDetails();
+        }
+        requestAnimationFrame(renderCount);
+        return content;
       }
 
-      function renderGrid() {
-        addGroups(PHOTOS);
-        sections.push({
-          title: TITLE,
-          year: YEAR,
-          url: window.location.pathname + window.location.search,
-          older: document.getElementById('older-link').getAttribute('href'),
-          newer: document.getElementById('newer-link').getAttribute('href'),
-          filter: document.getElementById('filter-link')?.getAttribute('href'),
-          photos: PHOTOS.slice(),
-          heading: null
-        });
-        renderCount();
-        watchForMore();
+      // every photo loaded so far, in order
+      function loadedPhotos() {
+        return (timeline ? timeline.months : []).flatMap(month => monthPhotos.get(month.key) || []);
       }
 
-      // ---- carrying on into the next month or year at the end of the page
-
-      // what's been loaded here so far, one for each page's worth
-      const sections = [];
-      let showing = 0;
-      let nextUrl = NEXT_URL;
-      let loadingMore = false;
-      let moreWatcher = null;
-
-      function jsonIn(html, name) {
-        const found = html.match(new RegExp(`const ${name} = (.*);\\n`));
-        return found ? JSON.parse(found[1]) : null;
+      async function selectMonths(keys) {
+        const many = keys.length > 1;
+        if (many) {
+          showToast('Loading…');
+        }
+        await Promise.all(keys.map(key => timeline.ensure(key)));
+        if (many) {
+          hideToast();
+        }
+        selecting = true;
+        pickAll(keys.flatMap(key => monthPhotos.get(key) || []));
       }
 
-      async function loadMore() {
-        if (loadingMore || !nextUrl) {
+      // a list too long to have loaded all at once is better chosen a year or a month at a time
+      const SELECT_ALL_MAX = 3000;
+
+      function selectEverything() {
+        const total = timeline.months.reduce((sum, month) => sum + month.count, 0);
+        if (total > SELECT_ALL_MAX) {
+          showToast(`That's ${plural(total, 'photo')}: select a year or a month at a time`);
           return;
         }
-        loadingMore = true;
-        const more = document.getElementById('more');
-        const url = nextUrl;
-        more.textContent = 'Loading…';
+        selectMonths(timeline.months.map(month => month.key));
+      }
+
+      function monthActions(month, heading) {
+        const button = document.createElement('button');
+        button.className = 'group-action';
+        button.textContent = 'Select month';
+        button.onclick = () => selectMonths([month.key]);
+        heading.append(button);
+      }
+
+      function yearActions(year, heading) {
+        const button = document.createElement('button');
+        button.className = 'group-action';
+        button.textContent = 'Select year';
+        button.onclick = () => selectMonths(timeline.months.filter(month => month.year === year).map(month => month.key));
+        heading.append(button);
+      }
+
+      // the nearest month there is to one asked for, as a list filtered by something may not have it
+      function nearestMonth(key) {
+        if (!timeline.months.length) {
+          return null;
+        }
+        if (key === UNDATED) {
+          return timeline.months[timeline.months.length - 1].key;
+        }
+        return (timeline.months.find(month => month.key !== UNDATED && month.key <= key) || timeline.months[timeline.months.length - 1]).key;
+      }
+
+      function goTo(key) {
+        const found = nearestMonth(key);
+        if (found) {
+          timeline.scrollTo(found);
+        }
+      }
+
+      // the address and the date chosen follow along, so that reloading stays in the same place
+      function noteShowing() {
+        const month = timeline.showing();
+        if (!month || month.key === showingKey) {
+          return;
+        }
+        showingKey = month.key;
+        dateJumper?.show(month);
+        if (!PRELOADED_PHOTOS) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('date', month.key);
+          history.replaceState(history.state, '', url);
+        }
+      }
+
+      // after photos' dates have changed: the months they've left, and those they've gone to
+      async function refreshDates(photos, to) {
+        const from = new Set(photos.map(photo => photo.month));
         try {
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error('Status: ' + response.status);
+          const response = await fetch(`/api/timeline/months?${filterQuery()}`);
+          if (response.ok) {
+            timeline.setMonths(await response.json());
+            dateJumper?.refill();
           }
-          const html = await response.text();
-          const photos = jsonIn(html, 'PHOTOS');
-          // a month that's been emptied sends this to the library page, which has none
-          nextUrl = jsonIn(html, 'NEXT_URL');
-          if (photos) {
-            const page = new DOMParser().parseFromString(html, 'text/html');
-            const title = jsonIn(html, 'TITLE');
-            const year = jsonIn(html, 'YEAR');
-            const heading = document.createElement('h2');
-            heading.className = 'library-section';
-            heading.textContent = year || title;
-            document.getElementById('days').append(heading);
-            PHOTOS.push(...photos);
-            addGroups(photos);
-            sections.push({
-              title,
-              year,
-              url,
-              older: page.getElementById('older-link')?.getAttribute('href'),
-              newer: page.getElementById('newer-link')?.getAttribute('href'),
-              filter: page.getElementById('filter-link')?.getAttribute('href'),
-              photos,
-              heading
-            });
-            renderCount();
-            if (current) {
-              renderViewerDetails();
-            }
-          }
-          more.textContent = '';
         } catch (error) {
           console.log(error);
-          more.textContent = '';
-          const retry = document.createElement('button');
-          retry.className = 'control';
-          retry.textContent = `Couldn't load more: try again`;
-          retry.onclick = loadMore;
-          more.append(retry);
-          loadingMore = false;
-          return;
         }
-        loadingMore = false;
-        // a short month can leave the end of the page still in sight
-        moreWatcher.unobserve(more);
-        if (nextUrl) {
-          moreWatcher.observe(more);
+        await Promise.all([...new Set([...from, ...to])].map(key => timeline.reload(key)));
+        // where the viewer's photo has gone
+        if (current && to.length) {
+          await timeline.ensure(monthOf(current.taken));
         }
+        renderCount();
       }
 
-      function watchForMore() {
-        moreWatcher = new IntersectionObserver(entries => {
-          if (entries.some(entry => entry.isIntersecting)) {
-            loadMore();
-          }
-        }, {rootMargin: '800px 0px'});
-        if (nextUrl) {
-          moreWatcher.observe(document.getElementById('more'));
-        }
-        window.addEventListener('scroll', noteSection, {passive: true});
+      // ---- narrowing the library to a tag or person and a place, which loads it again
+
+      function filterChanged() {
+        const [kind, ...rest] = document.getElementById('filter-who').value.split(':');
+        const name = rest.join(':');
+        filterTo({tag: kind === 'tag' ? name : null, person: kind === 'person' ? name : null});
       }
 
-      // the header, its links and the address follow along, so that reloading stays in the same place
-      function noteSection() {
-        const top = document.querySelector('.library-month-header').getBoundingClientRect().bottom;
-        let reached = 0;
-        sections.forEach((section, place) => {
-          if (section.heading && section.heading.getBoundingClientRect().top <= top) {
-            reached = place;
-          }
+      function startTimeline() {
+        const placeInput = document.getElementById('filter-place');
+        if (placeInput) {
+          placeFilter(placeInput);
+        }
+        timeline = new Timeline(document.getElementById('days'), MONTHS, {
+          load: loadMonth,
+          render: renderMonth,
+          monthActions: IN_TRASH ? null : monthActions,
+          yearActions: IN_TRASH ? null : yearActions
         });
-        if (reached === showing) {
-          return;
+        if (document.getElementById('jump-year')) {
+          dateJumper = dateJump('jump-year', 'jump-month', timeline, goTo);
         }
-        showing = reached;
-        const section = sections[reached];
-        history.replaceState(history.state, '', section.url);
-        for (const [id, url] of [['older-link', section.older], ['newer-link', section.newer]]) {
-          const link = document.getElementById(id);
-          link.hidden = !url;
-          if (url) {
-            link.href = url;
-          }
+        const asked = new URLSearchParams(window.location.search).get('date');
+        if (asked && MONTHS.length) {
+          // once the header's height is known
+          requestAnimationFrame(() => goTo(asked));
         }
-        if (section.filter) {
-          document.getElementById('filter-link').href = section.filter;
-        }
-        document.querySelectorAll('.year-rail a').forEach(link => {
-          if (link.textContent === section.year) {
-            link.setAttribute('aria-current', 'page');
-          } else {
-            link.removeAttribute('aria-current');
-          }
-        });
+        window.addEventListener('scroll', () => requestAnimationFrame(noteShowing), {passive: true});
+        requestAnimationFrame(noteShowing);
         renderCount();
       }
 
       const plural = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
 
       function renderCount() {
-        const section = sections[showing];
-        const left = section ? section.photos.filter(photo => !photo.removed).length : 0;
-        document.getElementById('summary').textContent =
-          `${section?.title ?? TITLE}${section?.year ? ` · ${section.year}` : ''} · ${plural(left, 'photo')}`;
+        if (!timeline) {
+          return;
+        }
+        const left = key => monthPhotos.has(key) ? monthPhotos.get(key).filter(photo => !photo.removed).length : null;
+        timeline.counted(left);
+        const total = timeline.months.reduce((sum, month) => sum + (left(month.key) ?? month.count), 0);
+        document.getElementById('summary').textContent = `${TITLE} · ${plural(total, 'photo')}`;
         for (const group of groups) {
           // folders can be told apart by size; every photo on a day is on screen anyway
-          const count = MONTH ? '' : ` · ${plural(group.photos.filter(photo => !photo.removed).length, 'photo')}`;
+          const count = group.month === UNDATED ? ` · ${plural(group.photos.filter(photo => !photo.removed).length, 'photo')}` : '';
           group.label.textContent = (group.name || 'Unknown day') + count;
         }
       }
@@ -435,20 +485,17 @@
       function assignDate(photos, date) {
         return run(async () => {
           const {previous} = await postJson('/api/dates', {photo_ids: photos.map(photo => photo.id), date});
-          // they change places within this month, so only the server knows the new layout
-          if (date.slice(0, 7) === MONTH || KEEPS_REDATED_PHOTOS) {
-            window.location.reload();
-            return;
-          }
-          photos.forEach(photo => setRemoved(photo, true));
+          const to = date.slice(0, 7);
           // so that one batch's date can't quietly carry over to the next
           document.getElementById('select-date').value = '';
-          renderSelection();
+          clearPicks();
+          await refreshDates(photos, [to]);
           const [year, month] = date.split('-').map(Number);
           const name = new Date(year, month - 1, 1).toLocaleString(undefined, {month: 'long', year: 'numeric'});
           showToast(`Moved ${plural(photos.length, 'photo')} to ${name}`, () => run(async () => {
             await postJson('/api/dates/restore', {previous});
-            photos.forEach(restored);
+            // back to wherever each came from, which the server knows
+            await refreshDates(photos.map(photo => ({month: to})), [...new Set(photos.map(photo => photo.month))]);
           }, "Couldn't undo"));
         }, "Couldn't set the date");
       }
@@ -630,8 +677,11 @@
         const when = current.when ? `${current.when} · ` : '';
         document.getElementById('viewer-caption').textContent =
           `${when}${fileName(current)} · ${position + 1} of ${list.length.toLocaleString()}`;
-        document.getElementById('viewer-previous').hidden = position === 0;
-        document.getElementById('viewer-next').hidden = position === list.length - 1;
+        // there can be more in months that haven't loaded yet
+        const months = timeline ? timeline.months : [];
+        const month = months.findIndex(entry => entry.key === current.month);
+        document.getElementById('viewer-previous').hidden = position === 0 && month <= 0;
+        document.getElementById('viewer-next').hidden = position === list.length - 1 && month === months.length - 1;
         const favorite = document.getElementById('viewer-favorite');
         favorite.setAttribute('aria-pressed', current.favorite);
         favorite.querySelector('i').className = current.favorite ? 'fa fa-heart' : 'fa fa-heart-o';
@@ -996,38 +1046,19 @@
 
       // ---- following a change of date, and changing dates and places of many photos
 
-      // whether a photo with this date goes on this page: only a month and Undated go by date
-      function belongsHere(taken) {
-        if (KEEPS_REDATED_PHOTOS || FOLDER) {
-          return true;
-        }
-        const dated = /^\d{4}:(0[1-9]|1[0-2]):/.test(taken) && taken.slice(0, 4) >= String(EARLIEST_YEAR);
-        return (dated ? taken.slice(0, 7).replace(':', '-') : null) === MONTH;
-      }
-
-      function applyTaken(photo, taken, when) {
-        if (photo.taken === taken) {
+      // from the info card: the photo moves to its new month, or among the days of the same one
+      window.addEventListener('photo-changed', ({detail}) => {
+        const photo = loadedPhotos().find(other => other.id === detail.photo_id);
+        if (!photo || !detail.taken_raw || photo.taken === detail.taken_raw) {
           return;
         }
-        photo.taken = taken;
-        photo.when = when;
-        const here = belongsHere(taken);
-        if (!here && !photo.removed) {
-          removeFromView(photo);
-        } else if (here && photo.removed) {
-          restored(photo);
-        } else if (photo === current) {
+        photo.taken = detail.taken_raw;
+        photo.when = detail.when;
+        photo.date_assigned = detail.date_assigned;
+        if (photo === current) {
           renderViewerDetails();
         }
-      }
-
-      // from the info card
-      window.addEventListener('photo-changed', ({detail}) => {
-        const photo = PHOTOS.find(other => other.id === detail.photo_id);
-        if (photo && detail.taken_raw) {
-          photo.date_assigned = detail.date_assigned;
-          applyTaken(photo, detail.taken_raw, detail.when);
-        }
+        refreshDates([photo], [monthOf(detail.taken_raw)]);
       });
 
       function ownDatesSelected() {
@@ -1040,17 +1071,12 @@
             return;
           }
           clearPicks();
-          const before = changed.map(photo => [photo, photo.taken, photo.when]);
-          changed.forEach(photo => {
-            photo.date_assigned = false;
-            applyTaken(photo, now[photo.id].taken, now[photo.id].when);
-          });
+          const from = [...new Set(changed.map(photo => photo.month))];
+          const to = [...new Set(changed.map(photo => monthOf(now[photo.id].taken)))];
+          await refreshDates(changed, to);
           showToast(`Back to their own dates: ${plural(changed.length, 'photo')}`, () => run(async () => {
             await postJson('/api/dates/restore', {previous});
-            before.forEach(([photo, taken, when]) => {
-              photo.date_assigned = true;
-              applyTaken(photo, taken, when);
-            });
+            await refreshDates(to.map(month => ({month})), from);
           }, "Couldn't undo"));
         }, "Couldn't change the dates");
       }
@@ -1182,6 +1208,17 @@
         const next = list[list.indexOf(current) + direction];
         if (next) {
           showPhoto(next);
+          return;
+        }
+        // the month along from this one may not have loaded yet
+        const months = timeline.months;
+        const neighbour = months[months.findIndex(month => month.key === current.month) + direction];
+        if (neighbour && !monthPhotos.has(neighbour.key)) {
+          timeline.ensure(neighbour.key).then(() => {
+            if (monthPhotos.has(neighbour.key)) {
+              step(direction);
+            }
+          });
         }
       }
 
@@ -1470,12 +1507,17 @@
             }
           });
         }
-        renderGrid();
+        startTimeline();
         renderSelection();
         // opened on a particular photo, from the map
-        const asked = PHOTOS.find(photo => photo.id === new URLSearchParams(window.location.search).get('open'));
-        if (asked) {
-          openViewer(asked);
+        const query = new URLSearchParams(window.location.search);
+        if (query.get('open')) {
+          timeline.ensure(nearestMonth(query.get('date') || UNDATED)).then(() => {
+            const asked = loadedPhotos().find(photo => photo.id === query.get('open'));
+            if (asked) {
+              openViewer(asked);
+            }
+          });
         }
 
         const viewer = document.getElementById('viewer');
@@ -1501,9 +1543,16 @@
     </script>
   </head>
   <body class="library-page">
+    <header class="app-header">
+    {% include '_nav.html' %}
     <div class="library-month-header">
-      <a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹ {{ back_label }}</a>
-      <span id="summary">{{ title }}</span>
+      {% if back_url %}<a href="{{ back_url }}" aria-label="Back to {{ back_label | lower }}">‹ {{ back_label }}</a>{% endif %}
+      {% if months and not photos %}
+      <span class="date-jump">
+        <select id="jump-year" aria-label="Go to a year"></select>
+        <select id="jump-month" aria-label="Go to a month"></select>
+      </span>
+      {% endif %}
       <span class="month-steps">
         {% if faces_url %}<a href="{{ faces_url }}">Faces</a>{% endif %}
         {% if map_url %}<a href="{{ map_url }}">Map</a>{% endif %}
@@ -1511,10 +1560,39 @@
         {% if tag %}<button onclick="toggleTagEdit()">Edit</button>{% endif %}
         {% if place_label %}<button onclick="toggleLabelEdit()">Edit</button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
-        {% if faces_checked %}<a id="filter-link" href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
-        <a id="older-link" href="{{ older_url or '' }}" title="Older month"{% if not older_url %} hidden{% endif %}>‹ Older</a>
-        <a id="newer-link" href="{{ newer_url or '' }}" title="Newer month"{% if not newer_url %} hidden{% endif %}>Newer ›</a>
+        {% if filtering %}<a href="/library/folders">Folders</a>{% endif %}
       </span>
+    </div>
+    </header>
+    <div class="library-title">
+      <h1 id="summary">{{ title }}</h1>
+      {% if filtering %}
+      <div class="library-filters">
+        <select id="filter-who" aria-label="Show only a tag or a person" onchange="filterChanged()">
+          <option value="">Any tag or person</option>
+          {% if tag_names_shown %}
+          <optgroup label="Tags">
+            {% for name in tag_names_shown %}
+            <option value="tag:{{ name }}"{% if name == filter_tag %} selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          <optgroup label="People">
+            {% for name in known_names %}
+            <option value="person:{{ name }}"{% if name == filter_person %} selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </optgroup>
+        </select>
+        {% if place %}
+        <span class="filter-chip">
+          {{ place.label }}
+          <button type="button" onclick="setPlace(null)" title="Any place" aria-label="Show photos from any place">×</button>
+        </span>
+        {% else %}
+        <input id="filter-place" type="text" maxlength="120" placeholder="Any place" aria-label="Show only a place" />
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
     {% if place_label %}
@@ -1547,13 +1625,6 @@
       <p class="library-hint">Using the name of another tag joins the two together. Deleting a tag takes it off its photos and leaves the photos alone.</p>
     </div>
     {% endif %}
-    {% if years_rail and years_rail | length > 1 %}
-    <nav class="year-rail" aria-label="Years">
-      {% for entry in years_rail %}
-      <a href="{{ entry.url }}"{% if entry.year == shown_year %} aria-current="page"{% endif %} title="{{ '{:,}'.format(entry.photos) }} photos">{{ entry.year }}</a>
-      {% endfor %}
-    </nav>
-    {% endif %}
     <datalist id="tags">
       {% for known in tag_names() %}
       <option value="{{ known }}"></option>
@@ -1566,9 +1637,6 @@
     </datalist>
     {% if hint %}
     <p class="library-hint">{{ hint }}</p>
-    {% endif %}
-    {% if not dated %}
-    <p class="library-hint">These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.</p>
     {% endif %}
     {% if movies %}
     <section class="library-days place-movies">
@@ -1584,10 +1652,9 @@
     </section>
     {% endif %}
     <div id="days" class="library-days"></div>
-    <div id="more" class="load-more"></div>
     <div id="select-bar" class="select-bar" hidden>
       <span id="select-count"></span>
-      <button onclick="pickAll(PHOTOS)">Select all</button>
+      <button onclick="selectEverything()">Select all</button>
       <span class="select-actions">
         {% if folder == 'trash' %}
         <button class="select-action" onclick="restorePhotos([...selected])" title="Back where they were in the library" disabled>
@@ -1598,7 +1665,7 @@
         </button>
         {% else %}
         {% if folder != 'hidden' %}
-        <button class="select-action" onclick="approveSelected()" title="Approve for the gallery and kiosk" disabled>
+        <button class="select-action" onclick="approveSelected()" title="Approve for the kiosk" disabled>
           <i class="fa fa-check" aria-hidden="true"></i> Approve
         </button>
         {% endif %}
@@ -1677,7 +1744,7 @@
           </button>
           {% endif %}
           <span class="viewer-library-actions"{% if folder == 'trash' %} hidden{% endif %}>
-          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the gallery and kiosk" aria-label="Approve">
+          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the kiosk" aria-label="Approve">
             <i class="fa fa-check" aria-hidden="true"></i> <span class="viewer-word">Approve</span>
           </button>
           <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">

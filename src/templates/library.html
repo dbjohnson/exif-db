@@ -1,26 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>Library</title>
+    <title>Folders</title>
     {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
     <script src="/static/tags.js"></script>
   </head>
   <body class="library-page">
-    {% include '_nav.html' %}
-    {% if not total %}
-    <div class="no-images">No photos {{ 'with faces ' if with_faces }}yet</div>
-    {% endif %}
-    <nav class="year-rail" aria-label="Years">
-      {% for year in years %}
-      <a href="#y{{ year.year }}">{{ year.year }}</a>
-      {% endfor %}
-      {% if undated %}
-      <a href="#undated">Undated</a>
-      {% endif %}
-      <a href="#folders">Folders</a>
-    </nav>
+    <header class="app-header">
+      {% include '_nav.html' %}
+    </header>
     {% macro month_tile(tile) %}
     <a class="month-tile{{ ' empty-folder' if not tile.cover }}" href="{{ tile.url }}">
       {% if tile.cover %}
@@ -40,26 +30,8 @@
       </span>
     </a>
     {% endmacro %}
-    {% for year in years %}
-    <section id="y{{ year.year }}" class="library-year">
-      <h2>{{ year.year }} <span>{{ "{:,}".format(year.photos) }} photo{{ '' if year.photos == 1 else 's' }}</span></h2>
-      <div class="month-grid">
-        {% for tile in year.months %}
-        {{ month_tile(tile) }}
-        {% endfor %}
-      </div>
-    </section>
-    {% endfor %}
-    {% if undated %}
-    <section id="undated" class="library-year">
-      <h2>Undated <span>no usable date</span></h2>
-      <div class="month-grid">
-        {{ month_tile(undated) }}
-      </div>
-    </section>
-    {% endif %}
     <section id="folders" class="library-year">
-      <h2>Folders <span>photos from any month, and a folder for each tag</span></h2>
+      <h2><a class="section-back" href="/library">Library</a> › Folders <span>photos from any month, and a folder for each tag</span></h2>
       <form class="new-tag" onsubmit="createTag(event)">
         <input id="new-tag" type="text" maxlength="80" placeholder="New tag" aria-label="Name for a new tag" />
         <button>Add tag</button>

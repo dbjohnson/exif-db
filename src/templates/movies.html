@@ -5,7 +5,10 @@
     {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
+    <script src="/static/timeline.js"></script>
     <script>
+      // what the list and the stream are narrowed to
+      const FILTERS = {{ filters | tojson }};
       // the next movie starts loading this long before it's needed, so that it starts straight
       // away, but not for the whole of an hour long film that might be skipped
       const PREPARE_SECS = 45;
@@ -32,10 +35,11 @@
       let clips = [];
       let months = new Map();
       let monthKeys = [];
-      let years = [];
-      // the months and movies being looked at, which needn't be where playback is
-      let browsedYear = null;
-      let browsedMonth = null;
+      // the list's months, newest first, as timeline.js lays them out
+      let listMonths = [];
+      let timeline = null;
+      let dateJumper = null;
+      let showingKey = null;
       let shownTiles = new Map();
 
       let active;
@@ -134,91 +138,42 @@
           }
           const key = monthKey(clip);
           if (!months.has(key)) {
-            months.set(key, {key, first: index, last: index, seconds: 0, count: 0});
+            months.set(key, {key, first: index, last: index, seconds: 0, count: 0, days: new Set()});
           }
           const month = months.get(key);
           month.last = index;
           month.seconds += clip.duration;
           month.count++;
+          month.days.add(clip.taken && clip.precision !== 'month' ? clip.taken.slice(0, 10) : '');
         });
         monthKeys = [...months.keys()];
-        const byYear = new Map();
-        for (const month of months.values()) {
-          const year = month.key === UNDATED ? UNDATED : month.key.slice(0, 4);
-          if (!byYear.has(year)) {
-            byYear.set(year, {year, months: [], seconds: 0});
-          }
-          byYear.get(year).months.push(month);
-          byYear.get(year).seconds += month.seconds;
-        }
         // newest first, with undated last, as in the library.  clips stays in filmed order, since
         // that's the order the stream plays in: only what's listed runs backwards
-        const allYears = [...byYear.values()];
-        years = [
-          ...allYears.filter(year => year.year !== UNDATED).reverse(),
-          ...allYears.filter(year => year.year === UNDATED)
-        ];
+        const ordered = [...months.values()];
+        listMonths = [
+          ...ordered.filter(month => month.key !== UNDATED).reverse(),
+          ...ordered.filter(month => month.key === UNDATED)
+        ].map(month => ({
+          key: month.key,
+          label: formatMonth(month.key),
+          year: month.key === UNDATED ? null : month.key.slice(0, 4),
+          count: month.count,
+          days: month.days.size
+        }));
       }
 
       // ---- finding your way around
-
-      function renderYears() {
-        const rail = byId('years');
-        rail.replaceChildren(...years.map(year => {
-          const button = document.createElement('button');
-          button.textContent = year.year === UNDATED ? 'Undated' : year.year;
-          button.title = formatLength(year.seconds);
-          button.classList.toggle('browsed', year.year === browsedYear);
-          button.classList.toggle('playing', current >= 0 && monthKey(clips[current]).startsWith(year.year));
-          button.onclick = () => browseYear(year);
-          return button;
-        }));
-        const selected = rail.querySelector('.browsed');
-        if (selected) {
-          // scrollIntoView would also scroll the page, away from whatever's being looked at
-          rail.scrollLeft = selected.offsetLeft - (rail.clientWidth - selected.offsetWidth) / 2;
-        }
-      }
-
-      function renderMonths() {
-        const rail = byId('months');
-        const year = years.find(entry => entry.year === browsedYear);
-        if (!year) {
-          rail.replaceChildren();
-          return;
-        }
-        const keys = browsedYear === UNDATED
-          ? [UNDATED]
-          : MONTH_NAMES.map((_, number) => `${browsedYear}-${String(number + 1).padStart(2, '0')}`);
-        const most = Math.max(...year.months.map(month => month.seconds));
-        rail.replaceChildren(...keys.map(key => {
-          const month = months.get(key);
-          const button = document.createElement('button');
-          button.className = 'movie-month';
-          button.disabled = !month;
-          button.title = month ? `${formatMonth(key)} · ${formatLength(month.seconds)}` : 'No movies';
-          button.classList.toggle('browsed', key === browsedMonth);
-          button.classList.toggle('playing', current >= 0 && monthKey(clips[current]) === key);
-          const bar = document.createElement('span');
-          bar.className = 'movie-month-bar';
-          // by square root, so that a month with an hour long film doesn't flatten the rest
-          bar.style.height = month ? `${Math.max(Math.sqrt(month.seconds / most) * 100, 6)}%` : '0';
-          const label = document.createElement('span');
-          label.textContent = key === UNDATED ? 'Undated' : MONTH_NAMES[Number(key.slice(5)) - 1];
-          button.append(bar, label);
-          if (month) {
-            button.onclick = () => dropIn(month.first);
-          }
-          return button;
-        }));
-      }
 
       function renderTile(index) {
         const clip = clips[index];
         const tile = document.createElement('button');
         tile.className = 'movie-tile';
         tile.setAttribute('aria-label', `${clip.title || clip.path.split('/').pop()}, ${formatWhen(clip)}`);
-        tile.onclick = () => dropIn(index);
+        tile.onclick = () => {
+          dropIn(index);
+          // the player is at the top, a long way above most of the list
+          window.scrollTo(0, 0);
+        };
 
         const image = document.createElement('img');
         image.alt = '';
@@ -237,27 +192,13 @@
         return tile;
       }
 
-      function renderClips() {
-        const list = byId('clips');
-        shownTiles = new Map();
-        list.replaceChildren();
-        const month = months.get(browsedMonth);
-        if (!month) {
-          return;
-        }
-        const heading = document.createElement('h2');
-        heading.className = 'movie-clips-heading';
-        const count = month.count;
-        heading.textContent = `${formatMonth(month.key)} · ${count.toLocaleString()} movie${count === 1 ? '' : 's'} · ${formatLength(month.seconds)}`;
-        list.append(heading);
-
+      // one month of the list, its movies newest first by day
+      function renderMonthClips(month, indices) {
+        const content = document.createElement('div');
         let grid = null;
         let day;
-        for (let index = month.last; index >= month.first; index--) {
+        for (const index of indices) {
           const clip = clips[index];
-          if (gone(clip)) {
-            continue;
-          }
           const clipDay = clip.taken && clip.precision !== 'month' ? formatDay(clip) : null;
           if (!grid || clipDay !== day) {
             day = clipDay;
@@ -271,26 +212,57 @@
             grid = document.createElement('div');
             grid.className = 'movie-grid';
             section.append(grid);
-            list.append(section);
+            content.append(section);
           }
           const tile = renderTile(index);
           tile.classList.toggle('playing', index === current);
           shownTiles.set(index, tile);
           grid.append(tile);
         }
+        return content;
       }
 
-      function browseMonth(key) {
-        browsedMonth = key;
-        browsedYear = key === UNDATED ? UNDATED : key.slice(0, 4);
-        renderYears();
-        renderMonths();
-        renderClips();
+      async function monthClips(month) {
+        const entry = months.get(month.key);
+        const indices = [];
+        if (entry) {
+          for (let index = entry.last; index >= entry.first; index--) {
+            if (!gone(clips[index])) {
+              indices.push(index);
+            }
+          }
+        }
+        return indices;
       }
 
-      // looking through a year doesn't interrupt what's playing; choosing a month or movie does
-      function browseYear(year) {
-        browseMonth(year.months[year.months.length - 1].key);
+      function noteShowing() {
+        const month = timeline.showing();
+        if (!month || month.key === showingKey) {
+          return;
+        }
+        showingKey = month.key;
+        dateJumper.show(month);
+      }
+
+      function startList() {
+        timeline = new Timeline(byId('clips'), listMonths, {
+          load: monthClips,
+          render: renderMonthClips,
+          tileWidth: 170,
+          aspect: 10 / 16
+        });
+        dateJumper = dateJump('jump-year', 'jump-month', timeline, key => timeline.scrollTo(key));
+        window.addEventListener('scroll', () => requestAnimationFrame(noteShowing), {passive: true});
+        requestAnimationFrame(noteShowing);
+      }
+
+      // the list after movies have been hidden, deleted or brought back
+      function relist() {
+        timeline.setMonths(listMonths);
+        dateJumper.refill();
+        for (const month of listMonths) {
+          timeline.reload(month.key);
+        }
       }
 
       // ---- the scrubber, which covers the month being played
@@ -372,11 +344,8 @@
         if (key !== scrubMonth) {
           layoutScrubber(key);
           byId('month-label').textContent = formatMonth(key);
-          browseMonth(key);
-        } else {
-          renderYears();
-          renderMonths();
         }
+        renderMovieTags();
         for (const [index, tile] of shownTiles) {
           tile.classList.toggle('playing', index === current);
         }
@@ -697,6 +666,7 @@
         organize();
         renderSummary();
         renderHidden();
+        relist();
         // the same month can have different movies in it now
         scrubMonth = null;
       }
@@ -793,6 +763,65 @@
         } catch (error) {
           console.log(error);
           showToast(`Couldn't bring it back: ${error.message}`);
+        }
+      }
+
+      // ---- tags of the movie playing, which the list can be narrowed to
+
+      async function renderMovieTags() {
+        const clip = clips[current];
+        const list = byId('movie-tag-list');
+        try {
+          const response = await fetch(`/api/photo-tags?${new URLSearchParams({photo_id: clip.id})}`);
+          const tagged = response.ok ? await response.json() : [];
+          if (clip !== clips[current]) {
+            return;
+          }
+          list.replaceChildren(...tagged.map(name => {
+            const chip = document.createElement('span');
+            chip.className = 'tag-chip';
+            const link = document.createElement('a');
+            link.href = `/movies?${new URLSearchParams({tag: name})}`;
+            link.textContent = name;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.title = `Take off ${name}`;
+            remove.setAttribute('aria-label', `Take off ${name}`);
+            remove.textContent = '×';
+            remove.onclick = () => tagMovie(clip, name, false);
+            chip.append(link, remove);
+            return chip;
+          }));
+        } catch (error) {
+          console.log(error);
+        }
+      }
+
+      async function tagMovie(clip, name, tagged) {
+        try {
+          const {name: saved, changed} = await postJson('/api/tags/photos', {name, photo_ids: [clip.id], tagged});
+          if (clip === clips[current]) {
+            renderMovieTags();
+          }
+          if (changed.length) {
+            showToast(tagged ? `Tagged ${saved}` : `Took ${saved} off`, async () => {
+              await postJson('/api/tags/photos', {name: saved, photo_ids: [clip.id], tagged: !tagged});
+              if (clip === clips[current]) {
+                renderMovieTags();
+              }
+            });
+          }
+        } catch (error) {
+          showToast(`Couldn't save the tag: ${error.message}`);
+        }
+      }
+
+      function addMovieTag() {
+        const input = byId('movie-add-tag');
+        const name = input.value.trim();
+        if (name && current >= 0) {
+          input.value = '';
+          tagMovie(clips[current], name, true);
         }
       }
 
@@ -1023,7 +1052,11 @@
       }
 
       window.addEventListener('DOMContentLoaded', async () => {
-        const response = await fetch('/api/movies').catch(() => null);
+        const placeInput = byId('filter-place');
+        if (placeInput) {
+          placeFilter(placeInput);
+        }
+        const response = await fetch(`/api/movies?${new URLSearchParams(FILTERS)}`).catch(() => null);
         clips = response?.ok ? await response.json() : [];
         if (!clips.length) {
           byId('player').hidden = true;
@@ -1032,6 +1065,7 @@
         }
         organize();
         renderSummary();
+        startList();
 
         active = byId('video-a');
         standby = byId('video-b');
@@ -1048,10 +1082,36 @@
     </script>
   </head>
   <body class="library-page">
+    <header class="app-header">
     {% include '_nav.html' %}
-    <p id="summary" class="movie-summary">Home movies</p>
+    <div class="library-month-header">
+      <span class="date-jump">
+        <select id="jump-year" aria-label="Go to a year"></select>
+        <select id="jump-month" aria-label="Go to a month"></select>
+      </span>
+    </div>
+    </header>
+    <div class="library-title">
+      <h1 id="summary">Home movies</h1>
+      <div class="library-filters">
+        <select id="filter-tag" aria-label="Show only a tag" onchange="filterTo({tag: this.value})">
+          <option value="">Any tag</option>
+          {% for name in tag_names_shown %}
+          <option value="{{ name }}"{% if name == filter_tag %} selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+        </select>
+        {% if place %}
+        <span class="filter-chip">
+          {{ place.label }}
+          <button type="button" onclick="setPlace(null)" title="Any place" aria-label="Show movies from any place">×</button>
+        </span>
+        {% else %}
+        <input id="filter-place" type="text" maxlength="120" placeholder="Any place" aria-label="Show only a place" />
+        {% endif %}
+      </div>
+    </div>
     <div id="empty" class="no-images" hidden>
-      No movies yet. They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
+      {% if filters %}No movies match these filters.{% else %}No movies yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
     </div>
     <div id="player" class="movie-player">
       <div id="stage" class="movie-stage">
@@ -1119,16 +1179,21 @@
           </div>
         </div>
       </div>
-      <nav class="movie-rails" aria-label="Choose a time">
-        <div id="years" class="movie-years"></div>
-        <div id="months" class="movie-months"></div>
-      </nav>
+      <div class="viewer-tagging movie-tags">
+        <span id="movie-tag-list" class="viewer-tag-list"></span>
+        <input id="movie-add-tag" type="text" list="tags" maxlength="80" placeholder="Add tag" aria-label="Add a tag to this movie" onkeydown="if (event.key === 'Enter') addMovieTag();" />
+      </div>
     </div>
-    <div id="clips" class="library-days"></div>
+    <datalist id="tags">
+      {% for name in tag_names() %}
+      <option value="{{ name }}"></option>
+      {% endfor %}
+    </datalist>
     <details id="hidden" class="movie-hidden" hidden>
       <summary id="hidden-count"></summary>
       <p>Select one to bring it back.</p>
       <div id="hidden-grid" class="movie-grid"></div>
     </details>
+    <div id="clips" class="library-days"></div>
   </body>
 </html>

@@ -316,23 +316,6 @@ def _with_status():
     """
 
 
-def background_photo():
-    """
-    A photo to stand in on a page with nothing to show: a random favorite, or failing
-    that any approved photo.  A favorite that has since been hidden doesn't qualify
-    """
-    row = db.execute(
-        f"""
-        SELECT SourceFile, rotation FROM {_with_status()}
-        WHERE review_status = ?
-        ORDER BY favorite DESC, random()
-        LIMIT 1
-        """,
-        [APPROVED]
-    ).fetchone()
-    return row
-
-
 def stand_in_photos(exclude, limit, seed):
     """
     Approved photos from any date, for when there aren't enough from around today: favorites
@@ -420,43 +403,6 @@ def review_counts(datestring='', recent=None):
     return {APPROVED: 0, REJECTED: 0, UNREVIEWED: 0, **dict(rows)}
 
 
-def _library_filter(with_faces):
-    if not with_faces:
-        return ''
-    _load_log('faces', FACES_CSV)
-    return f"AND photo_id IN (SELECT photo_id FROM faces WHERE value <> '{NO_FACES}')"
-
-
-def library_months(with_faces=False):
-    """
-    Every month with photos to browse, newest first and undated photos last.  Unlike the gallery
-    this includes unreviewed photos, which are most of a library, but not hidden ones.  A month's
-    cover stays the same until its photos change: a favorite or approved photo if there is one,
-    preferring camera photos over screenshots and JPEGs, which are the quickest to make a
-    thumbnail from
-    """
-    rows = db.execute(
-        f"""
-        SELECT
-            {LIBRARY_MONTH} AS month,
-            COUNT(*),
-            first(struct_pack(path := SourceFile, rotation := rotation) ORDER BY
-                favorite DESC,
-                review_status = ? DESC,
-                Make IS NOT NULL DESC,
-                FileType = 'JPEG' DESC,
-                hash(photo_id)
-            )
-        FROM {_with_status()}
-        WHERE review_status <> ? {_library_filter(with_faces)}
-        GROUP BY month
-        ORDER BY month DESC NULLS LAST
-        """,
-        [APPROVED, REJECTED]
-    ).fetchall()
-    return [{'month': month, 'photos': photos, 'cover': cover} for month, photos, cover in rows]
-
-
 def _library_rows(where, params, hidden=False):
     # hidden photos only appear if asked for
     rows = db.execute(
@@ -482,9 +428,38 @@ def _library_rows(where, params, hidden=False):
     ]
 
 
-def library_photos(month, with_faces=False):
-    # month as in library_months, where None is the undated photos
-    return _library_rows(f"({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? {_library_filter(with_faces)}", [month])
+def hidden_filter():
+    # photos someone has hidden, as SQL and its parameters: not copies hidden as duplicates
+    _load_log('duplicates', DUPLICATES_CSV)
+    return "review_status = ? AND photo_id NOT IN (SELECT photo_id FROM duplicates WHERE value = ?)", [REJECTED, HIDDEN_DUPLICATE]
+
+
+def screenshot_filter():
+    # None for an index from before scans read which photos are screenshots
+    return "CAST(Screenshot AS VARCHAR) = '1'" if 'Screenshot' in tags() else None
+
+
+def timeline_months(where='true', params=(), hidden=False):
+    """
+    The months with photos that match, newest first and undated photos last, with how many each has
+    and on how many days.  Hidden photos only appear if asked for
+    """
+    rows = db.execute(
+        f"""
+        SELECT {LIBRARY_MONTH} AS month, COUNT(*), COUNT(DISTINCT LEFT(DateTimeOriginal, 10))
+        FROM {_with_status()}
+        WHERE ({where}) AND (review_status <> ? OR ?)
+        GROUP BY month
+        ORDER BY month DESC NULLS LAST
+        """,
+        [*params, REJECTED, hidden]
+    ).fetchall()
+    return [{'month': month, 'photos': photos, 'days': days} for month, photos, days in rows]
+
+
+def timeline_photos(month, where='true', params=(), hidden=False):
+    # month as in timeline_months, where None is the undated photos
+    return _library_rows(f"({LIBRARY_MONTH}) IS NOT DISTINCT FROM ? AND ({where})", [month, *params], hidden)
 
 
 def photos_with_paths(paths):
