@@ -16,6 +16,11 @@
       const MONTHS = {{ months | tojson }};
       // a list with nothing to load, such as the recycle bin, or null
       const PRELOADED_PHOTOS = {{ (photos or none) | tojson }};
+      // On this day's address stays bare, so that a bookmark of it is always today's
+      const BARE_ADDRESS = {{ 'true' if day_steps else 'false' }};
+      if (BARE_ADDRESS && window.location.search) {
+        history.replaceState(history.state, '', window.location.pathname);
+      }
       // what this list is narrowed to, which each month is asked for by
       const FILTERS = {{ filters | tojson }};
       // whose page this is, or null
@@ -336,7 +341,7 @@
         showingKey = month.key;
         dateJumper?.show(month);
         sideJumper?.show(month);
-        if (!PRELOADED_PHOTOS) {
+        if (!PRELOADED_PHOTOS && !BARE_ADDRESS) {
           const url = new URL(window.location.href);
           url.searchParams.set('date', month.key);
           history.replaceState(history.state, '', url);
