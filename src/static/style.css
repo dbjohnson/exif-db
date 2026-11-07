@@ -195,6 +195,8 @@ button:disabled {
 .select-bar input[type="text"],
 .select-bar input[type="date"],
 .select-bar select,
+.person-edit select,
+.info-editor select,
 .manage select,
 .manage input[type="time"],
 .date-controls input[type="date"] {

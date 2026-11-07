@@ -30,6 +30,10 @@ function infoSection(title, fields) {
 
 const TOWN_WAIT_MS = 250;
 const TOWN_ZOOM = 11;
+// how far around a named place counts, in metres
+const LABEL_RADII = [100, 250, 500, 1000, 5000];
+const DEFAULT_LABEL_RADIUS = 250;
+const placeLabelUrl = name => `/places/photos?${new URLSearchParams({kind: 'label', key: name})}`;
 // where the map starts for a photo with no place, as photos near each other are often done in turn
 const LAST_PLACE = 'last-place';
 let leafletLoading = null;
@@ -297,21 +301,88 @@ function placeEditor(path, info) {
   return editor;
 }
 
+// gives the place a photo was taken a name, such as Home, which every photo near it then has
+function labelEditor(path, info) {
+  const editor = document.createElement('div');
+  editor.className = 'info-editor';
+  editor.hidden = true;
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.maxLength = 80;
+  name.placeholder = 'Name, such as Home';
+  name.setAttribute('aria-label', 'Name for this place');
+  const radius = document.createElement('select');
+  radius.setAttribute('aria-label', 'How far around it counts');
+  radius.append(...LABEL_RADII.map(metres => {
+    const option = document.createElement('option');
+    option.value = metres;
+    option.textContent = `Within ${metres < 1000 ? `${metres} m` : `${metres / 1000} km`}`;
+    option.selected = metres === DEFAULT_LABEL_RADIUS;
+    return option;
+  }));
+  const label = replace => postJson('/api/place-labels', {
+    name: name.value,
+    lat: info.location.lat,
+    lon: info.location.lon,
+    radius: Number(radius.value),
+    replace
+  });
+  const saved = ({name: given, previous}, moved) => infoChanged(
+    path,
+    moved ? `Moved ${given} here` : `Named this place ${given}`,
+    () => postJson('/api/place-labels/restore', {previous})
+  );
+  const save = infoButton('Save name', async () => {
+    if (!name.value.trim()) {
+      return;
+    }
+    try {
+      saved(await label(false), false);
+    } catch (error) {
+      if (!error.message.includes('409')) {
+        showToast(`Couldn't name this place: ${error.message}`);
+        return;
+      }
+      showToast(`There's already a place called ${name.value.trim()}`, async () => {
+        try {
+          saved(await label(true), true);
+        } catch (again) {
+          showToast(`Couldn't name this place: ${again.message}`);
+        }
+      }, 'Move it here');
+    }
+  });
+  name.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      save.click();
+    }
+  });
+  editor.append(name, radius, save, infoNote('Every photo taken within this distance will be at this place.'));
+  return editor;
+}
+
 function editors(path, info) {
   const row = document.createElement('div');
   row.className = 'info-editor-buttons';
   const date = dateEditor(path, info);
   const place = placeEditor(path, info);
-  const toggle = (editor, other) => () => {
-    other.hidden = true;
+  // only a place that isn't named yet, as one that is can be changed from its own page
+  const label = info.location && !info.location.label ? labelEditor(path, info) : null;
+  const all = [date, place, label].filter(Boolean);
+  // one at a time
+  const toggle = editor => () => {
+    all.filter(other => other !== editor).forEach(other => other.hidden = true);
     editor.hidden = !editor.hidden;
     if (!editor.hidden && editor.open) {
       editor.open();
     }
   };
-  row.append(infoButton('Change date', toggle(date, place)), infoButton('Change place', toggle(place, date)));
+  row.append(infoButton('Change date', toggle(date)), infoButton('Change place', toggle(place)));
+  if (label) {
+    row.append(infoButton('Name this place', toggle(label)));
+  }
   const wrapper = document.createElement('section');
-  wrapper.append(row, date, place);
+  wrapper.append(row, ...all);
   return wrapper;
 }
 
@@ -352,6 +423,7 @@ async function showInfo(path) {
     if (location) {
       const coordinates = `${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}`;
       body.push(infoSection(location.set ? 'Location, set by hand' : 'Location', [
+        ...(location.label ? [{label: 'Place', value: location.label, href: placeLabelUrl(location.label)}] : []),
         ...[['Near', location.city], ['County', location.county], ['State', location.state], ['Country', location.country]]
           .filter(([, value]) => value)
           .map(([label, value]) => ({label, value})),

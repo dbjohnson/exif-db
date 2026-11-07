@@ -4,15 +4,23 @@ the names of their folders say, such as "2002.03.11 - Escalante".  Old photos mo
 folder to go on, and many phones don't record a location at all.
 """
 import csv
+import json
+import math
 import os
 import re
+import threading
 
 from iso3166 import countries_by_alpha2
 
 from api import exif, movies, towns
+from api.worklog import save_json
 
 LOCATIONS_CSV = '/storage/locations.csv'
-CITY, STATE, COUNTRY, FOLDER, AREA = 'city', 'state', 'country', 'folder', 'area'
+# places given a name, such as Home: a point and how far around it counts, in metres
+LABELS_JSON = '/storage/place_labels.json'
+LABEL_RADII = (100, 250, 500, 1000, 5000)
+DEFAULT_RADIUS = 250
+CITY, STATE, COUNTRY, FOLDER, AREA, LABEL = 'city', 'state', 'country', 'folder', 'area', 'label'
 # the names people actually use, in place of the official ones
 COUNTRY_NAMES = {'US': 'United States', 'GB': 'United Kingdom', 'RU': 'Russia', 'KR': 'South Korea'}
 MAX_RESULTS = 200
@@ -27,6 +35,7 @@ TOWN_SUGGESTIONS = 10
 # what comes before a folder's name: "2002.03.11 - ", "2008.10 ", "2003 - "
 DATE_PREFIX = re.compile(r'^[\d._\- ]+')
 _cache = {}
+_labels_lock = threading.Lock()
 
 
 def country_name(code):
@@ -69,6 +78,62 @@ def _locations():
     return _cache['located']
 
 
+def labels():
+    """
+    The places given a name, by name, as {'name', 'lat', 'lon', 'radius'}
+    """
+    stamp = exif._file_stamps(LABELS_JSON)
+    if _cache.get('labels_stamp') != stamp:
+        found = {}
+        if os.path.exists(LABELS_JSON):
+            with open(LABELS_JSON) as fh:
+                found = {label['name']: label for label in json.load(fh)}
+        _cache.update(labels_stamp=stamp, labels=found)
+    return _cache['labels']
+
+
+def change_labels(changes):
+    """
+    Sets places' names, given as {name: label, or None to take it away}.  Returns what each of those
+    names was before, which this undoes
+    """
+    with _labels_lock:
+        current = dict(labels())
+        previous = {name: current.get(name) for name in changes}
+        for name, label in changes.items():
+            if label is None:
+                current.pop(name, None)
+            else:
+                current[name] = {
+                    'name': name,
+                    'lat': round(float(label['lat']), 5),
+                    'lon': round(float(label['lon']), 5),
+                    'radius': int(label['radius'])
+                }
+        save_json(LABELS_JSON, sorted(current.values(), key=lambda label: label['name'].casefold()))
+    return previous
+
+
+def radius_text(metres):
+    return f"{metres} m" if metres < 1000 else f"{metres / 1000:g} km"
+
+
+def _metres(lat, lon, other_lat, other_lon):
+    # near enough over the size of a place, and much quicker than the full formula
+    across = (lon - other_lon + 180) % 360 - 180
+    return math.hypot(across * math.cos(math.radians(lat)) * 111320, (lat - other_lat) * 110540)
+
+
+def label_at(lat, lon):
+    # the nearest named place this is in, if it's in one
+    inside = [
+        (_metres(lat, lon, label['lat'], label['lon']), label['name'])
+        for label in labels().values()
+        if _metres(lat, lon, label['lat'], label['lon']) <= label['radius']
+    ]
+    return min(inside)[1] if inside else None
+
+
 def _point(value):
     # "<lat> <lon>" as given by hand, or None for anything else, such as having no location
     try:
@@ -93,6 +158,7 @@ def _described(row):
     return {
         'lat': float(row['lat']),
         'lon': float(row['lon']),
+        'label': label_at(float(row['lat']), float(row['lon'])),
         'city': row['city'],
         'county': row['county'],
         'state': row['state'],
@@ -119,7 +185,12 @@ def search_towns(query):
         -counts.get((COUNTRY, town[3]), 0),
         town[0]
     ))
-    return [
+    named = [
+        {'label': label['name'], 'lat': label['lat'], 'lon': label['lon']}
+        for label in labels().values()
+        if not within and label['name'].casefold().startswith(name.casefold())
+    ]
+    return named + [
         {
             'label': ', '.join(part for part in (city, state, country_name(country)) if part),
             'lat': lat,
@@ -156,7 +227,8 @@ def _index():
     """
     stamp = (exif.shown_photos()[0], _cache.get('locations_stamp'), exif._file_stamps(movies.MOVIES_CSV))
     located = _locations()
-    stamp = (stamp[0], _cache['locations_stamp'], stamp[2])
+    named = labels()
+    stamp = (stamp[0], _cache['locations_stamp'], stamp[2], _cache['labels_stamp'])
     if _cache.get('index_stamp') == stamp:
         return _cache['index']
     entries = {}
@@ -165,9 +237,18 @@ def _index():
         entry = entries.setdefault((kind, key), {'kind': kind, 'key': key, 'label': label, 'detail': detail, 'photos': 0, 'movies': 0})
         entry[field] += 1
 
+    for label in named.values():
+        entries[(LABEL, label['name'])] = {
+            'kind': LABEL, 'key': label['name'], 'label': label['name'], 'detail': f"Within {radius_text(label['radius'])}",
+            'photos': 0, 'movies': 0
+        }
+
     def add(path, field):
         row = located.get(path)
         if row:
+            for label in named.values():
+                if _metres(float(row['lat']), float(row['lon']), label['lat'], label['lon']) <= label['radius']:
+                    entries[(LABEL, label['name'])][field] += 1
             name = country_name(row['country'])
             state = row['state']
             count(COUNTRY, row['country'], name, '', field)
@@ -185,7 +266,8 @@ def _index():
         add(path, 'photos')
     for clip in movies.clips():
         add(clip['path'], 'movies')
-    result = sorted(entries.values(), key=lambda entry: -(entry['photos'] + entry['movies']))
+    # named places first, as they're the ones chosen by hand
+    result = sorted(entries.values(), key=lambda entry: (entry['kind'] != LABEL, -(entry['photos'] + entry['movies'])))
     _cache.update(index_stamp=stamp, index=result)
     return result
 
@@ -199,7 +281,7 @@ def search(query):
     words = query.casefold().split()
     if not words:
         cities = [entry for entry in index if entry['kind'] == CITY][:BROWSE_CITIES]
-        return [entry for entry in index if entry['kind'] in (COUNTRY, STATE)] + cities
+        return [entry for entry in index if entry['kind'] in (LABEL, COUNTRY, STATE)] + cities
     return [
         entry for entry in index
         if all(word in f"{entry['label']} {entry['detail']}".casefold() for word in words)
@@ -216,6 +298,8 @@ def _box(key):
 
 
 def describe(kind, key):
+    if kind == LABEL and key not in labels():
+        return None
     if kind == AREA:
         return {'kind': AREA, 'key': key, 'label': 'On the map', 'detail': ''} if _box(key) else None
     return next((entry for entry in _index() if entry['kind'] == kind and entry['key'] == key), None)
@@ -279,6 +363,14 @@ def paths_at(kind, key):
         return {
             path for path, row in _locations().items()
             if south <= float(row['lat']) <= north and west <= float(row['lon']) <= east
+        }
+    if kind == LABEL:
+        label = labels().get(key)
+        if not label:
+            return set()
+        return {
+            path for path, row in _locations().items()
+            if _metres(float(row['lat']), float(row['lon']), label['lat'], label['lon']) <= label['radius']
         }
     if kind == FOLDER:
         return {

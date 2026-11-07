@@ -9,6 +9,7 @@
     <script src="/static/info.js"></script>
     {% if person %}<script src="/static/people.js"></script>{% endif %}
     <script src="/static/tags.js"></script>
+    {% if place_label %}<script src="/static/labels.js"></script>{% endif %}
     <script>
       const PHOTOS = {{ photos | tojson }};
       // whose page this is, or null
@@ -1508,6 +1509,7 @@
         {% if map_url %}<a href="{{ map_url }}">Map</a>{% endif %}
         {% if person %}<button onclick="togglePersonEdit()">Edit</button>{% endif %}
         {% if tag %}<button onclick="toggleTagEdit()">Edit</button>{% endif %}
+        {% if place_label %}<button onclick="toggleLabelEdit()">Edit</button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)">Select</button>
         {% if faces_checked %}<a id="filter-link" href="{{ other_filter_url }}">{{ 'All photos' if with_faces else 'Faces' }}</a>{% endif %}
         <a id="older-link" href="{{ older_url or '' }}" title="Older month"{% if not older_url %} hidden{% endif %}>‹ Older</a>
@@ -1515,6 +1517,25 @@
       </span>
     </div>
     {% if person %}{% include '_person_edit.html' %}{% endif %}
+    {% if place_label %}
+    <div id="label-edit" class="person-edit" hidden>
+      <label>
+        Name
+        <input id="label-new-name" type="text" maxlength="80" value="{{ place_label.name }}" aria-label="New name for {{ place_label.name }}" onkeydown="if (event.key === 'Enter') changePlaceLabel({{ place_label.name | tojson | forceescape }});" />
+      </label>
+      <label>
+        Within
+        <select id="label-radius" aria-label="How far around it counts">
+          {% for radius in label_radii %}
+          <option value="{{ radius }}"{% if radius == place_label.radius %} selected{% endif %}>{{ radius ~ ' m' if radius < 1000 else '{:g} km'.format(radius / 1000) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button onclick="changePlaceLabel({{ place_label.name | tojson | forceescape }})">Save</button>
+      <button class="person-remove" onclick="deletePlaceLabel(this, {{ place_label.name | tojson | forceescape }})">Delete name</button>
+      <p class="library-hint">Photos taken within this distance of where it was named count as being here. Deleting the name leaves the photos and their places alone.</p>
+    </div>
+    {% endif %}
     {% if tag %}
     <div id="tag-edit" class="person-edit" hidden>
       <label>

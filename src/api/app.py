@@ -1353,6 +1353,87 @@ async def _search_places(q: str = ''):
     return places.search(q)
 
 
+class PlaceLabel(BaseModel):
+    name: str
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    radius: int = places.DEFAULT_RADIUS
+    # moving a name that's already a place here, rather than refusing
+    replace: bool = False
+
+
+class PlaceLabelRename(BaseModel):
+    name: str
+    new_name: str
+    radius: int = None
+
+
+class PlaceLabelName(BaseModel):
+    name: str
+
+
+class PlaceLabelsRestore(BaseModel):
+    # as a change gave it: each name's place before, or None for a name that wasn't one
+    previous: dict[str, dict | None]
+
+
+def label_radius(radius):
+    if radius not in places.LABEL_RADII:
+        raise HTTPException(status_code=422, detail=f"The distance has to be one of {places.LABEL_RADII}")
+    return radius
+
+
+def place_label_url(name):
+    return f"/places/photos?{urlencode({'kind': places.LABEL, 'key': name})}"
+
+
+@app.get("/api/place-labels")
+async def _place_labels():
+    return list(places.labels().values())
+
+
+# naming a place, or moving one that has a name
+@app.post("/api/place-labels")
+async def _label_place(label: PlaceLabel):
+    name = clean_name(label.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="A name can't be blank")
+    if name in places.labels() and not label.replace:
+        raise HTTPException(status_code=409, detail=f"There's already a place called {name}")
+    previous = places.change_labels({name: {'lat': label.lat, 'lon': label.lon, 'radius': label_radius(label.radius)}})
+    return {'name': name, 'url': place_label_url(name), 'previous': previous}
+
+
+# a new name, a new distance around it, or both
+@app.post("/api/place-labels/change")
+async def _change_place_label(change: PlaceLabelRename):
+    label = places.labels().get(change.name)
+    if label is None:
+        raise HTTPException(status_code=404, detail="There's no place by that name")
+    new_name = clean_name(change.new_name)
+    if not new_name:
+        raise HTTPException(status_code=422, detail="A name can't be blank")
+    if new_name != change.name and new_name in places.labels():
+        raise HTTPException(status_code=409, detail=f"There's already a place called {new_name}")
+    radius = label['radius'] if change.radius is None else label_radius(change.radius)
+    changes = {change.name: None} if new_name != change.name else {}
+    previous = places.change_labels({**changes, new_name: {**label, 'radius': radius}})
+    return {'name': new_name, 'url': place_label_url(new_name), 'previous': previous}
+
+
+@app.post("/api/place-labels/delete")
+async def _delete_place_label(label: PlaceLabelName):
+    if label.name not in places.labels():
+        raise HTTPException(status_code=404, detail="There's no place by that name")
+    return {'previous': places.change_labels({label.name: None})}
+
+
+@app.post("/api/place-labels/restore")
+async def _restore_place_labels(restore: PlaceLabelsRestore):
+    places.change_labels(restore.previous)
+    return "saved"
+
+
 @app.get("/places/map")
 async def _places_map(request: Request, kind: str = None, key: str = None, lat: float = None, lon: float = None):
     focus = None
@@ -1396,6 +1477,9 @@ async def _place_photos(request: Request, kind: str, key: str, year: str = None)
         year,
         back_url="/places/map" if kind == places.AREA else "/places",
         back_label="Map" if kind == places.AREA else "Places",
+        # a named place can be renamed, made bigger or smaller, or have its name taken away
+        place_label=places.labels().get(key) if kind == places.LABEL else None,
+        label_radii=places.LABEL_RADII,
         map_url=None if kind == places.AREA or not places.bounds(kind, key) else f"/places/map?{urlencode({'kind': kind, 'key': key})}",
         # newest first, with their own heading, since a movie has no place among a year's photos
         movies=[
