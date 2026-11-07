@@ -2059,21 +2059,17 @@
           </button>
           {% endif %}
           <span class="viewer-library-actions"{% if folder == 'trash' %} hidden{% endif %}>
-          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the kiosk" aria-label="Approve">
-            <i class="fa fa-check" aria-hidden="true"></i>
-          </button>
           <button id="viewer-favorite" class="favorite-toggle" onclick="toggleFavorite()" title="Favorite" aria-label="Favorite" aria-pressed="false">
             <i class="fa fa-heart-o" aria-hidden="true"></i>
           </button>
-          <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
-            <i class="fa fa-tags" aria-hidden="true"></i>
+          {% if folder != 'trash' %}
+          <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
+            <i class="fa fa-trash-o" aria-hidden="true"></i>
           </button>
-          <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
-            <i class="fa fa-rotate-right" aria-hidden="true"></i>
+          {% endif %}
+          <button id="viewer-approve" onclick="approveCurrent()" title="Approve for the kiosk" aria-label="Approve">
+            <i class="fa fa-check" aria-hidden="true"></i>
           </button>
-          <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
-            <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
-          </a>
           {% if folder == 'hidden' %}
           <button onclick="unhidePhotos([current])" title="Unhide" aria-label="Unhide">
             <i class="fa fa-eye" aria-hidden="true"></i>
@@ -2083,11 +2079,15 @@
             <i class="fa fa-eye-slash" aria-hidden="true"></i>
           </button>
           {% endif %}
-          {% if folder != 'trash' %}
-          <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
-            <i class="fa fa-trash-o" aria-hidden="true"></i>
+          <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
+            <i class="fa fa-rotate-right" aria-hidden="true"></i>
           </button>
-          {% endif %}
+          <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
+            <i class="fa fa-tags" aria-hidden="true"></i>
+          </button>
+          <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
+            <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
+          </a>
           <button onclick="sharePhoto()" title="Share a link to this photo" aria-label="Share">
             <i class="fa fa-share-square-o" aria-hidden="true"></i>
           </button>
