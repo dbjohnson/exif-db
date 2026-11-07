@@ -39,6 +39,7 @@
       let listMonths = [];
       let timeline = null;
       let dateJumper = null;
+      let sideJumper = null;
       let showingKey = null;
       let shownTiles = new Map();
 
@@ -242,6 +243,7 @@
         }
         showingKey = month.key;
         dateJumper.show(month);
+        sideJumper.show(month);
       }
 
       function startList() {
@@ -252,6 +254,8 @@
           aspect: 10 / 16
         });
         dateJumper = dateJump('jump-year', 'jump-month', timeline, key => timeline.scrollTo(key));
+        sideJumper = sideDates('side-years', 'side-months', timeline, key => timeline.scrollTo(key));
+        sideFilters();
         window.addEventListener('scroll', () => requestAnimationFrame(noteShowing), {passive: true});
         requestAnimationFrame(noteShowing);
       }
@@ -260,6 +264,7 @@
       function relist() {
         timeline.setMonths(listMonths);
         dateJumper.refill();
+        sideJumper.refill();
         for (const month of listMonths) {
           timeline.reload(month.key);
         }
@@ -1110,6 +1115,9 @@
       {% endif %}
     </div>
     </header>
+    <div class="library-layout">
+    {% set filtering = true %}{% set side_people = false %}{% set side_folders = false %}{% include '_sidebar.html' %}
+    <main class="library-main">
     <div id="empty" class="no-images" hidden>
       {% if filters %}No movies match these filters.{% else %}No movies yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
     </div>
@@ -1195,5 +1203,7 @@
       <div id="hidden-grid" class="movie-grid"></div>
     </details>
     <div id="clips" class="library-days"></div>
+    </main>
+    </div>
   </body>
 </html>

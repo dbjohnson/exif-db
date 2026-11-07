@@ -1,0 +1,55 @@
+{# finding your way on a wide screen: dates, filters and folders down the side, which on a phone are the icons in the header instead #}
+<aside class="library-sidebar" aria-label="Find">
+  <section class="side-section">
+    <h3>Go to</h3>
+    <div id="side-years" class="side-years"></div>
+    <div id="side-months" class="side-months"></div>
+  </section>
+  {% if filtering %}
+  <section class="side-section">
+    <h3>{{ 'Tag or person' if side_people else 'Tag' }}</h3>
+    {% if filter_tag or filter_person %}
+    <span class="filter-chip">
+      <i class="fa {{ 'fa-tag' if filter_tag else 'fa-user' }}" aria-hidden="true"></i>
+      {{ filter_tag or filter_person }}
+      <button type="button" onclick="filterTo({tag: null, person: null})" title="Clear" aria-label="Clear">×</button>
+    </span>
+    {% else %}
+    <input id="side-who-search" class="side-search" type="search" placeholder="Find a {{ 'tag or person' if side_people else 'tag' }}" aria-label="Find a {{ 'tag or person' if side_people else 'tag' }}" />
+    <div id="side-who" class="side-list">
+      {% for name in tag_names_shown %}
+      <button type="button" data-kind="tag" data-name="{{ name }}"><i class="fa fa-tag" aria-hidden="true"></i>{{ name }}</button>
+      {% endfor %}
+      {% if side_people %}
+      {% for name in known_names %}
+      <button type="button" data-kind="person" data-name="{{ name }}"><i class="fa fa-user" aria-hidden="true"></i>{{ name }}</button>
+      {% endfor %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+  <section class="side-section">
+    <h3>Place</h3>
+    {% if place %}
+    <span class="filter-chip">
+      <i class="fa fa-map-marker" aria-hidden="true"></i>
+      {{ place.label }}
+      <button type="button" onclick="setPlace(null)" title="Clear" aria-label="Clear">×</button>
+    </span>
+    {% else %}
+    <input id="side-place" class="side-search" type="text" maxlength="120" placeholder="Named place, town or folder" aria-label="Show only a place" />
+    {% endif %}
+  </section>
+  {% if side_folders %}
+  <section class="side-section side-folders">
+    <h3>Folders</h3>
+    <a href="/library/favorites"><i class="fa fa-heart" aria-hidden="true"></i>Favorites</a>
+    <a href="/library/hidden"><i class="fa fa-eye-slash" aria-hidden="true"></i>Hidden</a>
+    <a href="/library/recycle-bin"><i class="fa fa-trash-o" aria-hidden="true"></i>Recycle bin</a>
+    <a href="/library/cameras"><i class="fa fa-camera" aria-hidden="true"></i>Cameras</a>
+    <a href="/screenshots"><i class="fa fa-mobile" aria-hidden="true"></i>Screenshots</a>
+    <a href="/library/folders"><i class="fa fa-folder-o" aria-hidden="true"></i>All folders and tags</a>
+  </section>
+  {% endif %}
+  {% endif %}
+</aside>

@@ -181,16 +181,19 @@ class Timeline {
   }
 
   fill(entry, items) {
-    const above = entry.section.getBoundingClientRect().bottom <= this.top();
-    // exactly, as rows of tiles have fractions of a pixel that would add up month by month
-    const before = entry.body.getBoundingClientRect().height;
+    // what's being looked at stays where it is: the month at the top, unless it's this one, whose
+    // photos are what's arriving
+    const showing = this.showing();
+    const anchor = showing && showing.key !== entry.month.key ? this.entries.get(showing.key).section : null;
+    const before = anchor?.getBoundingClientRect().top;
     entry.body.replaceChildren(this.render(entry.month, items));
     entry.body.style.height = '';
     entry.state = 'loaded';
-    // a month above what's being looked at mustn't move it
-    const change = entry.body.getBoundingClientRect().height - before;
-    if (above && change) {
-      window.scrollBy(0, change);
+    if (anchor) {
+      const moved = anchor.getBoundingClientRect().top - before;
+      if (moved) {
+        window.scrollBy(0, moved);
+      }
     }
   }
 
@@ -353,7 +356,7 @@ function setPlace(place) {
 // places to choose from as their names are typed: named places, towns, states, countries and folders
 function placeFilter(input) {
   const list = document.createElement('datalist');
-  list.id = 'filter-places';
+  list.id = `${input.id}-places`;
   input.setAttribute('list', list.id);
   input.after(list);
   const found = new Map();
@@ -389,3 +392,125 @@ function placeFilter(input) {
     }
   });
 }
+
+// ---- the sidebar on a wide screen
+
+// years down the side, and the months of the one showing, for going to a date
+function sideDates(yearsId, monthsId, timeline, chosen) {
+  const yearsList = document.getElementById(yearsId);
+  const monthsGrid = document.getElementById(monthsId);
+  const NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let present = new Map();
+  let shownYear = null;
+
+  function fill() {
+    present = new Map();
+    for (const month of timeline.months) {
+      const year = month.key === 'undated' ? 'undated' : month.year;
+      if (!year) {
+        continue;
+      }
+      if (!present.has(year)) {
+        present.set(year, []);
+      }
+      present.get(year).push(month);
+    }
+    yearsList.replaceChildren(...[...present].map(([year, months]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.year = year;
+      button.textContent = year === 'undated' ? 'Undated' : year;
+      button.title = `${months.reduce((sum, month) => sum + month.count, 0).toLocaleString()} in ${button.textContent}`;
+      button.classList.toggle('side-undated', year === 'undated');
+      // the newest month of the year, which is where its heading is
+      button.onclick = () => chosen(months[0].key);
+      return button;
+    }));
+    shownYear = null;
+  }
+
+  function fillMonths(year) {
+    shownYear = year;
+    const has = new Set((present.get(year) || []).map(month => month.key));
+    monthsGrid.hidden = year === 'undated';
+    monthsGrid.replaceChildren(...NAMES.map((name, index) => {
+      const key = `${year}-${String(index + 1).padStart(2, '0')}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.key = key;
+      button.textContent = name;
+      button.disabled = !has.has(key);
+      button.onclick = () => chosen(key);
+      return button;
+    }));
+  }
+
+  function show(month) {
+    const year = month?.key === 'undated' ? 'undated' : month?.year;
+    if (!year) {
+      return;
+    }
+    if (year !== shownYear) {
+      fillMonths(year);
+      for (const button of yearsList.children) {
+        const current = button.dataset.year === year;
+        button.toggleAttribute('aria-current', current);
+        if (current) {
+          // within the sidebar, which scrolls by itself
+          const side = yearsList.closest('.library-sidebar');
+          const top = button.offsetTop - side.offsetTop;
+          if (top < side.scrollTop || top > side.scrollTop + side.clientHeight - button.offsetHeight) {
+            side.scrollTop = top - side.clientHeight / 3;
+          }
+        }
+      }
+    }
+    for (const button of monthsGrid.children) {
+      button.toggleAttribute('aria-current', button.dataset.key === month.key);
+    }
+  }
+
+  fill();
+  return {
+    show,
+    refill() {
+      fill();
+    }
+  };
+}
+
+// the sidebar's filters: tags and people to choose from, found by typing, and a place
+function sideFilters() {
+  const list = document.getElementById('side-who');
+  const search = document.getElementById('side-who-search');
+  if (list) {
+    list.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (button) {
+        const {kind, name} = button.dataset;
+        filterTo({tag: kind === 'tag' ? name : null, person: kind === 'person' ? name : null});
+      }
+    });
+    search.addEventListener('input', () => {
+      const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+      for (const button of list.children) {
+        const name = button.dataset.name.toLowerCase();
+        button.hidden = !words.every(word => name.includes(word));
+      }
+    });
+  }
+  const place = document.getElementById('side-place');
+  if (place) {
+    placeFilter(place);
+  }
+}
+
+// how tall the sticky header is, which the sidebar sticks beneath
+function noteHeaderHeight() {
+  const header = document.querySelector('.app-header');
+  if (header) {
+    document.documentElement.style.setProperty('--header-height', `${header.offsetHeight}px`);
+  }
+}
+window.addEventListener('DOMContentLoaded', noteHeaderHeight);
+window.addEventListener('resize', noteHeaderHeight);

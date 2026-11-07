@@ -200,6 +200,7 @@
       const monthPhotos = new Map();
       let timeline = null;
       let dateJumper = null;
+      let sideJumper = null;
       let showingKey = null;
 
       const filterQuery = (extra = {}) => new URLSearchParams({...FILTERS, ...extra});
@@ -336,6 +337,7 @@
         }
         showingKey = month.key;
         dateJumper?.show(month);
+        sideJumper?.show(month);
         if (!PRELOADED_PHOTOS) {
           const url = new URL(window.location.href);
           url.searchParams.set('date', month.key);
@@ -351,6 +353,7 @@
           if (response.ok) {
             timeline.setMonths(await response.json());
             dateJumper?.refill();
+            sideJumper?.refill();
           }
         } catch (error) {
           console.log(error);
@@ -385,6 +388,10 @@
         if (document.getElementById('jump-year')) {
           dateJumper = dateJump('jump-year', 'jump-month', timeline, goTo);
         }
+        if (document.getElementById('side-years')) {
+          sideJumper = sideDates('side-years', 'side-months', timeline, goTo);
+        }
+        sideFilters();
         const asked = new URLSearchParams(window.location.search).get('date');
         if (asked && MONTHS.length) {
           // once the header's height is known
@@ -1605,10 +1612,13 @@
         {% if tag %}<button onclick="toggleTagEdit()" title="Edit"><i class="fa fa-pencil" aria-hidden="true"></i><span class="toolbar-word">Edit</span></button>{% endif %}
         {% if place_label %}<button onclick="toggleLabelEdit()" title="Edit"><i class="fa fa-pencil" aria-hidden="true"></i><span class="toolbar-word">Edit</span></button>{% endif %}
         <button id="select-toggle" onclick="setSelecting(!selecting)" title="Select" aria-pressed="false"><i class="fa fa-check-square-o" aria-hidden="true"></i><span class="toolbar-word">Select</span></button>
-        {% if filtering %}<a href="/library/folders" title="Folders"><i class="fa fa-folder-o" aria-hidden="true"></i><span class="toolbar-word">Folders</span></a>{% endif %}
+        {% if filtering %}<a class="toolbar-folders" href="/library/folders" title="Folders"><i class="fa fa-folder-o" aria-hidden="true"></i><span class="toolbar-word">Folders</span></a>{% endif %}
       </span>
     </div>
     </header>
+    <div class="library-layout">
+    {% if months and not photos %}{% set side_people = true %}{% set side_folders = filtering %}{% include '_sidebar.html' %}{% endif %}
+    <main class="library-main">
     {% if person %}{% include '_person_edit.html' %}{% endif %}
     {% if place_label %}
     <div id="label-edit" class="person-edit" hidden>
@@ -1667,6 +1677,8 @@
     </section>
     {% endif %}
     <div id="days" class="library-days"></div>
+    </main>
+    </div>
     <div id="select-bar" class="select-bar" hidden>
       <span id="select-count"></span>
       <button onclick="selectEverything()">Select all</button>
