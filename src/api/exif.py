@@ -15,6 +15,9 @@ FAVORITES_CSV = '/storage/favorites.csv'
 ROTATIONS_CSV = '/storage/rotations.csv'
 # dates given to photos by hand, which take the place of what's in the file
 DATES_CSV = '/storage/dates.csv'
+# where photos were taken, given by hand: "<lat> <lon>", NO_LOCATION, or empty for the photo's own
+LOCATIONS_SET_CSV = '/storage/locations_set.csv'
+NO_LOCATION = 'none'
 # the same, with a path in place of the photo id
 DELETIONS_CSV = '/storage/deletions.csv'
 MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
@@ -48,6 +51,9 @@ NO_DATE = '0000:00:00 00:00:00'
 LIBRARY_EARLIEST_YEAR = 1902
 # photos in a range of days, given as the first day and the day after the last, each "YYYY:MM:DD"
 RECENT_FILTER = "DateTimeOriginal >= ? AND DateTimeOriginal < ?"
+# which camera took a photo, as text with nothing for none, so that every camera has one name to go by
+CAMERA_MAKE = "NULLIF(TRIM(CAST(Make AS VARCHAR)), '')"
+CAMERA_MODEL = "NULLIF(TRIM(CAST(Model AS VARCHAR)), '')"
 # a photo's "YYYY:MM" in the library, or NULL if its date can't be trusted
 LIBRARY_MONTH = f"""
     CASE WHEN regexp_matches(DateTimeOriginal, '^\\d{{4}}:(0[1-9]|1[0-2]):')
@@ -290,6 +296,7 @@ def _with_status():
     _load_log('favorites', FAVORITES_CSV)
     _load_log('rotations', ROTATIONS_CSV)
     _load_log('dates', DATES_CSV)
+    _load_log('locations_set', LOCATIONS_SET_CSV)
     _load_deletions()
     return f"""
         (
@@ -629,6 +636,116 @@ def assign_date(photo_ids, date):
 
 def restore_dates(previous):
     _append_log(DATES_CSV, list(previous.items()))
+
+
+def _assigned(table, photo_ids):
+    # what each of these photos has been given by hand in a log, with '' for nothing
+    _with_status()
+    return dict(db.execute(
+        f"""
+        SELECT photo_id, COALESCE({table}.value, '')
+        FROM exif LEFT JOIN {table} USING (photo_id)
+        WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))
+        """,
+        [list(photo_ids)]
+    ).fetchall())
+
+
+def set_taken(photo_id, taken):
+    """
+    Gives one photo an exact date and time.  Returns what it was before, as restore_dates takes it
+    """
+    previous = _assigned('dates', [photo_id])
+    _append_log(DATES_CSV, [(photo_id, taken.strftime('%Y:%m:%d %H:%M:%S'))])
+    return previous
+
+
+def own_dates(photo_ids):
+    """
+    Takes photos back to the dates in their files.  Returns what those given one by hand had, as
+    restore_dates takes it
+    """
+    previous = {photo_id: value for photo_id, value in _assigned('dates', photo_ids).items() if value}
+    _append_log(DATES_CSV, [(photo_id, '') for photo_id in previous])
+    return previous
+
+
+def own_taken(photo_ids):
+    # each photo's date as it's now used, by photo id
+    return dict(db.execute(
+        f"SELECT photo_id, DateTimeOriginal FROM {_with_status()} WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))",
+        [list(photo_ids)]
+    ).fetchall())
+
+
+def own_date(photo_id):
+    # the date in the photo's file, whatever it's been given since
+    load_csv()
+    row = db.execute("SELECT DateTimeOriginal FROM exif WHERE photo_id = ?", [photo_id]).fetchone()
+    return row[0] if row and row[0] != NO_DATE else None
+
+
+def set_locations(photo_ids, value):
+    """
+    Says where photos were taken, as "<lat> <lon>", NO_LOCATION, or '' for what their files say.
+    Returns what each had before, for restore_locations
+    """
+    previous = _assigned('locations_set', photo_ids)
+    _append_log(LOCATIONS_SET_CSV, [(photo_id, value) for photo_id in previous])
+    return previous
+
+
+def restore_locations(previous):
+    _append_log(LOCATIONS_SET_CSV, list(previous.items()))
+
+
+def locations_set():
+    """
+    Where photos were said to be taken by hand, by the path of each one's file in the library
+    """
+    _with_status()
+    return dict(db.execute(
+        "SELECT SourceFile, locations_set.value FROM exif JOIN locations_set USING (photo_id) WHERE locations_set.value IS NOT NULL"
+    ).fetchall())
+
+
+def cameras():
+    """
+    Every camera with photos in the library, as its make and model, how many photos it took, the
+    years of its first and last, and one to show.  Those with the most photos first, as the
+    library's own cameras are, rather than those of friends who sent a photo or two.  Photos with no
+    camera, such as screenshots and scans, go last
+    """
+    rows = db.execute(
+        f"""
+        SELECT
+            {CAMERA_MAKE} AS make, {CAMERA_MODEL} AS model, COUNT(*),
+            MIN({LIBRARY_MONTH}), MAX({LIBRARY_MONTH}),
+            first(struct_pack(path := SourceFile, rotation := rotation) ORDER BY
+                favorite DESC, review_status = ? DESC, DateTimeOriginal DESC
+            )
+        FROM {_with_status()}
+        WHERE review_status <> ?
+        GROUP BY make, model
+        ORDER BY make IS NULL AND model IS NULL, COUNT(*) DESC, MAX({LIBRARY_MONTH}) DESC NULLS LAST
+        """,
+        [APPROVED, REJECTED]
+    ).fetchall()
+    return [
+        {
+            'make': make,
+            'model': model,
+            'photos': count,
+            'first': first[:4] if first else None,
+            'last': last[:4] if last else None,
+            'cover': cover
+        }
+        for make, model, count, first, last, cover in rows
+    ]
+
+
+def camera_photos(make, model):
+    return _library_rows(f"{CAMERA_MAKE} IS NOT DISTINCT FROM ? AND {CAMERA_MODEL} IS NOT DISTINCT FROM ?", [make, model])
 
 
 def face_counts():

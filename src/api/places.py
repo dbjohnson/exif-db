@@ -9,7 +9,7 @@ import re
 
 from iso3166 import countries_by_alpha2
 
-from api import exif, movies
+from api import exif, movies, towns
 
 LOCATIONS_CSV = '/storage/locations.csv'
 CITY, STATE, COUNTRY, FOLDER, AREA = 'city', 'state', 'country', 'folder', 'area'
@@ -22,6 +22,8 @@ AREA_MOVIES = 12
 # how finely to share a circle on the map: about a hundred metres
 POINT_DECIMALS = 3
 BROWSE_CITIES = 60
+# how many towns to suggest for a name
+TOWN_SUGGESTIONS = 10
 # what comes before a folder's name: "2002.03.11 - ", "2008.10 ", "2003 - "
 DATE_PREFIX = re.compile(r'^[\d._\- ]+')
 _cache = {}
@@ -36,9 +38,11 @@ def country_name(code):
 
 def _locations():
     """
-    Where each located file was taken, by its path
+    Where each located file was taken, by its path.  A place given by hand takes the place of what
+    the file says, and so does saying it has none
     """
-    stamp = exif._file_stamps(LOCATIONS_CSV)
+    # the index too, which says which file each photo given a place by hand is
+    stamp = exif._file_stamps(LOCATIONS_CSV, exif.LOCATIONS_SET_CSV, exif.EXIF_CSV)
     if _cache.get('locations_stamp') != stamp:
         located = {}
         read = set()
@@ -49,8 +53,80 @@ def _locations():
                     # a row cut short by a crash has no place to go on either
                     if row.get('lat') and row.get('country') is not None:
                         located[row['SourceFile']] = row
-        _cache.update(locations_stamp=stamp, located=located, read=read)
+        own = dict(located)
+        for path, value in exif.locations_set().items():
+            read.add(path)
+            point = _point(value)
+            if point is None:
+                located.pop(path, None)
+                continue
+            city, county, state, country = towns.towns().nearest(*point)
+            located[path] = {
+                'SourceFile': path, 'lat': f"{point[0]:.5f}", 'lon': f"{point[1]:.5f}",
+                'city': city, 'county': county, 'state': state, 'country': country, 'set': True
+            }
+        _cache.update(locations_stamp=stamp, located=located, read=read, own=own)
     return _cache['located']
+
+
+def _point(value):
+    # "<lat> <lon>" as given by hand, or None for anything else, such as having no location
+    try:
+        lat, lon = map(float, value.split())
+    except ValueError:
+        return None
+    return (lat, lon) if abs(lat) <= 90 and abs(lon) <= 180 else None
+
+
+def point_value(lat, lon):
+    return f"{lat:.5f} {lon:.5f}"
+
+
+def own_location(path):
+    # what the file itself says, whatever's been given by hand since
+    _locations()
+    row = _cache['own'].get(path)
+    return _described(row) if row else None
+
+
+def _described(row):
+    return {
+        'lat': float(row['lat']),
+        'lon': float(row['lon']),
+        'city': row['city'],
+        'county': row['county'],
+        'state': row['state'],
+        'country': country_name(row['country']),
+        'set': bool(row.get('set'))
+    }
+
+
+def search_towns(query):
+    """
+    Towns to suggest for a name, such as "Ann Arbor" or "Paris, France": those named exactly that
+    first, and then those in the states and countries with the most photos already
+    """
+    name, *rest = [part.strip() for part in query.split(',')]
+    within = [part.casefold() for part in rest if part]
+    found = [
+        town for town in towns.towns().named(name, 2000)
+        if all(any(part in field.casefold() for field in (town[1], town[2], town[3], country_name(town[3]))) for part in within)
+    ]
+    counts = {(entry['kind'], entry['key']): entry['photos'] for entry in _index() if entry['kind'] in (STATE, COUNTRY)}
+    found.sort(key=lambda town: (
+        town[0].casefold() != name.casefold(),
+        -counts.get((STATE, f"{town[2]}|{town[3]}"), 0),
+        -counts.get((COUNTRY, town[3]), 0),
+        town[0]
+    ))
+    return [
+        {
+            'label': ', '.join(part for part in (city, state, country_name(country)) if part),
+            'lat': lat,
+            'lon': lon
+        }
+        for city, _, state, country, lat, lon in found[:TOWN_SUGGESTIONS]
+    ]
 
 
 def location_read(path):
@@ -61,16 +137,7 @@ def location_read(path):
 
 def location_of(path):
     row = _locations().get(path)
-    if not row:
-        return None
-    return {
-        'lat': float(row['lat']),
-        'lon': float(row['lon']),
-        'city': row['city'],
-        'county': row['county'],
-        'state': row['state'],
-        'country': country_name(row['country'])
-    }
+    return _described(row) if row else None
 
 
 def _folder_name(folder):
@@ -167,7 +234,8 @@ def points():
     """
     Where things are, as [lat, lon, how many], with things close together sharing a point
     """
-    stamp = (exif.shown_photos()[0], exif._file_stamps(LOCATIONS_CSV), exif._file_stamps(movies.MOVIES_CSV))
+    _locations()
+    stamp = (exif.shown_photos()[0], _cache['locations_stamp'], exif._file_stamps(movies.MOVIES_CSV))
     if _cache.get('points_stamp') != stamp:
         counts = {}
         for _, row, _ in _shown_located():

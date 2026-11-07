@@ -53,7 +53,14 @@ The bottom of `/library` has folders that gather photos from every month, one ye
 - `/library/hidden` has photos hidden from the library or left unchecked in the review queue.  Unhide puts a photo back in the library as unreviewed.  Copies hidden automatically as duplicates aren't here; `/duplicates` has those.
 - `/library/recycle-bin` has photos deleted from the library, by the day they were deleted (from `deletions.csv`, or for older deletions the time the file moved).  Restore moves a photo's files back; one deleted before the last scan returns to the library after the next one.  Delete forever removes its files from the NAS for good, along with the thumbnails made from them and Synology's copies in the photo's old `@eaDir`, and can't be undone.  Files deleted with a photo, such as a Live Photo's video, go with it either way.  Videos deleted on their own, and anything put in `deleted/` by hand rather than from the library, aren't shown; emptying the trash from `/manage` still removes them.
 - Screenshots (below).
+- `/library/cameras` has every camera with photos in the library, those with the most photos first, each with the years it was used and a page of its photos one year at a time.  Photos with no camera in their details, such as screenshots and scans, are under No camera.  A photo's info card links its camera here.
 - A folder for each tag, after those.
+
+## Changing a date or place
+
+A photo's info card has Change date, for an exact date and time, and Change place, for a town found by name or a point tapped on the map.  Either can go back to what the photo's file says, and each change can be undone.  In any month or folder, Select, then Own date, takes photos back to their files' dates, and Place sets a town for many photos at once, says they have none, or goes back to their own.
+
+Dates set by hand go in `dates.csv` like those set by Select.  Places set by hand go in `locations_set.csv` by photo id, as a point or as having none, and take the place of what `locations.csv` says everywhere places are used: the info card, `/places` and its map.  Neither changes the original files.
 
 ## Tags
 

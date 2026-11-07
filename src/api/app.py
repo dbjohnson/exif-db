@@ -43,6 +43,7 @@ templates.env.globals['is_family'] = lambda name: name in people.family()
 templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(name), **people.relatives(name)}
 # for suggesting tags wherever photos can be tagged
 templates.env.globals['tag_names'] = tags.names
+templates.env.globals['earliest_year'] = exif.LIBRARY_EARLIEST_YEAR
 
 
 @app.middleware("http")
@@ -551,6 +552,14 @@ def folder_tiles(with_faces, binned):
     ]
     # not with faces, as nobody wants a screenshot for its faces
     screenshots = None if with_faces else screenshots_tile()
+    cameras = exif.cameras()
+    tiles.append({
+        'name': 'Cameras',
+        'url': '/library/cameras',
+        'photos': len(cameras),
+        'cover': cameras[0]['cover'] if cameras else None,
+        'icon': 'fa-camera'
+    })
     tagged = [
         {**tile(name, tag_url(name), exif.photos_with_ids(tags.photo_ids(name)), 'fa-tag'), 'tag': True}
         for name in tags.names()
@@ -732,6 +741,56 @@ async def _tag(request: Request, name: str, year: str = None):
             "No photos have this tag yet. To add some, open a photo and press the tag button, or "
             "select photos in any month and use Tag."
         )
+    )
+
+
+def camera_name(make, model):
+    """
+    What to call a camera: its model if that already says who made it, as "NIKON D90" does for
+    "NIKON CORPORATION", or else both, as in "Apple iPhone 15 Pro"
+    """
+    if not make and not model:
+        return 'No camera'
+    if not make or not model:
+        return make or model
+    folded = model.casefold()
+    if any(len(word) > 2 and word in folded for word in make.casefold().split()):
+        return model
+    return f"{make} {model}"
+
+
+@app.get("/library/cameras")
+async def _cameras(request: Request):
+    cameras = [
+        {
+            **camera,
+            'name': camera_name(camera['make'], camera['model']),
+            'url': info.camera_url(camera['make'], camera['model']),
+            'years': (
+                None if not camera['first'] else
+                camera['first'] if camera['first'] == camera['last'] else f"{camera['first']} to {camera['last']}"
+            )
+        }
+        for camera in exif.cameras()
+    ]
+    return templates.TemplateResponse(request=request, name="cameras.html", context={"cameras": cameras})
+
+
+@app.get("/library/camera")
+async def _camera(request: Request, make: str = None, model: str = None, year: str = None):
+    photos = exif.camera_photos(make or None, model or None)
+    if not photos:
+        return RedirectResponse(url='/library/cameras')
+    name = camera_name(make, model)
+    return photos_by_year_page(
+        request,
+        name,
+        photos,
+        info.camera_url(make, model),
+        year,
+        back_url="/library/cameras",
+        back_label="Cameras",
+        hint="Photos with no camera in their details, such as screenshots, scans and saved pictures." if not make and not model else None
     )
 
 
@@ -1352,7 +1411,9 @@ async def _photo_info(path: str):
     details = info.photo_info(path)
     if details is None:
         raise HTTPException(status_code=404, detail="That photo isn't in the index")
-    return details
+    # what a page needs to follow a change of date
+    shown = library_photo({'taken': details['taken_raw'], 'date_assigned': details['date_assigned']})
+    return {**details, 'when': shown['when']}
 
 
 UNDATED_YEAR = 'Undated'
@@ -1579,6 +1640,79 @@ async def _assign_date(assignment: DateAssignment):
             detail=f"The date has to be from {exif.LIBRARY_EARLIEST_YEAR} up to today"
         )
     return {'previous': exif.assign_date(assignment.photo_ids, assignment.date)}
+
+
+class TakenChange(BaseModel):
+    photo_id: str
+    taken: datetime.datetime
+
+
+# one photo's exact date and time, as library_photo describes it
+@app.post("/api/photo-date")
+async def _set_taken(change: TakenChange):
+    if not valid_photo_date(change.taken.date()):
+        raise HTTPException(
+            status_code=422,
+            detail=f"The date has to be from {exif.LIBRARY_EARLIEST_YEAR} up to today"
+        )
+    previous = exif.set_taken(change.photo_id, change.taken)
+    taken = change.taken.strftime('%Y:%m:%d %H:%M:%S')
+    return {'previous': previous, **library_photo({'taken': taken, 'date_assigned': False}), 'taken': taken}
+
+
+class PhotoIds(BaseModel):
+    photo_ids: list[str]
+
+
+# back to the dates in the photos' files
+@app.post("/api/dates/own")
+async def _own_dates(photos: PhotoIds):
+    previous = exif.own_dates(photos.photo_ids)
+    # what each changed one's date is now, as a page follows a change of date
+    taken = exif.own_taken(list(previous))
+    return {
+        'previous': previous,
+        'photos': {
+            photo_id: {'taken': value, 'when': library_photo({'taken': value, 'date_assigned': False})['when']}
+            for photo_id, value in taken.items()
+        }
+    }
+
+
+class LocationChange(BaseModel):
+    photo_ids: list[str]
+    # a point, or neither for the photos having none
+    lat: float = Field(default=None, ge=-90, le=90)
+    lon: float = Field(default=None, ge=-180, le=180)
+    # what their files say instead
+    own: bool = False
+
+
+class LocationRestore(BaseModel):
+    # as /api/locations gave it
+    previous: dict[str, str]
+
+
+@app.post("/api/locations")
+async def _set_locations(change: LocationChange):
+    if change.own:
+        value = ''
+    elif change.lat is not None and change.lon is not None:
+        value = places.point_value(change.lat, change.lon)
+    else:
+        value = exif.NO_LOCATION
+    return {'previous': exif.set_locations(change.photo_ids, value)}
+
+
+@app.post("/api/locations/restore")
+async def _restore_locations(restore: LocationRestore):
+    exif.restore_locations(restore.previous)
+    return "saved"
+
+
+@app.get("/api/towns")
+async def _towns(q: str = ''):
+    return await run_in_threadpool(places.search_towns, q) if q.split(',')[0].strip() else []
 
 
 @app.post("/api/dates/restore")

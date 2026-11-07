@@ -959,6 +959,23 @@ button:disabled {
   font-size: 12px;
 }
 
+.camera-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.camera-years {
+  display: block;
+  color: #bbb;
+  font-size: 12px;
+}
+
+.section-back {
+  color: var(--muted);
+  text-decoration: none;
+}
+
 /* a folder with no photos in it to show */
 .empty-folder {
   display: flex;
@@ -1446,6 +1463,46 @@ button:disabled {
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+}
+
+/* changing a photo's date and place, from its info card */
+.info-editor-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.info-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.info-editor[hidden] {
+  display: none;
+}
+
+.info-editor input {
+  box-sizing: border-box;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--input-font);
+}
+
+.info-editor > .control {
+  align-self: flex-start;
+}
+
+.info-map {
+  height: 220px;
+  border-radius: var(--radius);
 }
 
 .select-tagging[hidden] {
@@ -3135,8 +3192,8 @@ html.navigating::before {
   .select-actions {
     grid-column: 1 / -1;
     display: grid;
-    grid-auto-columns: minmax(0, 1fr);
-    grid-auto-flow: column;
+    /* a second row rather than words too squeezed to read */
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
     width: 100%;
   }
   .select-tagging {

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Cameras</title>
+    {% include '_head.html' %}
+    <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
+  </head>
+  <body class="library-page">
+    {% include '_nav.html' %}
+    <section class="library-year">
+      <h2><a class="section-back" href="/library#folders">Library</a> › Cameras <span>{{ "{:,}".format(cameras | length) }}, most photos first</span></h2>
+      {% if not cameras %}
+      <p class="library-hint">No photos yet.</p>
+      {% endif %}
+      <div class="month-grid">
+        {% for camera in cameras %}
+        <a class="month-tile" href="{{ camera.url }}" title="{{ camera.name }}{% if camera.years %}, {{ camera.years }}{% endif %}">
+          <img
+            src="/api/thumb{{ camera.cover.path | urlencode }}{% if camera.cover.rotation %}?rotate={{ camera.cover.rotation }}{% endif %}"
+            loading="lazy"
+            decoding="async"
+            alt=""
+            onerror="this.remove()"
+          />
+          <span class="month-label camera-label">
+            <span class="camera-name">{{ camera.name }}{% if camera.years %}<span class="camera-years">{{ camera.years }}</span>{% endif %}</span>
+            <span class="month-count">{{ "{:,}".format(camera.photos) }}</span>
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+  </body>
+</html>

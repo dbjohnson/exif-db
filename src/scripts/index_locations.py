@@ -8,18 +8,18 @@ appended to an existing index until a full rebuild.  So it has its own file, whe
 seen before need reading.  Files with no location get a row too, so that they aren't read again.
 """
 import csv
-import math
 import os
 import subprocess
 import sys
 import tempfile
 
-import numpy as np
+# only this: importing the api package would also start a web app
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api'))
+import towns  # noqa: E402
 
 STORAGE = os.getenv('LOCATIONS_STORAGE', '/storage')
 EXIF_CSV = f'{STORAGE}/exif.csv'
 LOCATIONS_CSV = f'{STORAGE}/locations.csv'
-CITIES_CSV = os.getenv('PLACES_FILE', '/opt/places/cities.csv')
 FIELDS = ('SourceFile', 'lat', 'lon', 'city', 'county', 'state', 'country')
 BATCH = 500
 
@@ -41,26 +41,6 @@ def to_read():
         for row in read_rows(LOCATIONS_CSV):
             wanted.pop(row['SourceFile'], None)
     return list(wanted)
-
-
-class Places:
-    def __init__(self):
-        rows = list(read_rows(CITIES_CSV))
-        self.names = [(row['name'], row['admin2'], row['admin1'], row['cc']) for row in rows]
-        self.lats = np.radians([float(row['lat']) for row in rows])
-        self.lons = np.radians([float(row['lon']) for row in rows])
-        self.known = {}
-
-    def nearest(self, lat, lon):
-        # to about a kilometre, as many photos from one place share a town
-        key = (round(lat, 2), round(lon, 2))
-        if key not in self.known:
-            lat_radians, lon_radians = math.radians(lat), math.radians(lon)
-            # the difference across the date line is the short way round
-            across = np.abs(self.lons - lon_radians)
-            across = np.minimum(across, 2 * math.pi - across) * math.cos(lat_radians)
-            self.known[key] = self.names[int(np.argmin(across ** 2 + (self.lats - lat_radians) ** 2))]
-        return self.known[key]
 
 
 def number(value):
@@ -95,7 +75,7 @@ def main():
     paths = to_read()
     if not paths:
         return
-    places = Places()
+    places = towns.towns()
     is_new = not os.path.exists(LOCATIONS_CSV)
     done = located = 0
     with open(LOCATIONS_CSV, 'a', newline='', encoding='utf-8', errors='surrogateescape') as fh:

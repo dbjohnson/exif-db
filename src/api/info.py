@@ -4,6 +4,7 @@ rather than its descriptions, since it's read with -n.
 """
 import datetime
 import os
+from urllib.parse import urlencode
 
 from api import exif, people, places
 
@@ -92,9 +93,22 @@ def when(value):
     return f"{taken:%A}, {taken:%B} {taken.day}, {taken.year}, {taken.hour % 12 or 12}:{taken:%M %p}"
 
 
+def _iso(value):
+    # as a browser's date and time input takes it
+    try:
+        return datetime.datetime.strptime(str(value)[:19], '%Y:%m:%d %H:%M:%S').strftime('%Y-%m-%dT%H:%M')
+    except ValueError:
+        return None
+
+
 def _section(title, *fields):
-    shown = [{'label': label, 'value': value} for label, value in fields if value]
+    # a field is (label, value) or (label, value, link)
+    shown = [{'label': label, 'value': value, 'href': (rest or [None])[0]} for label, value, *rest in fields if value]
     return {'title': title, 'fields': shown} if shown else None
+
+
+def camera_url(make, model):
+    return '/library/camera?' + urlencode({key: value for key, value in (('make', make), ('model', model)) if value})
 
 
 def photo_info(path):
@@ -105,7 +119,8 @@ def photo_info(path):
     row = exif.photo_details(path)
     if row is None:
         return None
-    camera = ' '.join(part for part in (_text(row.get('Make')), _text(row.get('Model'))) if part)
+    make, model = _text(row.get('Make')), _text(row.get('Model'))
+    camera = ' '.join(part for part in (make, model) if part)
     location = places.location_of(path)
     faces = [face['name'] for face in people.photo_faces(row['photo_id']) if face['name']]
     sections = [
@@ -116,7 +131,7 @@ def photo_info(path):
         ),
         _section(
             'Camera',
-            ('Model', camera),
+            ('Model', camera, camera_url(make, model)),
             ('Lens', _text(row.get('LensID')))
         ),
         _section(
@@ -143,6 +158,12 @@ def photo_info(path):
         )
     ]
     return {
+        'photo_id': row['photo_id'],
+        'taken': _iso(row.get('DateTimeOriginal')),
+        'taken_raw': row.get('DateTimeOriginal'),
+        'date_assigned': bool(row.get('date_assigned')),
+        'own_date': when(exif.own_date(row['photo_id'])),
+        'own_location': places.own_location(path),
         'sections': [section for section in sections if section],
         'location': location,
         'location_read': places.location_read(path),

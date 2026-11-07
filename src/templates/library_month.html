@@ -27,6 +27,7 @@
       // which of the library's virtual folders this is, if one: 'favorites', 'hidden' or 'trash'
       const FOLDER = {{ (folder or none) | tojson }};
       const IN_TRASH = FOLDER === 'trash';
+      const EARLIEST_YEAR = {{ earliest_year | tojson }};
       // the tag whose folder this is, or null
       const TAG = {{ (tag or none) | tojson }};
       const SWIPE_PX = 50;
@@ -992,9 +993,107 @@
         }
       }
 
-      function toggleTagging() {
-        const row = document.getElementById('select-tagging');
+      // ---- following a change of date, and changing dates and places of many photos
+
+      // whether a photo with this date goes on this page: only a month and Undated go by date
+      function belongsHere(taken) {
+        if (KEEPS_REDATED_PHOTOS || FOLDER) {
+          return true;
+        }
+        const dated = /^\d{4}:(0[1-9]|1[0-2]):/.test(taken) && taken.slice(0, 4) >= String(EARLIEST_YEAR);
+        return (dated ? taken.slice(0, 7).replace(':', '-') : null) === MONTH;
+      }
+
+      function applyTaken(photo, taken, when) {
+        if (photo.taken === taken) {
+          return;
+        }
+        photo.taken = taken;
+        photo.when = when;
+        const here = belongsHere(taken);
+        if (!here && !photo.removed) {
+          removeFromView(photo);
+        } else if (here && photo.removed) {
+          restored(photo);
+        } else if (photo === current) {
+          renderViewerDetails();
+        }
+      }
+
+      // from the info card
+      window.addEventListener('photo-changed', ({detail}) => {
+        const photo = PHOTOS.find(other => other.id === detail.photo_id);
+        if (photo && detail.taken_raw) {
+          photo.date_assigned = detail.date_assigned;
+          applyTaken(photo, detail.taken_raw, detail.when);
+        }
+      });
+
+      function ownDatesSelected() {
+        const photos = [...selected];
+        run(async () => {
+          const {previous, photos: now} = await postJson('/api/dates/own', {photo_ids: ids(photos)});
+          const changed = photos.filter(photo => now[photo.id]);
+          if (!changed.length) {
+            showToast('Those already have their own dates');
+            return;
+          }
+          clearPicks();
+          const before = changed.map(photo => [photo, photo.taken, photo.when]);
+          changed.forEach(photo => {
+            photo.date_assigned = false;
+            applyTaken(photo, now[photo.id].taken, now[photo.id].when);
+          });
+          showToast(`Back to their own dates: ${plural(changed.length, 'photo')}`, () => run(async () => {
+            await postJson('/api/dates/restore', {previous});
+            before.forEach(([photo, taken, when]) => {
+              photo.date_assigned = true;
+              applyTaken(photo, taken, when);
+            });
+          }, "Couldn't undo"));
+        }, "Couldn't change the dates");
+      }
+
+      let selectedTown = null;
+
+      function placeSelected(kind) {
+        const photos = [...selected];
+        const town = selectedTown;
+        if (!photos.length || (kind === 'town' && !town)) {
+          return;
+        }
+        const change = kind === 'town' ? {lat: town.lat, lon: town.lon} : kind === 'own' ? {own: true} : {};
+        run(async () => {
+          const {previous} = await postJson('/api/locations', {photo_ids: ids(photos), ...change});
+          if (kind === 'town') {
+            rememberPlace({lat: town.lat, lon: town.lon});
+          }
+          const count = plural(photos.length, 'photo');
+          const said = kind === 'town'
+            ? `Set ${count} to ${town.label}`
+            : kind === 'own' ? `Back to their own places: ${count}` : `Took the place off ${count}`;
+          showToast(said, () => run(() => postJson('/api/locations/restore', {previous}), "Couldn't undo"));
+        }, "Couldn't change the place");
+      }
+
+      // one row of extra controls at a time
+      function toggleRow(id) {
+        for (const other of ['select-tagging', 'select-placing']) {
+          if (other !== id) {
+            document.getElementById(other).hidden = true;
+          }
+        }
+        const row = document.getElementById(id);
         row.hidden = !row.hidden;
+        return row;
+      }
+
+      function togglePlacing() {
+        toggleRow('select-placing');
+      }
+
+      function toggleTagging() {
+        const row = toggleRow('select-tagging');
         if (!row.hidden && TAG && !document.getElementById('select-tag-name').value) {
           document.getElementById('select-tag-name').value = TAG;
         }
@@ -1325,6 +1424,19 @@
       });
 
       window.addEventListener('DOMContentLoaded', () => {
+        const place = document.getElementById('select-place');
+        if (place) {
+          townSearch(place, town => {
+            selectedTown = town;
+            document.getElementById('select-place-set').disabled = false;
+          });
+          place.addEventListener('input', () => {
+            if (selectedTown && place.value !== selectedTown.label) {
+              selectedTown = null;
+              document.getElementById('select-place-set').disabled = true;
+            }
+          });
+        }
         renderGrid();
         renderSelection();
         // opened on a particular photo, from the map
@@ -1458,6 +1570,9 @@
         <button class="select-action" onclick="toggleTagging()" title="Tag these, or say who's in them" disabled>
           <i class="fa fa-tags" aria-hidden="true"></i> Tag
         </button>
+        <button class="select-action" onclick="togglePlacing()" title="Say where these were taken" disabled>
+          <i class="fa fa-map-marker" aria-hidden="true"></i> Place
+        </button>
         {% endif %}
       </span>
       {% if folder != 'trash' %}
@@ -1466,6 +1581,13 @@
         <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" oninput="renderSelection()" />
       </label>
       <button id="select-apply" onclick="applySelected()" disabled>Set date</button>
+      <button class="select-action" onclick="ownDatesSelected()" title="Back to the dates in their files, for any given a date by hand" disabled>Own date</button>
+      <div id="select-placing" class="select-tagging" hidden>
+        <input id="select-place" type="text" maxlength="120" placeholder="Town, such as Ann Arbor" aria-label="Town" />
+        <button id="select-place-set" onclick="placeSelected('town')" disabled>Set place</button>
+        <button class="select-action" onclick="placeSelected('none')" title="Say these have no place" disabled>No place</button>
+        <button class="select-action" onclick="placeSelected('own')" title="Back to what their files say" disabled>Own place</button>
+      </div>
       <div id="select-tagging" class="select-tagging" hidden>
         <select id="select-tag-kind" aria-label="What to tag" onchange="tagKindChanged()">
           <option value="tag">Tag</option>
