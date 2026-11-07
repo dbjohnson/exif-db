@@ -5,14 +5,12 @@
     <div id="side-months" class="side-months"></div>
   </section>
   {% if filtering %}
-  <section class="side-section">
-    <h3>{{ 'Tags and people' if side_people else 'Tags' }}</h3>
+  <section class="side-section" aria-label="{{ 'Tags and people' if side_people else 'Tags' }}">
     {% from '_filters.html' import who_chips, who_select %}
     <div class="side-chips">{{ who_chips(filter_tags, filter_people) }}</div>
     {{ who_select('side-who', tag_names_shown, known_names, filter_tags, filter_people, side_people) }}
   </section>
-  <section class="side-section">
-    <h3>Place</h3>
+  <section class="side-section" aria-label="Place">
     {% if place %}
     <span class="filter-chip">
       <i class="fa fa-map-marker" aria-hidden="true"></i>
