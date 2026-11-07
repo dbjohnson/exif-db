@@ -1055,7 +1055,7 @@
         if (placeInput) {
           placeFilter(placeInput);
         }
-        const response = await fetch(`/api/movies?${new URLSearchParams(FILTERS)}`).catch(() => null);
+        const response = await fetch(`/api/movies?${filterParams(FILTERS)}`).catch(() => null);
         clips = response?.ok ? await response.json() : [];
         if (!clips.length) {
           byId('player').hidden = true;
@@ -1087,23 +1087,12 @@
         <select id="jump-year" aria-label="Go to a year"></select>
         <select id="jump-month" aria-label="Go to a month"></select>
       </span>
-      {% if filter_tag %}
-      <span class="filter-chip">
+      {% from '_filters.html' import who_chips, who_select %}
+      {{ who_chips(filter_tags, []) }}
+      <label class="filter-pick" title="Show only movies with a tag">
         <i class="fa fa-tag" aria-hidden="true"></i>
-        {{ filter_tag }}
-        <button type="button" onclick="filterTo({tag: null})" title="Clear" aria-label="Show every tag">×</button>
-      </span>
-      {% else %}
-      <label class="filter-pick" title="Show only a tag">
-      <i class="fa fa-tag" aria-hidden="true"></i>
-      <select id="filter-tag" class="toolbar-filter" aria-label="Show only a tag" onchange="filterTo({tag: this.value})">
-        <option value="">Tag</option>
-        {% for name in tag_names_shown %}
-        <option value="{{ name }}">{{ name }}</option>
-        {% endfor %}
-      </select>
+        {{ who_select('filter-tag', tag_names_shown, [], filter_tags, [], false) }}
       </label>
-      {% endif %}
       {% if place %}
       <span class="filter-chip">
         <i class="fa fa-map-marker" aria-hidden="true"></i>
@@ -1119,7 +1108,7 @@
     </div>
     </header>
     <div class="library-layout">
-    {% set filtering = true %}{% set side_people = false %}{% set side_folders = false %}{% include '_sidebar.html' %}
+    {% set filtering = true %}{% set side_people = false %}{% set filter_people = [] %}{% set side_folders = false %}{% include '_sidebar.html' %}
     <main class="library-main">
     <div id="empty" class="no-images" hidden>
       {% if filters %}No movies match these filters.{% else %}No movies yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.

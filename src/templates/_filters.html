@@ -1,0 +1,38 @@
+{# tags and people a list is narrowed to, each with an × to take it off, and a list for adding another.
+   Photos have to have every one of them #}
+{% macro who_chips(chosen_tags, chosen_people) %}
+{% for name in chosen_tags %}
+<span class="filter-chip">
+  <i class="fa fa-tag" aria-hidden="true"></i>
+  {{ name }}
+  <button type="button" class="filter-remove" data-kind="tag" data-name="{{ name }}" title="Clear" aria-label="Take off {{ name }}">×</button>
+</span>
+{% endfor %}
+{% for name in chosen_people %}
+<span class="filter-chip">
+  <i class="fa fa-user" aria-hidden="true"></i>
+  {{ name }}
+  <button type="button" class="filter-remove" data-kind="person" data-name="{{ name }}" title="Clear" aria-label="Take off {{ name }}">×</button>
+</span>
+{% endfor %}
+{% endmacro %}
+
+{% macro who_select(id, tag_names, people, chosen_tags, chosen_people, with_people=true) %}
+<select id="{{ id }}" class="toolbar-filter" data-filter-add aria-label="{{ 'Add a tag or person' if with_people else 'Add a tag' }}">
+  <option value="">{{ ('Add a tag or person' if with_people else 'Add a tag') if chosen_tags or chosen_people else ('Tag or person' if with_people else 'Tag') }}</option>
+  {% if tag_names %}
+  <optgroup label="Tags">
+    {% for name in tag_names if name not in chosen_tags %}
+    <option value="tag:{{ name }}">{{ name }}</option>
+    {% endfor %}
+  </optgroup>
+  {% endif %}
+  {% if with_people %}
+  <optgroup label="People">
+    {% for name in people if name not in chosen_people %}
+    <option value="person:{{ name }}">{{ name }}</option>
+    {% endfor %}
+  </optgroup>
+  {% endif %}
+</select>
+{% endmacro %}

@@ -351,6 +351,43 @@ function filterTo(changes) {
   window.location.href = url;
 }
 
+// a list's filters as a query, where tags and people can each be more than one
+function filterParams(filters) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    for (const each of Array.isArray(value) ? value : [value]) {
+      params.append(key, each);
+    }
+  }
+  return params;
+}
+
+// adds a tag or person to what a list is narrowed to, or takes one off
+function changeFilter(kind, name, add) {
+  const url = new URL(window.location.href);
+  const values = url.searchParams.getAll(kind).filter(value => value !== name);
+  if (add) {
+    values.push(name);
+  }
+  url.searchParams.delete(kind);
+  values.forEach(value => url.searchParams.append(kind, value));
+  window.location.href = url;
+}
+
+// the × on a tag or person, and the lists for adding one, wherever they are
+document.addEventListener('click', event => {
+  const remove = event.target.closest?.('.filter-remove');
+  if (remove) {
+    changeFilter(remove.dataset.kind, remove.dataset.name, false);
+  }
+});
+document.addEventListener('change', event => {
+  if (event.target.matches?.('select[data-filter-add]') && event.target.value) {
+    const [kind, ...rest] = event.target.value.split(':');
+    changeFilter(kind, rest.join(':'), true);
+  }
+});
+
 function setPlace(place) {
   filterTo({place_kind: place?.kind, place_key: place?.key});
 }
@@ -481,26 +518,8 @@ function sideDates(yearsId, monthsId, timeline, chosen) {
   };
 }
 
-// the sidebar's filters: tags and people to choose from, found by typing, and a place
+// the sidebar's place
 function sideFilters() {
-  const list = document.getElementById('side-who');
-  const search = document.getElementById('side-who-search');
-  if (list) {
-    list.addEventListener('click', event => {
-      const button = event.target.closest('button');
-      if (button) {
-        const {kind, name} = button.dataset;
-        filterTo({tag: kind === 'tag' ? name : null, person: kind === 'person' ? name : null});
-      }
-    });
-    search.addEventListener('input', () => {
-      const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-      for (const button of list.children) {
-        const name = button.dataset.name.toLowerCase();
-        button.hidden = !words.every(word => name.includes(word));
-      }
-    });
-  }
   const place = document.getElementById('side-place');
   if (place) {
     placeFilter(place);

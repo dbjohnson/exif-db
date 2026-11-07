@@ -7,26 +7,10 @@
   </section>
   {% if filtering %}
   <section class="side-section">
-    <h3>{{ 'Tag or person' if side_people else 'Tag' }}</h3>
-    {% if filter_tag or filter_person %}
-    <span class="filter-chip">
-      <i class="fa {{ 'fa-tag' if filter_tag else 'fa-user' }}" aria-hidden="true"></i>
-      {{ filter_tag or filter_person }}
-      <button type="button" onclick="filterTo({tag: null, person: null})" title="Clear" aria-label="Clear">×</button>
-    </span>
-    {% else %}
-    <input id="side-who-search" class="side-search" type="search" placeholder="Find a {{ 'tag or person' if side_people else 'tag' }}" aria-label="Find a {{ 'tag or person' if side_people else 'tag' }}" />
-    <div id="side-who" class="side-list">
-      {% for name in tag_names_shown %}
-      <button type="button" data-kind="tag" data-name="{{ name }}"><i class="fa fa-tag" aria-hidden="true"></i>{{ name }}</button>
-      {% endfor %}
-      {% if side_people %}
-      {% for name in known_names %}
-      <button type="button" data-kind="person" data-name="{{ name }}"><i class="fa fa-user" aria-hidden="true"></i>{{ name }}</button>
-      {% endfor %}
-      {% endif %}
-    </div>
-    {% endif %}
+    <h3>{{ 'Tags and people' if side_people else 'Tags' }}</h3>
+    {% from '_filters.html' import who_chips, who_select %}
+    <div class="side-chips">{{ who_chips(filter_tags, filter_people) }}</div>
+    {{ who_select('side-who', tag_names_shown, known_names, filter_tags, filter_people, side_people) }}
   </section>
   <section class="side-section">
     <h3>Place</h3>

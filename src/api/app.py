@@ -568,8 +568,22 @@ TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make'
 UNDATED_KEY = 'undated'
 
 
+# what can be more than one, each of which a photo has to have
+LIST_FILTERS = ('tag', 'person')
+
+
 def timeline_filters(query):
-    return {key: query[key] for key in TIMELINE_FILTERS if query.get(key)}
+    filters = {key: query[key] for key in TIMELINE_FILTERS if key not in LIST_FILTERS and query.get(key)}
+    for key in LIST_FILTERS:
+        values = [value for value in query.getlist(key) if value]
+        if values:
+            filters[key] = values
+    return filters
+
+
+def as_list(value):
+    # a page's own filter is one name, and the library's can be several
+    return [] if not value else [value] if isinstance(value, str) else list(value)
 
 
 def timeline_spec(filters):
@@ -579,13 +593,14 @@ def timeline_spec(filters):
     """
     where, params, hidden = [], [], False
     by_id = "photo_id IN (SELECT UNNEST(?::VARCHAR[]))"
-    if filters.get('tag'):
+    for name in as_list(filters.get('tag')):
         where.append(by_id)
-        params.append(tags.photo_ids(filters['tag']))
+        params.append(tags.photo_ids(name))
     if filters.get('person'):
         update_hidden_faces()
+    for name in as_list(filters.get('person')):
         where.append(by_id)
-        params.append(people.person_photo_ids(filters['person']))
+        params.append(people.person_photo_ids(name))
     if filters.get('place_kind') and filters.get('place_key'):
         where.append("SourceFile IN (SELECT UNNEST(?::VARCHAR[]))")
         params.append(list(places.paths_at(filters['place_kind'], filters['place_key'])))
@@ -669,8 +684,15 @@ async def _timeline_months(request: Request):
 
 
 @app.get("/library")
-async def _library(request: Request, tag: str = None, person: str = None, place_kind: str = None, place_key: str = None):
+async def _library(
+    request: Request,
+    tag: list[str] = Query(default=[]),
+    person: list[str] = Query(default=[]),
+    place_kind: str = None,
+    place_key: str = None
+):
     place = places.describe(place_kind, place_key) if place_kind and place_key else None
+    tag, person = [name for name in tag if name], [name for name in person if name]
     filters = {
         key: value
         for key, value in (('tag', tag), ('person', person), ('place_kind', place and place_kind), ('place_key', place and place_key))
@@ -685,8 +707,8 @@ async def _library(request: Request, tag: str = None, person: str = None, place_
         place=place,
         tag_names_shown=tags.names(),
         person=None,
-        filter_person=person,
-        filter_tag=tag
+        filter_people=person,
+        filter_tags=tag
     )
 
 
@@ -1746,6 +1768,7 @@ async def _stop_faces():
 def movie_filters(tag, place_kind, place_key):
     # as the library's, with no people, as nobody's found in movies
     place = places.describe(place_kind, place_key) if place_kind and place_key else None
+    tag = [name for name in tag if name]
     return {
         key: value
         for key, value in (('tag', tag), ('place_kind', place and place_kind), ('place_key', place and place_key))
@@ -1754,21 +1777,21 @@ def movie_filters(tag, place_kind, place_key):
 
 
 @app.get("/movies")
-async def _movies_page(request: Request, tag: str = None, place_kind: str = None, place_key: str = None):
+async def _movies_page(request: Request, tag: list[str] = Query(default=[]), place_kind: str = None, place_key: str = None):
     filters, place = movie_filters(tag, place_kind, place_key)
     return templates.TemplateResponse(
         request=request,
         name="movies.html",
-        context={"filters": filters, "place": place, "filter_tag": tag, "tag_names_shown": tags.names()}
+        context={"filters": filters, "place": place, "filter_tags": filters.get('tag', []), "tag_names_shown": tags.names()}
     )
 
 
 @app.get("/api/movies")
-async def _movies(tag: str = None, place_kind: str = None, place_key: str = None):
+async def _movies(tag: list[str] = Query(default=[]), place_kind: str = None, place_key: str = None):
     filters, _ = movie_filters(tag, place_kind, place_key)
     clips = movies.clips()
-    if filters.get('tag'):
-        tagged = set(tags.photo_ids(filters['tag']))
+    for name in filters.get('tag', []):
+        tagged = set(tags.photo_ids(name))
         clips = [clip for clip in clips if clip['id'] in tagged]
     if filters.get('place_kind'):
         located = places.paths_at(filters['place_kind'], filters['place_key'])

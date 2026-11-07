@@ -203,7 +203,7 @@
       let sideJumper = null;
       let showingKey = null;
 
-      const filterQuery = (extra = {}) => new URLSearchParams({...FILTERS, ...extra});
+      const filterQuery = (extra = {}) => filterParams({...FILTERS, ...extra});
 
       // which month a date as the index has it, "YYYY:MM:DD HH:MM:SS", belongs in
       function monthOf(taken) {
@@ -363,11 +363,6 @@
 
       // ---- narrowing the library to a tag or person and a place, which loads it again
 
-      function filterChanged() {
-        const [kind, ...rest] = document.getElementById('filter-who').value.split(':');
-        const name = rest.join(':');
-        filterTo({tag: kind === 'tag' ? name : null, person: kind === 'person' ? name : null});
-      }
 
       function startTimeline() {
         const placeInput = document.getElementById('filter-place');
@@ -1560,32 +1555,12 @@
       </span>
       {% endif %}
       {% if filtering %}
-      {% if filter_tag or filter_person %}
-      <span class="filter-chip">
-        <i class="fa {{ 'fa-tag' if filter_tag else 'fa-user' }}" aria-hidden="true"></i>
-        {{ filter_tag or filter_person }}
-        <button type="button" onclick="filterTo({tag: null, person: null})" title="Clear" aria-label="Show every tag and person">×</button>
-      </span>
-      {% else %}
-      <label class="filter-pick" title="Show only a tag or a person">
-      <i class="fa fa-tag" aria-hidden="true"></i>
-      <select id="filter-who" class="toolbar-filter" aria-label="Show only a tag or a person" onchange="filterChanged()">
-        <option value="">Tag or person</option>
-        {% if tag_names_shown %}
-        <optgroup label="Tags">
-          {% for name in tag_names_shown %}
-          <option value="tag:{{ name }}">{{ name }}</option>
-          {% endfor %}
-        </optgroup>
-        {% endif %}
-        <optgroup label="People">
-          {% for name in known_names %}
-          <option value="person:{{ name }}">{{ name }}</option>
-          {% endfor %}
-        </optgroup>
-      </select>
+      {% from '_filters.html' import who_chips, who_select %}
+      {{ who_chips(filter_tags, filter_people) }}
+      <label class="filter-pick" title="Show only photos with a tag or a person">
+        <i class="fa fa-tag" aria-hidden="true"></i>
+        {{ who_select('filter-who', tag_names_shown, known_names, filter_tags, filter_people) }}
       </label>
-      {% endif %}
       {% if place %}
       <span class="filter-chip">
         <i class="fa fa-map-marker" aria-hidden="true"></i>

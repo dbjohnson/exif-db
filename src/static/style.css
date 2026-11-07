@@ -319,6 +319,20 @@ button:disabled {
   gap: 6px;
 }
 
+.side-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.side-chips:not(:empty) {
+  margin-bottom: 6px;
+}
+
+.library-sidebar .toolbar-filter {
+  width: 100%;
+}
+
 .side-list button,
 .side-folders a {
   display: flex;
