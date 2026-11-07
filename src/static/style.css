@@ -1546,6 +1546,40 @@ button:disabled {
   gap: 4px;
 }
 
+/* an invisible date box over the calendar button, so that a tap opens its picker */
+.select-date-pick {
+  position: relative;
+  display: inline-flex;
+}
+
+.select-date-pick button {
+  flex: 1;
+}
+
+.select-bar .select-date-pick input[type="date"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  /* any smaller and iOS zooms in when it's tapped */
+  font-size: 16px;
+}
+
+.select-bar .select-date-pick input[type="date"]:disabled {
+  cursor: default;
+}
+
+/* a keyboard user tabs to the date box, so its ring shows on the button */
+.select-date-pick:has(input:focus-visible) button {
+  outline: 2px solid var(--highlight);
+}
+
 /* whether a photo is already approved matters when choosing what to approve or hide */
 .selecting .library-tile.approved::after {
   content: "\2713";

@@ -427,9 +427,12 @@
         if (IN_TRASH) {
           return;
         }
-        document.getElementById('select-apply').disabled =
-          !selected.size || !document.getElementById('select-date').value;
-        document.getElementById('select-own-date').hidden = ![...selected].some(photo => photo.date_assigned);
+        // the picker's own Clear or Reset takes them back to their files' dates, so it's only
+        // offered where one was set by hand
+        const date = document.getElementById('select-date');
+        date.disabled = !selected.size;
+        date.required = ![...selected].some(photo => photo.date_assigned);
+        date.value = startingDay([...selected][0]);
         const allFavorites = selected.size && [...selected].every(photo => photo.favorite);
         const favorite = document.getElementById('select-favorite');
         favorite.title = allFavorites ? 'Unfavorite' : 'Favorite';
@@ -517,8 +520,24 @@
         }, "Couldn't set the dates");
       }
 
-      function applySelected() {
-        assignDate([...selected], document.getElementById('select-date').value);
+      // from the selection bar's date picker: a day it was cleared
+      function datePicked(input) {
+        if (input.value) {
+          assignDate([...selected], input.value);
+        } else if (!input.required) {
+          ownDatesSelected();
+        } else {
+          renderSelection();
+        }
+      }
+
+      // a date box shows its picker only from its own small button, so this opens it from anywhere on it
+      function openDatePicker(input) {
+        try {
+          input.showPicker();
+        } catch (error) {
+          // a phone opens it by itself, and older browsers have none
+        }
       }
 
       const ids = photos => photos.map(photo => photo.id);
@@ -1159,7 +1178,7 @@
 
       // one row of extra controls at a time
       function toggleRow(id) {
-        for (const other of ['select-tagging', 'select-placing', 'select-dating']) {
+        for (const other of ['select-tagging', 'select-placing']) {
           if (other !== id) {
             document.getElementById(other).hidden = true;
           }
@@ -1178,15 +1197,9 @@
         return monthOf(taken) === UNDATED ? '' : taken.slice(0, 10).replaceAll(':', '-');
       }
 
-      // starts at the first photo's date in its file, else the one it was given, else its folder's
-      function toggleDating() {
-        const row = toggleRow('select-dating');
-        const photo = [...selected][0];
-        if (!row.hidden && photo) {
-          document.getElementById('select-date').value =
-            dayOf(photo.own_taken) || dayOf(photo.taken) || (photo.suggested || {}).date || '';
-          renderSelection();
-        }
+      // where the date picker starts: a photo's date in its file, else the one it was given, else its folder's
+      function startingDay(photo) {
+        return photo ? dayOf(photo.own_taken) || dayOf(photo.taken) || (photo.suggested || {}).date || '' : '';
       }
 
       function toggleTagging() {
@@ -1995,17 +2008,15 @@
         <button class="select-action" onclick="togglePlacing()" title="Say where these were taken" aria-label="Place" disabled>
           <i class="fa fa-map-marker" aria-hidden="true"></i>
         </button>
-        <button class="select-action" onclick="toggleDating()" title="Say when these were taken" aria-label="Date" disabled>
-          <i class="fa fa-calendar" aria-hidden="true"></i>
-        </button>
+        <span class="select-date-pick" title="Say when these were taken">
+          <button class="select-action" tabindex="-1" aria-hidden="true" disabled>
+            <i class="fa fa-calendar" aria-hidden="true"></i>
+          </button>
+          <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" onclick="openDatePicker(this)" onchange="datePicked(this)" disabled />
+        </span>
         {% endif %}
       </span>
       {% if folder != 'trash' %}
-      <div id="select-dating" class="select-tagging" hidden>
-        <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" oninput="renderSelection()" />
-        <button id="select-apply" onclick="applySelected()" title="Set date" aria-label="Set date" disabled><i class="fa fa-check" aria-hidden="true"></i></button>
-        <button id="select-own-date" onclick="ownDatesSelected()" title="Reset date. Back to the dates in their files, for any given a date by hand" aria-label="Reset date" hidden><i class="fa fa-history" aria-hidden="true"></i></button>
-      </div>
       <div id="select-placing" class="select-tagging" hidden>
         <input id="select-place" type="text" maxlength="120" placeholder="Named place or town" aria-label="Named place or town" />
         <button id="select-place-set" onclick="placeSelected('town')" title="Set place" aria-label="Set place" disabled><i class="fa fa-check" aria-hidden="true"></i></button>
