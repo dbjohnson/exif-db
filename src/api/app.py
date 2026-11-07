@@ -1737,6 +1737,20 @@ async def _towns(q: str = ''):
     return await run_in_threadpool(places.search_towns, q)
 
 
+# every undated photo in a list whose folder's name says when it's from, such as "2002.03.11 -
+# Escalante", dated by it.  Those in folders with the same date are dated together, keeping their order
+@app.post("/api/dates/folders")
+async def _date_from_folders(request: Request):
+    by_date = {}
+    for photo in timeline_month_photos(UNDATED_KEY, timeline_filters(request.query_params)):
+        if photo['suggested']:
+            by_date.setdefault(photo['suggested']['date'], []).append(photo['id'])
+    previous = {}
+    for date, photo_ids in by_date.items():
+        previous.update(exif.assign_date(photo_ids, datetime.date.fromisoformat(date)))
+    return {'previous': previous, 'dated': len(previous), 'months': sorted({date[:7] for date in by_date})}
+
+
 @app.post("/api/dates/restore")
 async def _restore_dates(restore: DateRestore):
     for value in restore.previous.values():

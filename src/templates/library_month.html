@@ -244,6 +244,20 @@
           hint.className = 'library-hint';
           hint.textContent = "These photos have no date, or one their camera couldn't have recorded, like 1901, usually because its clock was never set. They're shown by folder, with the date a folder's name suggests. Dates set here don't change the original files.";
           content.append(hint);
+          const datable = photos.filter(photo => photo.suggested);
+          if (datable.length) {
+            const button = document.createElement('button');
+            button.className = 'control date-from-folders';
+            const folders = new Set(datable.map(photo => photo.day)).size;
+            button.textContent = `Date ${plural(datable.length, 'photo')} from ${plural(folders, 'folder')}`;
+            button.title = "Each gets the date its folder's name suggests, as Date all does for one folder";
+            button.onclick = () => {
+              if (pressedTwice(button, `Date ${plural(datable.length, 'photo')}?`)) {
+                dateFromFolders();
+              }
+            };
+            content.append(button);
+          }
         }
         const added = [];
         for (const photo of photos) {
@@ -498,6 +512,23 @@
             await refreshDates(photos.map(photo => ({month: to})), [...new Set(photos.map(photo => photo.month))]);
           }, "Couldn't undo"));
         }, "Couldn't set the date");
+      }
+
+      // every undated photo whose folder says when it's from
+      function dateFromFolders() {
+        return run(async () => {
+          const response = await fetch(`/api/dates/folders?${filterQuery()}`, {method: 'POST'});
+          if (!response.ok) {
+            throw new Error('Status: ' + response.status);
+          }
+          const {previous, dated, months} = await response.json();
+          const undated = [{month: UNDATED}];
+          await refreshDates(undated, months);
+          showToast(`Dated ${plural(dated, 'photo')} from their folders`, () => run(async () => {
+            await postJson('/api/dates/restore', {previous});
+            await refreshDates(months.map(month => ({month})), [UNDATED]);
+          }, "Couldn't undo"));
+        }, "Couldn't set the dates");
       }
 
       function applySelected() {

@@ -3660,6 +3660,10 @@ html.navigating::before {
   }
 }
 
+.date-from-folders {
+  margin: 0 0 8px;
+}
+
 /* ---- the open photo beside what may be copies of it */
 
 .viewer-compare {
