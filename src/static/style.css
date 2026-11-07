@@ -548,11 +548,6 @@ button:disabled {
   color: var(--muted);
 }
 
-.library-toolbar a .fa,
-.library-toolbar button .fa {
-  margin-right: 6px;
-}
-
 .library-toolbar .filter-chip {
   gap: 6px;
   white-space: nowrap;
@@ -3520,10 +3515,6 @@ html.navigating::before {
   .library-toolbar .toolbar-word {
     display: none;
   }
-  .library-toolbar a .fa,
-  .library-toolbar button .fa {
-    margin-right: 0;
-  }
   .filter-pick {
     justify-content: center;
     box-sizing: border-box;
@@ -3611,8 +3602,7 @@ html.navigating::before {
   .select-actions {
     grid-column: 1 / -1;
     display: grid;
-    /* a second row rather than words too squeezed to read */
-    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
     width: 100%;
   }
   .select-tagging {
@@ -3623,13 +3613,7 @@ html.navigating::before {
     flex: 1 1 100%;
   }
   .select-actions button {
-    flex-direction: column;
-    gap: 2px;
-    min-height: 52px;
-    padding: 4px 2px;
-    overflow: hidden;
-    font-size: 12px;
-    text-overflow: ellipsis;
+    padding: 0 2px;
   }
   .select-actions button i {
     font-size: 16px;
@@ -3646,9 +3630,6 @@ html.navigating::before {
   }
   .library-page.viewing .toast {
     bottom: calc(var(--people-height, 0px) + 12px);
-  }
-  .viewer-word {
-    display: none;
   }
 }
 
