@@ -47,7 +47,9 @@ Every month takes its full height from the start and fills in as it comes near t
 
 On a screen at least 1,024 pixels wide, the dates and filters are down the side instead: every year, the months of the one showing with Undated under them, the tags and people chosen with the list for adding another, the place, and the folders.  What's left of the row, such as Select, sits on the navigation bar's line, so the header is one line.  Movies have the same sidebar, with tags only.
 
-The viewer's share button gives a link to the photo, `/photo?id=…`, through the device's share sheet where there is one or else copied.  It opens the photo in the viewer wherever it is in the library, even after its date has changed, or in Hidden if it's been hidden.  The movie player's share button does the same for a movie, as `/movies?path=…`, which opens the player on it.  Links work for anyone who can reach the app.
+The viewer's share button gives a link to the photo, `/photo?id=…`, through the device's share sheet where there is one or else copied.  It opens the photo in the viewer wherever it is in the library, even after its date has changed, or in Hidden if it's been hidden.  The movie player's share button does the same for a movie, as `/movie?path=…`, which opens the player on it.  Links work for anyone who can reach the app.
+
+Both links first give a short page with Open Graph tags, which Messages and other apps build a link's preview from: a photo's date and place with the photo itself, and a movie's title, date, place and length with its poster and the movie (an H.264 copy where there is one).  Apps fetching a preview get the page without its script, and a browser goes straight on to the photo or movie.  Whole addresses in the tags come from the `X-Forwarded-Host` and `X-Forwarded-Proto` headers, or else the `Host` header, with https for a `ts.net` name.
 
 A person's, tag's, place's or camera's photos, and Favorites, Hidden and Screenshots, are the same list narrowed to them, with the same date boxes.  The navigation bar and that one row stay at the top of every page while scrolling.
 

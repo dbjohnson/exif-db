@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    {# what Messages and other apps build a link's preview from #}
+    <meta property="og:title" content="{{ title }}">
+    {% if description %}<meta property="og:description" content="{{ description }}">{% endif %}
+    <meta property="og:url" content="{{ url }}">
+    <meta property="og:type" content="{{ 'video.other' if video else 'website' }}">
+    {% if image %}
+    <meta property="og:image" content="{{ image }}">
+    <meta property="og:image:secure_url" content="{{ image }}">
+    <meta property="og:image:type" content="image/jpeg">
+    {% endif %}
+    {% if video %}
+    <meta property="og:video" content="{{ video }}">
+    <meta property="og:video:secure_url" content="{{ video }}">
+    <meta property="og:video:type" content="video/mp4">
+    {% if video_width %}
+    <meta property="og:video:width" content="{{ video_width }}">
+    <meta property="og:video:height" content="{{ video_height }}">
+    {% endif %}
+    {% endif %}
+    <meta name="twitter:card" content="{{ 'player' if video else 'summary_large_image' }}">
+    <meta name="twitter:title" content="{{ title }}">
+    {% if image %}<meta name="twitter:image" content="{{ image }}">{% endif %}
+    {% if not previewing %}
+    <script>location.replace({{ target | tojson }});</script>
+    {% endif %}
+    <style>
+      body { margin: 0; background: #000; color: #ddd; font-family: -apple-system, system-ui, sans-serif; text-align: center; }
+      img { display: block; max-width: 100%; max-height: 90vh; margin: 0 auto; }
+      a { color: #ddd; }
+    </style>
+  </head>
+  <body>
+    <a href="{{ target }}">
+      {% if image %}<img src="{{ image }}" alt="">{% endif %}
+      <p>{{ title }}</p>
+    </a>
+  </body>
+</html>

@@ -818,7 +818,7 @@
       // a link that opens the player on this movie
       function shareMovie() {
         const clip = clips[current];
-        shareLink(`${window.location.origin}/movies?${new URLSearchParams({path: clip.path})}`, clip.title || clip.path.split('/').pop());
+        shareLink(`${window.location.origin}/movie?${new URLSearchParams({path: clip.path})}`, clip.title || clip.path.split('/').pop());
       }
 
       function addMovieTag() {

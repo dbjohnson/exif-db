@@ -712,16 +712,98 @@ async def _library(
     )
 
 
+# what Messages, Slack and other apps say when they fetch a link to build its preview.  They don't
+# run scripts, but are sent the page without one anyway, in case one would
+LINK_PREVIEWERS = ('facebookexternalhit', 'Facebot', 'Twitterbot', 'Slackbot', 'WhatsApp', 'Discordbot', 'TelegramBot')
+
+
+def public_base(request):
+    """
+    The address the app is reached at, for links inside a preview, which have to be whole.  Behind
+    the NAS's reverse proxy the app itself is reached by plain http, though nobody else reaches it so
+    """
+    host = request.headers.get('x-forwarded-host') or request.headers.get('host') or request.url.netloc
+    scheme = request.headers.get('x-forwarded-proto') or ('https' if '.ts.net' in host else request.url.scheme)
+    return f"{scheme}://{host}"
+
+
+def share_page(request, target, title, description=None, image=None, video=None, size=None):
+    """
+    A page to link to that carries a preview: its title, a picture and, for a movie, the movie.  A
+    person who opens it goes straight on to target in the app
+    """
+    base = public_base(request)
+    agent = request.headers.get('user-agent', '')
+    return templates.TemplateResponse(
+        request=request,
+        name="share.html",
+        context={
+            "title": title,
+            "description": description,
+            "url": f"{base}{request.url.path}?{request.url.query}",
+            "image": image and f"{base}{image}",
+            "video": video and f"{base}{video}",
+            "video_width": size[0] if size else None,
+            "video_height": size[1] if size else None,
+            "target": target,
+            "previewing": any(name in agent for name in LINK_PREVIEWERS)
+        }
+    )
+
+
+def place_words(path):
+    location = places.location_of(path)
+    if not location:
+        return None
+    return location['label'] or ', '.join(part for part in (location['city'], location['state'], location['country']) if part)
+
+
 # a link to one photo that stays right if its date changes: it goes to wherever the photo is now,
-# and opens it there
+# and opens it there.  The page it gives first carries a preview of the photo
 @app.get("/photo")
-async def _photo_link(id: str):
+async def _photo_link(request: Request, id: str):
     found = exif.duplicate_photos([id])
     if not found:
         return RedirectResponse(url="/library")
     photo = found[0]
     place = "/library/hidden" if photo['status'] == exif.REJECTED else "/library"
-    return RedirectResponse(url=f"{place}?{urlencode({'date': timeline_month_key(photo['date']), 'open': id})}")
+    target = f"{place}?{urlencode({'date': timeline_month_key(photo['date']), 'open': id})}"
+    when = library_photo({'taken': photo['date'], 'date_assigned': True})['day'] if photo['dated'] else None
+    rotation = f"?rotate={photo['rotation']}" if photo['rotation'] else ''
+    return share_page(
+        request,
+        target,
+        f"Photo from {when}" if when else photo['name'],
+        place_words(photo['path']),
+        image=f"/api/image{quote(photo['path'])}{rotation}"
+    )
+
+
+# the same for a movie, which opens the player on it
+@app.get("/movie")
+async def _movie_link(request: Request, path: str):
+    clip = next((clip for clip in movies.clips() if clip['path'] == path), None)
+    if clip is None:
+        return RedirectResponse(url="/movies")
+    taken = clip['taken'] and datetime.datetime.strptime(clip['taken'][:19], '%Y-%m-%d %H:%M:%S')
+    when = None if not taken else f"{taken:%B %Y}" if clip['precision'] == 'month' else f"{taken:%A}, {taken:%B} {taken.day}, {taken.year}"
+    minutes, seconds = divmod(round(clip['duration']), 60)
+    description = ' · '.join(part for part in (when if clip['title'] else None, place_words(path), f"{minutes}:{seconds:02d}") if part)
+    poster = None
+    try:
+        thumbs.video_poster(library_path(path), 'XL')
+        poster = f"/api/poster{quote(path)}?size=XL"
+    except Exception:
+        pass
+    return share_page(
+        request,
+        f"/movies?{urlencode({'path': path})}",
+        clip['title'] or (f"Movie from {when}" if when else path.split('/')[-1]),
+        description,
+        image=poster,
+        # the copy every phone can play, where there's a choice
+        video=f"/api/movie{quote(path)}?hevc=false"
+    )
 
 
 @app.get("/library/folders")
