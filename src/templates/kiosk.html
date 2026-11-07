@@ -417,6 +417,18 @@
         upcoming.forEach(preload);
       }
 
+      // the photo before the one on screen, from where the slideshow then carries on
+      function previousImage() {
+        if (images.length) {
+          const index = images.indexOf(shown);
+          const from = index >= 0 ? index : currentIndex;
+          // refreshImage moves on by one, to the photo before
+          currentIndex = ((from - 1) % images.length + images.length) % images.length - 1;
+          refreshImage();
+        }
+        showControls();
+      }
+
       function refreshImage() {
         if (!images.length) {
           reloadPage();
@@ -561,6 +573,12 @@
           title="Hide"
         >
           <i class="fa fa-eye-slash fa-2x" aria-hidden="true"></i>
+        </button>
+        <button
+          onclick="previousImage()"
+          title="Previous image"
+        >
+          <i class="fa fa-fast-backward fa-2x" aria-hidden="true"></i>
         </button>
         <button
           id="pause"
