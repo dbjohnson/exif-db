@@ -798,7 +798,7 @@ async def _movie_link(request: Request, path: str):
     return share_page(
         request,
         f"/movies?{urlencode({'path': path})}",
-        clip['title'] or (f"Movie from {when}" if when else path.split('/')[-1]),
+        clip['title'] or (f"Video from {when}" if when else path.split('/')[-1]),
         description,
         image=poster,
         # the copy every phone can play, where there's a choice

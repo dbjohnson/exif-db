@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>Home movies</title>
+    <title>Videos</title>
     {% include '_head.html' %}
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
@@ -368,7 +368,7 @@
         byId('later-month').disabled = position === monthKeys.length - 1;
         byId('previous-clip').disabled = current === 0;
         byId('next-clip').disabled = current === clips.length - 1;
-        document.title = `${clip.title || formatMonth(key)} · Home movies`;
+        document.title = `${clip.title || formatMonth(key)} · Videos`;
 
         const caption = byId('caption');
         caption.classList.add('announcing');
@@ -553,7 +553,7 @@
         if (failures >= MAX_FAILURES) {
           wantsPlay = false;
           renderPlayState();
-          showToast("Couldn't play the last few movies. Check the connection, then press play.");
+          showToast("Couldn't play the last few videos. Check the connection, then press play.");
           clips.forEach(entry => { entry.broken = false; entry.useCopy = false; });
           failures = 0;
           return;
@@ -665,7 +665,7 @@
       function renderHidden() {
         const hidden = clips.flatMap((clip, index) => clip.hidden ? [index] : []).reverse();
         byId('hidden').hidden = !hidden.length;
-        byId('hidden-count').textContent = `${hidden.length.toLocaleString()} hidden movie${hidden.length === 1 ? '' : 's'}`;
+        byId('hidden-count').textContent = `${hidden.length.toLocaleString()} hidden video${hidden.length === 1 ? '' : 's'}`;
         byId('hidden-grid').replaceChildren(...hidden.map(index => {
           const tile = renderTile(index);
           tile.title = 'Bring back';
@@ -733,7 +733,7 @@
         removeWithUndo(
           clip,
           'hidden',
-          () => 'Movie hidden',
+          () => 'Video hidden',
           "Couldn't hide",
           () => postJson('/api/movies/hidden', {id: clip.id, hidden: true}),
           () => postJson('/api/movies/hidden', {id: clip.id, hidden: false})
@@ -750,7 +750,7 @@
           'deleted',
           ({files}) => {
             const others = files.length - 1;
-            return others ? `Movie deleted, with ${others} other cop${others === 1 ? 'y' : 'ies'} of it` : 'Movie deleted';
+            return others ? `Video deleted, with ${others} other cop${others === 1 ? 'y' : 'ies'} of it` : 'Video deleted';
           },
           "Couldn't delete",
           async () => {
@@ -800,7 +800,7 @@
           await postJson('/api/movies/hidden', {id: clip.id, hidden: false});
           clip.hidden = false;
           returned();
-          showToast('Movie back in the stream');
+          showToast('Video back in the stream');
         } catch (error) {
           console.log(error);
           showToast(`Couldn't bring it back: ${error.message}`);
@@ -1138,7 +1138,7 @@
       </span>
       {% from '_filters.html' import who_chips, who_select %}
       {{ who_chips(filter_tags, []) }}
-      <label class="filter-pick" title="Show only movies with a tag">
+      <label class="filter-pick" title="Show only videos with a tag">
         <i class="fa fa-tag" aria-hidden="true"></i>
         {{ who_select('filter-tag', tag_names_shown, [], filter_tags, [], false) }}
       </label>
@@ -1146,7 +1146,7 @@
       <span class="filter-chip">
         <i class="fa fa-map-marker" aria-hidden="true"></i>
         {{ place.label }}
-        <button type="button" onclick="setPlace(null)" title="Clear" aria-label="Show movies from any place">×</button>
+        <button type="button" onclick="setPlace(null)" title="Clear" aria-label="Show videos from any place">×</button>
       </span>
       {% else %}
       <label class="filter-pick filter-place" title="Show only a place">
@@ -1160,7 +1160,7 @@
     {% set filtering = true %}{% set side_people = false %}{% set filter_people = [] %}{% set side_folders = false %}{% include '_sidebar.html' %}
     <main class="library-main">
     <div id="empty" class="no-images" hidden>
-      {% if filters %}No movies match these filters.{% else %}No movies yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
+      {% if filters %}No videos match these filters.{% else %}No videos yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.
     </div>
     <div id="player" class="movie-player">
       <div id="stage" class="movie-stage">
@@ -1187,13 +1187,13 @@
             </div>
           </div>
           <div class="movie-buttons">
-            <button id="previous-clip" onclick="stepClip(-1)" title="Previous movie (Shift+←)" aria-label="Previous movie">
+            <button id="previous-clip" onclick="stepClip(-1)" title="Previous video (Shift+←)" aria-label="Previous video">
               <i class="fa fa-step-backward" aria-hidden="true"></i>
             </button>
             <button id="play" onclick="togglePlay()" title="Play or pause (Space)" aria-label="Play">
               <i class="fa fa-play" aria-hidden="true"></i>
             </button>
-            <button id="next-clip" onclick="stepClip(1)" title="Next movie (Shift+→)" aria-label="Next movie">
+            <button id="next-clip" onclick="stepClip(1)" title="Next video (Shift+→)" aria-label="Next video">
               <i class="fa fa-step-forward" aria-hidden="true"></i>
             </button>
             <span id="time" class="movie-time"></span>
@@ -1216,7 +1216,7 @@
               <i class="fa fa-volume-up" aria-hidden="true"></i>
             </button>
             <input id="volume" class="movie-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume" />
-            <button id="share" onclick="shareMovie()" title="Share a link to this movie" aria-label="Share">
+            <button id="share" onclick="shareMovie()" title="Share a link to this video" aria-label="Share">
               <i class="fa fa-share-square-o" aria-hidden="true"></i>
             </button>
             <button id="airplay" onclick="chooseAirPlayReceiver()" title="AirPlay" aria-label="AirPlay" hidden>
@@ -1236,7 +1236,7 @@
       </div>
       <div class="viewer-tagging movie-tags">
         <span id="movie-tag-list" class="viewer-tag-list"></span>
-        <input id="movie-add-tag" type="text" list="tags" maxlength="80" placeholder="Add tag" aria-label="Add a tag to this movie" onkeydown="if (event.key === 'Enter') addMovieTag();" />
+        <input id="movie-add-tag" type="text" list="tags" maxlength="80" placeholder="Add tag" aria-label="Add a tag to this video" onkeydown="if (event.key === 'Enter') addMovieTag();" />
       </div>
     </div>
     <datalist id="tags">

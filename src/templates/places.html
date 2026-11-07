@@ -25,7 +25,7 @@
           count.className = 'place-count';
           const parts = [];
           if (place.photos) parts.push(`${place.photos.toLocaleString()} photo${place.photos === 1 ? '' : 's'}`);
-          if (place.movies) parts.push(`${place.movies.toLocaleString()} movie${place.movies === 1 ? '' : 's'}`);
+          if (place.movies) parts.push(`${place.movies.toLocaleString()} video${place.movies === 1 ? '' : 's'}`);
           count.textContent = parts.join(', ');
           link.append(name, detail, count);
           return link;
@@ -55,7 +55,7 @@
         <input id="place-search" type="search" name="q" value="{{ query }}" placeholder="Search for a place or folder" aria-label="Search for a place or folder" oninput="typed(this)" />
         <a class="control" href="/places/map">Map</a>
       </form>
-      <p class="library-hint">Goes by the location a photo or movie recorded, which {{ "{:,}".format(located) }} of them did, and by the names of folders, like "2002.03.11 - Escalante". To name a place, such as Home, open a photo taken there, then its info, then Name this place.</p>
+      <p class="library-hint">Goes by the location a photo or video recorded, which {{ "{:,}".format(located) }} of them did, and by the names of folders, like "2002.03.11 - Escalante". To name a place, such as Home, open a photo taken there, then its info, then Name this place.</p>
       <div id="places" class="place-list"></div>
       <p id="no-places" class="no-images" hidden>Nothing found</p>
     </div>

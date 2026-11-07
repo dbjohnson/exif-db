@@ -1951,7 +1951,7 @@
     {% endif %}
     {% if movies %}
     <section class="library-days place-movies">
-      <h2 class="movie-clips-heading">{{ "{:,}".format(movies | length) }} movie{{ '' if movies | length == 1 else 's' }}</h2>
+      <h2 class="movie-clips-heading">{{ "{:,}".format(movies | length) }} video{{ '' if movies | length == 1 else 's' }}</h2>
       <div class="movie-grid">
         {% for movie in movies %}
         <a class="movie-tile" href="{{ movie.url }}" aria-label="{{ movie.title or movie.path.split('/')[-1] }}">

@@ -78,7 +78,7 @@
         const {photos, movies, shown_photos: shownPhotos, shown_movies: shownMovies} = await response.json();
         const parts = [];
         if (photos) parts.push(plural(photos, 'photo'));
-        if (movies) parts.push(plural(movies, 'movie'));
+        if (movies) parts.push(plural(movies, 'video'));
         document.getElementById('map-summary').textContent = parts.length ? `${parts.join(', ')} in view` : 'Nothing here. Try zooming out';
         const all = document.getElementById('map-all');
         all.hidden = !parts.length;
