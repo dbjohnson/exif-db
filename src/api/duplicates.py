@@ -124,11 +124,11 @@ def _group_for_page(group, photos, handled):
     if len(members) < 2:
         return None
     showing = [photo for photo in members if photo['status'] != copies.REJECTED]
-    if group['sure']:
-        # only what this has hidden, rather than every group someone has already sorted out
-        if not any(handled.get(photo['id']) == copies.HIDDEN and photo['status'] == copies.REJECTED for photo in members):
-            return None
-    elif len(showing) < 2 or all(photo['id'] in handled for photo in showing):
+    waiting = not group['sure'] and len(showing) >= 2 and not all(photo['id'] in handled for photo in showing)
+    # otherwise only for what's hidden as a copy, rather than every group someone has said aren't copies
+    if not waiting and not any(
+        handled.get(photo['id']) == copies.HIDDEN and photo['status'] == copies.REJECTED for photo in members
+    ):
         return None
     best = photos.get(group.get('best'))
     if best is None or best['status'] == copies.REJECTED:
@@ -139,16 +139,27 @@ def _group_for_page(group, photos, handled):
             'showing': photo['status'] != copies.REJECTED,
             'best': photo is best,
             'folder': os.path.relpath(os.path.dirname(photo['path']), exif.LIBRARY_ROOT),
-            'kind': 'screenshot' if copies.looks_like_screenshot(photo) else None
+            'screenshot': copies.looks_like_screenshot(photo),
+            'hidden_as_copy': photo['status'] == copies.REJECTED and handled.get(photo['id']) == copies.HIDDEN
         }
         for photo in members
     ]
     return {
+        'waiting': waiting,
         'photo_ids': [photo['id'] for photo in members],
         'showing_ids': [photo['id'] for photo in showing],
         'best': best['id'],
         'photos': sorted(described, key=lambda photo: (not photo['best'], not photo['showing'], photo['id']))
     }
+
+
+def _with_cameras(groups):
+    # what each photo was taken with, which is worth comparing but slow to find for every group at once
+    cameras = exif.cameras_of([photo['id'] for group in groups for photo in group['photos']])
+    for group in groups:
+        for photo in group['photos']:
+            photo['camera_name'] = cameras.get(photo['id'])
+    return groups
 
 
 def _groups_for_page():
@@ -158,11 +169,11 @@ def _groups_for_page():
         for photo in exif.duplicate_photos({photo_id for group in groups for photo_id in group['photos']})
     }
     handled = exif.handled_duplicates()
-    described = ((group['sure'], _group_for_page(group, photos, handled)) for group in groups)
     sure, possible = [], []
-    for is_sure, group in described:
-        if group:
-            (sure if is_sure else possible).append(group)
+    for group in groups:
+        described = _group_for_page(group, photos, handled)
+        if described:
+            (possible if described['waiting'] else sure).append(described)
     # newest first, going by the latest photo in each
     newest = lambda group: max(photo['date'] or '' for photo in group['photos'])
     return sorted(sure, key=newest, reverse=True), sorted(possible, key=newest, reverse=True)
@@ -170,7 +181,22 @@ def _groups_for_page():
 
 def page():
     sure, possible = _groups_for_page()
-    return {'hidden': sure, 'possible': possible}
+    return {
+        'possible': len(possible),
+        'hidden_groups': len(sure),
+        'hidden': sum(not photo['showing'] for group in sure for photo in group['photos'])
+    }
+
+
+def to_review():
+    # every group waiting for a decision, to go through one at a time
+    return _with_cameras(_groups_for_page()[1])
+
+
+def hidden_groups(offset, limit):
+    # a page of the groups with copies hidden, automatically or by a person, which are too many to show at once
+    sure = _groups_for_page()[0]
+    return {'total': len(sure), 'groups': _with_cameras(sure[offset:offset + limit])}
 
 
 def status():
@@ -182,31 +208,73 @@ def status():
     }
 
 
-def keep(photo_id, photo_ids):
-    # keep this copy and hide the others, which takes over whatever they had
+def _group_of(photo_ids):
+    # how the group these photos are in stands now, or None if there's nothing left to show of it
+    wanted = set(photo_ids)
+    group = next((group for group in _groups() if wanted & set(group['photos'])), None)
+    if group is None:
+        return None
+    photos = {photo['id']: photo for photo in exif.duplicate_photos(group['photos'])}
+    described = _group_for_page(group, photos, exif.handled_duplicates())
+    return described and _with_cameras([described])[0]
+
+
+def _before(photo_ids):
+    # what a decision about these photos changes, as restore takes it back
+    handled = exif.handled_duplicates()
+    return [
+        {'id': photo['id'], 'status': photo['status'], 'favorite': photo['favorite'], 'handled': handled.get(photo['id'], '')}
+        for photo in exif.duplicate_photos(photo_ids)
+    ]
+
+
+def keep(kept_ids, photo_ids):
+    """
+    Keep these copies and hide the others, of which the first kept takes over whatever the hidden
+    ones had.  Returns what was there before, for restore, and how the group stands now
+    """
+    previous = _before(photo_ids)
     photos = {photo['id']: photo for photo in exif.duplicate_photos(photo_ids)}
-    kept = photos.get(photo_id)
-    if kept is None:
-        return
-    others = [photo for other, photo in photos.items() if other != photo_id]
+    kept = [photos[photo_id] for photo_id in dict.fromkeys(kept_ids) if photo_id in photos]
+    if not kept:
+        return {'previous': [], 'group': _group_of(photo_ids)}
+    kept_set = {photo['id'] for photo in kept}
+    others = [photo for photo_id, photo in photos.items() if photo_id not in kept_set]
     showing = [photo for photo in others if photo['status'] != copies.REJECTED]
     approve = any(photo['status'] == copies.APPROVED for photo in showing)
-    if kept['status'] == copies.REJECTED and not approve:
-        exif.record_reviews(unreviewed=[photo_id])
+    first = kept[0]['id']
+    # kept on purpose, so not left hidden.  Those approved before being hidden gave that to the copy
+    # that stayed, so these start again as unreviewed
+    exif.record_reviews(unreviewed=[
+        photo['id'] for photo in kept
+        if photo['status'] == copies.REJECTED and not (approve and photo['id'] == first)
+    ])
     _record(
         hide=others,
-        approve=[photo_id] if approve else [],
-        favorite=[photo_id] if any(photo['favorite'] for photo in showing) else [],
-        kept=[photo_id]
+        approve=[first] if approve else [],
+        favorite=[first] if any(photo['favorite'] for photo in showing) and not kept[0]['favorite'] else [],
+        kept=kept_set
     )
+    return {'previous': previous, 'group': _group_of(photo_ids)}
 
 
 def show(photo_ids):
-    # these aren't duplicates, or are wanted anyway.  Those approved before being hidden gave that
-    # to the copy that stayed, so these start again as unreviewed
-    photos = exif.duplicate_photos(photo_ids)
-    exif.record_duplicates([(photo['id'], copies.KEPT) for photo in photos])
-    exif.record_reviews(unreviewed=[photo['id'] for photo in photos if photo['status'] == copies.REJECTED])
+    # these aren't duplicates, or are wanted anyway
+    return keep(photo_ids, photo_ids)
+
+
+def restore(previous):
+    """
+    Undoes keep or show, given what they returned: each photo's review, favorite and duplicate
+    decision as they were.  Returns how the group stands again
+    """
+    if not previous:
+        return None
+    exif.record_duplicates([(photo['id'], photo['handled']) for photo in previous])
+    exif.restore_reviews({photo['id']: photo['status'] for photo in previous})
+    exif.set_favorites([photo['id'] for photo in previous if photo['favorite']], True)
+    exif.set_favorites([photo['id'] for photo in previous if not photo['favorite']], False)
+    return _group_of([photo['id'] for photo in previous])
 
 
 # ---- possible duplicates of one photo, to compare side by side

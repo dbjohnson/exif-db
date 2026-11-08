@@ -2003,12 +2003,25 @@ def _movie(path: str, hevc: bool = True, copy: bool = False):
 
 
 class DuplicateChoice(BaseModel):
-    keep: str
+    # the copies to keep, of which the first takes over what the hidden ones had
+    keep: list[str]
     photo_ids: list[str]
 
 
 class DuplicatesShown(BaseModel):
     photo_ids: list[str]
+
+
+class DuplicateDecision(BaseModel):
+    id: str
+    status: Literal['approved', 'rejected', 'unreviewed']
+    favorite: bool
+    # '' for no decision about it as a copy
+    handled: Literal['', 'hidden', 'kept']
+
+
+class DuplicatesRestored(BaseModel):
+    previous: list[DuplicateDecision]
 
 
 @app.get("/duplicates")
@@ -2048,16 +2061,31 @@ async def _duplicate_candidates(photo_id: str):
     return found
 
 
+# the groups waiting for a decision, to go through one at a time
+@app.get("/api/duplicates/review")
+async def _duplicates_to_review():
+    return duplicates.to_review()
+
+
+@app.get("/api/duplicates/hidden")
+async def _hidden_duplicates(offset: int = 0, limit: int = Query(30, ge=1, le=200)):
+    return duplicates.hidden_groups(max(offset, 0), limit)
+
+
+# each returns what it changed, for undoing it, and how the group stands now
 @app.post("/api/duplicates/keep")
 async def _keep_duplicate(choice: DuplicateChoice):
-    duplicates.keep(choice.keep, choice.photo_ids)
-    return "saved"
+    return duplicates.keep(choice.keep, choice.photo_ids)
 
 
 @app.post("/api/duplicates/show")
 async def _show_duplicates(shown: DuplicatesShown):
-    duplicates.show(shown.photo_ids)
-    return "saved"
+    return duplicates.show(shown.photo_ids)
+
+
+@app.post("/api/duplicates/restore")
+async def _restore_duplicates(restored: DuplicatesRestored):
+    return {'group': duplicates.restore([decision.model_dump() for decision in restored.previous])}
 
 
 def slides(df, bursts=None):

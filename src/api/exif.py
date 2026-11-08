@@ -275,6 +275,11 @@ def record_reviews(approved=(), rejected=(), unreviewed=()):
     )
 
 
+def restore_reviews(statuses):
+    # puts reviews back as they were, by photo id
+    _append_log(REVIEWS_CSV, list(statuses.items()))
+
+
 def reset_reviews(datestring=''):
     """
     Return reviewed photos to unreviewed, and report how many.  Resetting the whole
@@ -879,8 +884,9 @@ def cameras_of(photo_ids):
 
 
 def handled_duplicates():
+    # an empty value is a decision taken back
     _load_log('duplicates', DUPLICATES_CSV)
-    return dict(db.execute("SELECT photo_id, value FROM duplicates").fetchall())
+    return dict(db.execute("SELECT photo_id, value FROM duplicates WHERE value <> ''").fetchall())
 
 
 def record_duplicates(rows):

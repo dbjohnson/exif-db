@@ -3526,6 +3526,185 @@ html.navigating::before {
   font-size: var(--control-font);
 }
 
+/* one group of possible copies at a time, each copy marked to keep or hide */
+.dupe-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.dupe-bar h2 {
+  margin: 12px 0 8px;
+}
+
+.dupe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.dupe-primary:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-strong);
+}
+
+.dupe-review .dupe-hint {
+  margin: 0 0 10px;
+}
+
+.dupe-copies {
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 2), minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dupe-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.dupe-copy.marked-keep {
+  border-color: var(--accent);
+}
+
+.dupe-copy.marked-hide .dupe-picture img {
+  opacity: 0.45;
+}
+
+.dupe-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dupe-copy.marked-hide .dupe-state {
+  color: var(--muted);
+}
+
+.dupe-copy.marked-keep .dupe-state {
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.dupe-original {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.dupe-picture {
+  padding: 0;
+  background: var(--surface);
+  border-radius: var(--radius-tile);
+}
+
+.dupe-picture img {
+  display: block;
+  width: 100%;
+  /* fills what's left of the screen above the details */
+  height: max(220px, calc(100dvh - 400px));
+  object-fit: contain;
+}
+
+.dupe-copies.two-rows .dupe-picture img {
+  height: max(160px, calc(50dvh - 220px));
+}
+
+.dupe-copy dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.dupe-copy dt {
+  color: var(--muted);
+}
+
+.dupe-copy dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dupe-copy dd.differs {
+  color: var(--highlight);
+}
+
+.dupe-keys {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: 12px/1.5 ui-monospace, monospace;
+}
+
+/* no keyboard, so no keys to list */
+@media (pointer: coarse) {
+  .dupe-keys,
+  .dupe-label kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  /* the decisions stay under a thumb, with room left below the last details for them */
+  .dupe-review {
+    padding-bottom: calc(var(--control-height) + 24px);
+  }
+  .dupe-actions {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 5;
+    flex-wrap: nowrap;
+    padding: 8px var(--page-margin) calc(8px + env(safe-area-inset-bottom));
+    background: var(--bg);
+    border-top: 1px solid var(--selected);
+  }
+  .dupe-actions .dupe-primary {
+    flex: 1;
+  }
+  .dupe-actions .control {
+    padding: 0 10px;
+  }
+  .dupe-review .dupe-hint {
+    font-size: 12px;
+  }
+  .dupe-copies {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .dupe-picture img,
+  .dupe-copies.two-rows .dupe-picture img {
+    height: 30vh;
+  }
+  .dupe-copy {
+    padding: 3px;
+  }
+  .dupe-copy dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .dupe-copy dd {
+    margin-bottom: 3px;
+  }
+}
+
 @media (max-width: 600px) {
   .site-nav {
     justify-content: space-between;

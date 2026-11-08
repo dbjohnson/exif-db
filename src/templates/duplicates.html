@@ -4,103 +4,36 @@
     <title>Duplicates</title>
     {% include '_head.html' %}
     <script src="/static/toast.js"></script>
-    <script>
-      async function act(url, body) {
-        try {
-          await postJson(url, body);
-          window.location.reload();
-        } catch (error) {
-          console.log(error);
-          showToast(`Couldn't save: ${error.message}`);
-        }
-      }
-
-      const groupIds = button => JSON.parse(button.closest('.duplicate-group').dataset.photos);
-
-      function keep(button) {
-        act('/api/duplicates/keep', {keep: button.dataset.photo, photo_ids: groupIds(button)});
-      }
-
-      function show(button) {
-        act('/api/duplicates/show', {photo_ids: [button.dataset.photo]});
-      }
-
-      // only those showing: any hidden here are copies of something else, whatever these turn out to be
-      function notDuplicates(button) {
-        act('/api/duplicates/show', {photo_ids: JSON.parse(button.dataset.photos)});
-      }
-    </script>
+    <script src="/static/duplicates.js" defer></script>
   </head>
   <body class="library-page">
     {% include '_nav.html' %}
-    {% macro tile(photo) %}
-    <figure class="duplicate-tile{{ ' kept' if photo.best }}{{ ' hidden-copy' if not photo.showing }}">
-      <a href="/api/image{{ photo.path | urlencode }}{% if photo.rotation %}?rotate={{ photo.rotation }}{% endif %}" target="_blank" rel="noopener">
-        <img
-          src="/api/thumb{{ photo.path | urlencode }}{% if photo.rotation %}?rotate={{ photo.rotation }}{% endif %}"
-          loading="lazy"
-          decoding="async"
-          alt="{{ photo.name }}"
-          onerror="this.remove()"
-        />
-      </a>
-      <figcaption>
-        {% if photo.best %}
-        <strong class="duplicate-badge">Best copy</strong>
-        {% elif not photo.showing %}
-        <span class="duplicate-badge">Hidden</span>
-        {% endif %}
-        <span>{{ photo.name }}</span>
-        <span>{{ photo.folder }}</span>
-        <span>
-          {% if photo.width and photo.height %}{{ photo.width }} × {{ photo.height }} · {% endif %}{{ photo.type }}{% if photo.kind %} · {{ photo.kind }}{% endif %}
-        </span>
-        {% if not (photo.best and photo.showing) %}
-        <span class="duplicate-actions">
-          <button data-photo="{{ photo.id }}" onclick="keep(this)">Keep this instead</button>
-          {% if not photo.showing %}
-          <button data-photo="{{ photo.id }}" onclick="show(this)">Show this too</button>
-          {% endif %}
-        </span>
-        {% endif %}
-      </figcaption>
-    </figure>
-    {% endmacro %}
     {% if possible %}
-    <section class="library-year">
-      <h2>Might be duplicates <span>{{ "{:,}".format(possible | length) }} to look at</span></h2>
-      <p class="library-hint">These look alike, but not enough to be sure, so nothing has been hidden. They may be edited copies or a similar screen.</p>
-      {% for group in possible %}
-      <div class="duplicate-group" data-photos="{{ group.photo_ids | tojson | forceescape }}">
-        <div class="duplicate-copies">
-          {% for photo in group.photos %}
-          {{ tile(photo) }}
-          {% endfor %}
-        </div>
-        <div class="duplicate-actions">
-          <button data-photo="{{ group.best }}" onclick="keep(this)">Keep the best copy</button>
-          <button data-photos="{{ group.showing_ids | tojson | forceescape }}" onclick="notDuplicates(this)">Not duplicates</button>
-        </div>
+    <section id="review" class="library-year dupe-review" aria-label="Might be duplicates">
+      <div class="dupe-bar">
+        <h2>Might be duplicates <span id="review-count">{{ "{:,}".format(possible) }} to look at</span></h2>
+        <span class="dupe-actions">
+          <button class="control dupe-primary" id="review-keep" onclick="keepMarked()" title="Enter">Keep</button>
+          <button class="control" id="review-different" onclick="notDuplicates()" title="N">Not duplicates</button>
+          <button class="control" id="review-back" onclick="step(-1)" title="Previous (←)" aria-label="Previous">‹</button>
+          <button class="control" id="review-skip" onclick="step(1)" title="Skip for now (→)" aria-label="Skip">›</button>
+          <button class="control" id="review-undo" onclick="undo()" title="Undo (U)" disabled>Undo</button>
+        </span>
       </div>
-      {% endfor %}
+      <p class="library-hint dupe-hint">These look alike, but not enough to be sure, so nothing has been hidden. Copies you don't keep are hidden, not deleted, and are listed under Hidden copies below.</p>
+      <div id="review-copies" class="dupe-copies"><p class="no-images">Loading…</p></div>
+      <p class="dupe-keys">Keys: <kbd>1</kbd>–<kbd>9</kbd> keep only that copy, <kbd>Shift</kbd>+number or a click on a photo to mark it kept or hidden, <kbd>Enter</kbd> keep the marked ones, <kbd>N</kbd> not duplicates, <kbd>←</kbd> <kbd>→</kbd> back and skip, <kbd>U</kbd> undo.</p>
     </section>
     {% endif %}
-    {% if hidden %}
-    <section class="library-year">
-      <h2>Hidden automatically <span>{{ "{:,}".format(hidden | length) }} photo{{ '' if hidden | length == 1 else 's' }} with copies</span></h2>
-      <p class="library-hint">Each of these was the same photo more than once, so only the best copy still shows. Nothing was deleted.</p>
-      {% for group in hidden %}
-      <div class="duplicate-group" data-photos="{{ group.photo_ids | tojson | forceescape }}">
-        <div class="duplicate-copies">
-          {% for photo in group.photos %}
-          {{ tile(photo) }}
-          {% endfor %}
-        </div>
-      </div>
-      {% endfor %}
+    {% if hidden_groups %}
+    <section id="hidden-list" class="library-year">
+      <h2>Hidden copies <span id="hidden-count">{{ "{:,}".format(hidden) }} photo{{ '' if hidden == 1 else 's' }} with copies</span></h2>
+      <p class="library-hint">Each of these was the same photo more than once, so only the copy kept still shows. Most were hidden automatically, and the rest after being looked at above. Nothing was deleted.</p>
+      <div id="hidden-groups"></div>
+      <p id="hidden-more" class="no-images">Loading…</p>
     </section>
     {% endif %}
-    {% if not possible and not hidden %}
+    {% if not possible and not hidden_groups %}
     <div class="no-images">No duplicates found</div>
     {% endif %}
   </body>
