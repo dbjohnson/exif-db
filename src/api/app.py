@@ -2094,6 +2094,14 @@ async def _show_duplicates(shown: DuplicatesShown):
     return duplicates.show(shown.photo_ids)
 
 
+# every decision about copies taken back and made again by the current rules
+@app.post("/api/duplicates/reset")
+async def _reset_duplicates():
+    if duplicates.job.running():
+        raise HTTPException(status_code=409, detail="Wait for the duplicate check to finish")
+    return duplicates.reset()
+
+
 @app.post("/api/duplicates/restore")
 async def _restore_duplicates(restored: DuplicatesRestored):
     return {'group': duplicates.restore([decision.model_dump() for decision in restored.previous])}

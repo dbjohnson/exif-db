@@ -297,6 +297,57 @@ def keep(kept_ids, photo_ids):
     return {'previous': previous, 'group': _group_of(photo_ids)}
 
 
+def _history(path):
+    # every row of a log, by key, as (value, time) oldest first
+    rows = {}
+    if os.path.exists(path):
+        with open(path, newline='', encoding='utf-8', errors='surrogateescape') as fh:
+            for row in csv.reader(fh):
+                if len(row) == 3 and row[2].isdigit():
+                    rows.setdefault(row[0], []).append((row[1], int(row[2])))
+    for history in rows.values():
+        history.sort(key=lambda entry: entry[1])
+    return rows
+
+
+# how long after a copy was hidden its review can have been written by the same decision
+SAME_DECISION_NS = 5 * 10**9
+
+
+def reset():
+    """
+    Takes back every decision about copies, automatic or not, and decides again by the current rules:
+    each photo hidden as a copy gets the review it had before then, unless someone has reviewed it
+    since, and what the check is sure about is hidden again.  The rest wait on the duplicates page.
+    What kept copies took over from hidden ones, like an approval, stays.  Returns what changed
+    """
+    handled = exif.handled_duplicates()
+    if not handled:
+        return {'reset': 0, 'shown': 0, 'hidden': 0}
+    photos = {photo['id']: photo for photo in exif.duplicate_photos(handled)}
+    decisions = _history(exif.DUPLICATES_CSV)
+    reviews = _history(exif.REVIEWS_CSV)
+    statuses = {}
+    for photo_id, value in handled.items():
+        photo = photos.get(photo_id)
+        if value != copies.HIDDEN or photo is None or photo['status'] != copies.REJECTED:
+            continue
+        hidden_at = max(time for value, time in decisions.get(photo_id, []) if value == copies.HIDDEN)
+        history = reviews.get(photo_id, [])
+        # reviewed again since, so that stands
+        if history and history[-1][1] > hidden_at + SAME_DECISION_NS:
+            continue
+        before = [value for value, time in history if time < hidden_at]
+        statuses[photo_id] = before[-1] if before else copies.UNREVIEWED
+    exif.record_duplicates([(photo_id, '') for photo_id in handled])
+    exif.restore_reviews(statuses)
+    results = _read_json(RESULTS)
+    hidden = _apply(results['groups']) if results else 0
+    shown = sum(status != copies.REJECTED for status in statuses.values())
+    logger.info(f"Reset {len(handled)} duplicate decisions: {shown} copies shown again, then {hidden} hidden")
+    return {'reset': len(handled), 'shown': shown, 'hidden': hidden}
+
+
 def show(photo_ids):
     # these aren't duplicates, or are wanted anyway
     return keep(photo_ids, photo_ids)
