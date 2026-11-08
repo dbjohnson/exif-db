@@ -842,7 +842,7 @@ def duplicate_photos(photo_ids=None, paths=()):
             Make IS NOT NULL OR Model IS NOT NULL,
             ({LIBRARY_MONTH}) IS NOT NULL,
             date_assigned,
-            DateTimeOriginal, review_status, favorite, rotation
+            DateTimeOriginal, review_status, favorite, rotation, {CAMERA_MAKE}
         FROM {table}
         WHERE ? OR photo_id IN (SELECT UNNEST(?::VARCHAR[])) OR SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
         """,
@@ -864,9 +864,10 @@ def duplicate_photos(photo_ids=None, paths=()):
             'date': taken,
             'status': status,
             'favorite': favorite,
-            'rotation': rotation
+            'rotation': rotation,
+            'make': make
         }
-        for photo_id, path, name, file_type, size, width, height, camera, dated, assigned, taken, status, favorite, rotation
+        for photo_id, path, name, file_type, size, width, height, camera, dated, assigned, taken, status, favorite, rotation, make
         in rows
     ]
 

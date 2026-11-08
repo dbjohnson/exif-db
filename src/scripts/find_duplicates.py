@@ -24,7 +24,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # only these: importing the api package would also start a web app
 sys.path.insert(0, os.path.join(APP_DIR, 'api'))
 import worklog  # noqa: E402
-from copies import DIFFERENT, POSSIBLE, SAME, best_copy, is_original, looks_like_screenshot, separate_shots  # noqa: E402
+from copies import DIFFERENT, POSSIBLE, RULES, SAME, best_copy, full_size_export, is_original, looks_like_screenshot, separate_shots  # noqa: E402
 
 # how many photos or comparisons could be redone if this is killed
 SAVE_EVERY = 20
@@ -57,6 +57,10 @@ MAX_CONTRAST_CHANGE = 1.25
 MAX_SHIFT = 0.015
 # more than this is a family of similar screens rather than copies of something
 MAX_POSSIBLE_GROUP = 12
+# a camera's file and an export of it with its own tone, vignette or lens correction differ block by
+# block like a different photo, but line up feature for feature.  Below this many, as many pairs
+# are the next shot in a burst as are copies, judging by a contact sheet of the library's 441
+EXPORT_MIN_MATCHES = 400
 
 
 def flat_run(spread):
@@ -158,7 +162,7 @@ def candidates(np, photos, fingerprints):
     return [
         (known[first], known[second])
         for _, first, second in found
-        if not separate_shots(known[first], known[second])
+        if not separate_shots(known[first], known[second]) and not full_size_export(known[first], known[second])
     ]
 
 
@@ -297,7 +301,7 @@ class Comparer:
         if not results:
             return DIFFERENT, 1
         best = min(results, key=lambda result: result['worst'])
-        verdict = judge(best, photo_a, photo_b)
+        verdict = judge(best, photo_a, photo_b, matches)
         # pixels in the file for each in the thumbnail, then the same area in both
         density_a = file_density(photo_a, width_a, height_a)
         density_b = file_density(photo_b, width_b, height_b)
@@ -310,10 +314,15 @@ def file_density(photo, width, height):
     return math.sqrt(photo['width'] * photo['height'] / (width * height))
 
 
-def judge(result, photo_a, photo_b):
+def judge(result, photo_a, photo_b, matches=0):
     smaller, larger = sorted((result['cover_a'], result['cover_b']))
     if not math.isfinite(result['worst']) or larger < MIN_COVER:
         return DIFFERENT
+    # an export next to the camera's file it came from, framed alike, however it was edited.  Only
+    # ever possible, as an edit is something a person decides about
+    exported = is_original(photo_a) != is_original(photo_b)
+    if exported and smaller >= MIN_COVER and matches >= EXPORT_MIN_MATCHES and result['worst'] > SAME_FRAMING[POSSIBLE]:
+        return POSSIBLE
     same_size = (photo_a['width'], photo_a['height']) == (photo_b['width'], photo_b['height'])
     if same_size and result['shift'] > MAX_SHIFT:
         return DIFFERENT
@@ -389,6 +398,18 @@ class Groups:
                 yield best, {best: 1 / most, **{other: ratio / most for other, ratio in direct.items()}}
 
 
+RULES_FILE = 'duplicate_rules.json'
+
+
+def read_rules(path):
+    # which rules the pairs already compared were judged by: 1 from before there was this file
+    try:
+        with open(path) as fh:
+            return json.load(fh)['rules']
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return 1
+
+
 def pair_key(a, b):
     return f"{a['path']}\t{b['path']}"
 
@@ -404,7 +425,7 @@ def build_groups(comparisons, photos):
         path_a, path_b = key.split('\t', 1)
         verdict, ratio = value.split()
         a, b = by_path.get(path_a), by_path.get(path_b)
-        if verdict != DIFFERENT and a and b and a['id'] != b['id'] and not separate_shots(a, b):
+        if verdict != DIFFERENT and a and b and a['id'] != b['id'] and not separate_shots(a, b) and not full_size_export(a, b):
             loose.link(a['id'], b['id'], float(ratio))
             if verdict == SAME:
                 sure.link(a['id'], b['id'], float(ratio))
@@ -475,6 +496,13 @@ def main(queue_path, fingerprints_path, pairs_path, results_path, index, progres
     if not stopping:
         comparisons = read_log(pairs_path)
         pairs = candidates(np, photos, fingerprints)
+        rules_path = os.path.join(os.path.dirname(pairs_path), RULES_FILE)
+        if read_rules(rules_path) < 2:
+            # from before EXPORT_MIN_MATCHES: an export and its original found different are looked at again
+            for a, b in pairs:
+                key = pair_key(*sorted((a, b), key=lambda photo: photo['path']))
+                if comparisons.get(key, '').startswith(DIFFERENT) and is_original(a) != is_original(b):
+                    del comparisons[key]
         comparer = Comparer(cv2, np, thumbs)
         progress.update(phase='comparing', started=int(time.time()), total=len(pairs), done=0)
         worklog.save_json(progress_path, progress)
@@ -499,6 +527,7 @@ def main(queue_path, fingerprints_path, pairs_path, results_path, index, progres
         worklog.append_log(pairs_path, rows)
 
     if not stopping:
+        worklog.save_json(rules_path, {'rules': RULES})
         worklog.save_json(results_path, {
             'finished': time.time_ns(),
             'groups': build_groups(comparisons, photos)

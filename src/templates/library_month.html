@@ -1526,12 +1526,11 @@
         );
       }
 
-      // ---- comparing the open photo with what may be copies of it, side by side
+      // ---- the open photo and what may be copies of it, on the duplicates page's review over the viewer
 
       const duplicateCandidates = new Map();
-      // what's being compared: the photo, what was found for it, and which candidate is showing
+      // the photo the review was opened for, while it's open
       let comparing = null;
-      const STATUS_NAMES = {approved: 'Approved', unreviewed: 'Unreviewed', rejected: 'Hidden'};
 
       function candidatesOf(photo) {
         if (!duplicateCandidates.has(photo.id)) {
@@ -1547,7 +1546,8 @@
         return duplicateCandidates.get(photo.id);
       }
 
-      const stillThere = found => found.candidates.filter(candidate => !candidate.gone);
+      // what the review starts with: those the duplicate check didn't find different
+      const likelyCopies = found => found.candidates.filter(candidate => !['different', 'export'].includes(candidate.verdict));
 
       async function renderCompareCount() {
         const button = document.getElementById('viewer-compare');
@@ -1558,7 +1558,7 @@
         const badge = document.getElementById('viewer-compare-count');
         badge.hidden = true;
         try {
-          const count = stillThere(await candidatesOf(photo)).length;
+          const count = likelyCopies(await candidatesOf(photo)).length;
           if (photo !== current) {
             return;
           }
@@ -1570,209 +1570,53 @@
         }
       }
 
-      async function openCompare() {
-        const photo = current;
-        try {
-          comparing = {photo, found: await candidatesOf(photo), index: 0};
-        } catch (error) {
-          showToast(`Couldn't look for duplicates: ${error.message}`);
-          return;
-        }
+      function openCompare() {
+        comparing = current;
+        const frame = document.getElementById('compare-frame');
+        frame.src = `/duplicates?${new URLSearchParams({photo: current.id, embed: 1})}`;
+        // so that its keys work straight away
+        frame.onload = () => frame.contentWindow.focus();
         document.getElementById('compare').hidden = false;
-        renderCompare();
       }
 
       function closeCompare() {
         comparing = null;
         document.getElementById('compare').hidden = true;
+        document.getElementById('compare-frame').src = 'about:blank';
+        // what's a copy of what may have changed
+        duplicateCandidates.clear();
         if (current) {
           renderCompareCount();
         }
       }
 
-      function stepCompare(direction) {
-        const count = stillThere(comparing.found).length;
-        if (count) {
-          comparing.index = (comparing.index + direction + count) % count;
-          renderCompare();
-        }
-      }
-
-      function formatTaken(value) {
-        const [date, time] = value.split(' ');
-        const [year, month, day] = date.split(':').map(Number);
-        const [hour, minute] = (time || '0:0').split(':').map(Number);
-        return new Date(year, month - 1, day, hour, minute).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
-      }
-
-      function formatBytes(bytes) {
-        return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round((bytes || 0) / 1e3)} KB`;
-      }
-
-      // what's worth comparing, as label and text, where a difference between the two stands out
-      function compareFields(photo) {
-        const pixels = (photo.width || 0) * (photo.height || 0);
-        return [
-          ['Size', photo.width ? `${photo.width.toLocaleString()} × ${photo.height.toLocaleString()} (${(pixels / 1e6).toFixed(1)} MP)` : 'Unknown'],
-          ['File', `${photo.type || 'Unknown'}, ${formatBytes(photo.size)}`],
-          ['Taken', photo.taken ? formatTaken(photo.taken) : photo.dated ? `${formatTaken(photo.date)}, set by hand` : 'No date of its own'],
-          ['Camera', photo.camera_name || (photo.screenshot ? 'None: looks like a screenshot' : 'None')],
-          ['Folder', photo.folder],
-          ['Name', photo.name],
-          ['Status', `${photo.hidden_as_copy ? 'Hidden as a copy' : STATUS_NAMES[photo.status] || photo.status}${photo.favorite ? ', favorite' : ''}`]
-        ];
-      }
-
-      function verdictText(candidate) {
-        if (candidate.verdict === 'same') {
-          return 'The duplicate check found these are the same photo.';
-        }
-        if (candidate.verdict === 'possible') {
-          return 'The duplicate check found these may be the same photo.';
-        }
-        if (candidate.verdict === 'different') {
-          return 'The duplicate check compared these closely and found them different.';
-        }
-        if (candidate.in_group) {
-          return 'The duplicate check grouped these together.';
-        }
-        return `These look alike, ${candidate.distance} of 64 bits of their fingerprints apart, but haven't been compared closely. Photos a camera took at different moments, like a burst, are treated as separate shots.`;
-      }
-
-      function renderSide(id, photo, other, better, remove) {
-        const side = document.getElementById(id);
-        const image = document.createElement('img');
-        image.alt = '';
-        image.src = photoUrl('image', photo);
-        const label = document.createElement('div');
-        label.className = 'compare-label';
-        label.textContent = id === 'compare-left' ? 'This photo' : 'Possible duplicate';
-        if (better) {
-          const badge = document.createElement('span');
-          badge.className = 'compare-better';
-          badge.textContent = 'Better copy';
-          badge.title = 'More detail, or else from a camera, not a screenshot, with a date, in a named folder';
-          label.append(badge);
-        }
-        const list = document.createElement('dl');
-        const theirs = new Map(compareFields(other));
-        for (const [name, value] of compareFields(photo)) {
-          const term = document.createElement('dt');
-          term.textContent = name;
-          const detail = document.createElement('dd');
-          detail.textContent = value;
-          detail.classList.toggle('differs', theirs.get(name) !== value);
-          list.append(term, detail);
-        }
-        const actions = document.createElement('div');
-        actions.className = 'compare-actions';
-        const original = document.createElement('a');
-        original.className = 'control';
-        original.href = `/api/original${encodePath(photo.path)}`;
-        original.target = '_blank';
-        original.textContent = 'Original';
-        const deleting = document.createElement('button');
-        deleting.className = 'control';
-        deleting.title = 'Delete';
-        deleting.setAttribute('aria-label', 'Delete');
-        deleting.innerHTML = '<i class="fa fa-trash-o" aria-hidden="true"></i>';
-        deleting.onclick = () => {
-          if (pressedTwice(deleting)) {
-            remove();
-          }
-        };
-        actions.append(original, deleting);
-        side.replaceChildren(label, image, list, actions);
-        if (id === 'compare-left' && comparing.found.other_files.length) {
-          const note = document.createElement('p');
-          note.className = 'library-hint';
-          note.textContent = `Another file of this photo is at ${comparing.found.other_files.map(path => path.replace(/^\/photo\//, '')).join(', ')}. Deleting this one lets that take its place.`;
-          side.append(note);
-        }
-      }
-
-      function renderCompare() {
-        const candidates = stillThere(comparing.found);
-        const left = comparing.found.photo;
-        const summary = document.getElementById('compare-summary');
-        const verdict = document.getElementById('compare-verdict');
-        const strip = document.getElementById('compare-strip');
-        if (!candidates.length) {
-          summary.textContent = 'No possible duplicates';
-          verdict.textContent = comparing.found.checked
-            ? 'Nothing else in the library looks like this photo.'
-            : "This photo hasn't been checked for duplicates yet, which happens after each scan.";
-          renderSide('compare-left', left, left, false, () => compareDeleteOpen());
-          document.getElementById('compare-right').replaceChildren();
-          strip.replaceChildren();
+      // what the review hid, or showed again with its undo
+      window.addEventListener('message', event => {
+        const change = event.origin === window.location.origin && event.data?.duplicates;
+        if (!change) {
           return;
         }
-        comparing.index = Math.min(comparing.index, candidates.length - 1);
-        const right = candidates[comparing.index];
-        summary.textContent = `${comparing.index + 1} of ${plural(candidates.length, 'possible duplicate')}`;
-        verdict.textContent = verdictText(right);
-        renderSide('compare-left', left, right, !right.better, () => compareDeleteOpen());
-        renderSide('compare-right', right, left, right.better, () => compareDeleteCandidate(right));
-        strip.replaceChildren(...candidates.map((candidate, index) => {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.title = candidate.name;
-          button.toggleAttribute('aria-current', index === comparing.index);
-          const thumb = document.createElement('img');
-          thumb.alt = '';
-          thumb.loading = 'lazy';
-          thumb.src = photoUrl('thumb', candidate);
-          button.append(thumb);
-          button.onclick = () => {
-            comparing.index = index;
-            renderCompare();
-          };
-          return button;
-        }));
-      }
-
-      // the open photo goes as it would from the viewer, which moves on to the next
-      function compareDeleteOpen() {
-        const photo = comparing.photo;
-        closeCompare();
-        if (current === photo) {
-          deleteNow(photo);
+        const byId = new Map(loadedPhotos().map(photo => [photo.id, photo]));
+        for (const id of change.hidden || []) {
+          const photo = byId.get(id);
+          if (photo && !photo.removed) {
+            removeFromView(photo);
+          }
         }
-      }
-
-      async function compareDeleteCandidate(candidate) {
-        const found = comparing.found;
-        const loaded = loadedPhotos().find(photo => photo.id === candidate.id);
-        const shown = gone => {
-          candidate.gone = gone;
-          if (loaded) {
-            gone ? setRemoved(loaded, true) : restored(loaded);
+        for (const id of change.shown || []) {
+          const photo = byId.get(id);
+          if (photo?.removed) {
+            restored(photo);
+            // the viewer had moved on from the photo this was opened for
+            if (photo.id === comparing?.id && current) {
+              showPhoto(photo);
+            }
           }
-          if (comparing?.found === found) {
-            renderCompare();
-          }
-          renderCompareCount();
-        };
-        shown(true);
-        deletesRunning += 1;
-        try {
-          const response = await fetch(`/api/image${encodePath(candidate.path)}`, {method: 'DELETE', keepalive: true});
-          if (!response.ok) {
-            throw new Error('Status: ' + response.status);
-          }
-          const {files} = await response.json();
-          showToast('Deleted the duplicate', () => run(async () => {
-            await postJson('/api/restore', {files});
-            shown(false);
-          }, "Couldn't undo"));
-        } catch (error) {
-          console.log(error);
-          shown(false);
-          showToast(`Couldn't delete: ${error.message}`);
-        } finally {
-          deletesRunning -= 1;
         }
-      }
+        if (change.close) {
+          closeCompare();
+        }
+      });
 
       // a link that opens this photo wherever it is in the library, even after its date changes
       function sharePhoto() {
@@ -1795,10 +1639,6 @@
         if (comparing) {
           if (event.key === 'Escape') {
             closeCompare();
-          } else if (event.key === 'ArrowLeft') {
-            stepCompare(-1);
-          } else if (event.key === 'ArrowRight') {
-            stepCompare(1);
           }
           return;
         }
@@ -2133,22 +1973,7 @@
       </div>
     </div>
     <div id="compare" class="compare" hidden>
-      <div class="compare-bar">
-        <button onclick="closeCompare()" title="Close (Esc)" aria-label="Close">
-          <i class="fa fa-times" aria-hidden="true"></i>
-        </button>
-        <span id="compare-summary"></span>
-        <span class="compare-steps">
-          <button onclick="stepCompare(-1)" title="Previous (←)" aria-label="Previous possible duplicate">‹</button>
-          <button onclick="stepCompare(1)" title="Next (→)" aria-label="Next possible duplicate">›</button>
-        </span>
-      </div>
-      <p id="compare-verdict" class="compare-verdict"></p>
-      <div class="compare-sides">
-        <section id="compare-left" class="compare-side"></section>
-        <section id="compare-right" class="compare-side"></section>
-      </div>
-      <div id="compare-strip" class="compare-strip"></div>
+      <iframe id="compare-frame" title="Possible duplicates" src="about:blank"></iframe>
     </div>
   </body>
 </html>

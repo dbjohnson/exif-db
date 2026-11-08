@@ -2025,11 +2025,13 @@ class DuplicatesRestored(BaseModel):
 
 
 @app.get("/duplicates")
-async def _duplicates_page(request: Request):
+async def _duplicates_page(request: Request, photo: str | None = None, embed: bool = False):
+    # with a photo, only that photo and what may be copies of it, as the library's viewer opens it
+    counts = {'possible': 0, 'hidden_groups': 0, 'hidden': 0} if photo else duplicates.page()
     return templates.TemplateResponse(
         request=request,
         name="duplicates.html",
-        context=duplicates.page()
+        context={**counts, 'photo': photo, 'embed': embed}
     )
 
 
@@ -2065,6 +2067,15 @@ async def _duplicate_candidates(photo_id: str):
 @app.get("/api/duplicates/review")
 async def _duplicates_to_review():
     return duplicates.to_review()
+
+
+# a photo and what may be copies of it, to decide about as one group
+@app.get("/api/duplicates/photo")
+async def _duplicates_of_photo(photo_id: str, everything: bool = False):
+    found = duplicates.for_photo(photo_id, everything)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That photo isn't in the index")
+    return found
 
 
 @app.get("/api/duplicates/hidden")

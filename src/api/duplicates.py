@@ -20,6 +20,8 @@ PAIRS = '/storage/duplicate_pairs.csv'
 RESULTS = '/storage/duplicates.json'
 # when the results last applied were written
 APPLIED = '/storage/duplicates_applied.json'
+# matches RULES_FILE in scripts/find_duplicates.py
+RULES_PATH = '/storage/duplicate_rules.json'
 logger = logging.getLogger('uvicorn.error')
 _resumed = False
 # bits out of 64 that can differ for photos to be worth showing side by side, as
@@ -27,7 +29,7 @@ _resumed = False
 CANDIDATE_DISTANCE = 10
 CANDIDATES_SHOWN = 24
 # what the duplicate check concluded about a pair, best first
-VERDICT_ORDER = {copies.SAME: 0, copies.POSSIBLE: 1, None: 2, copies.DIFFERENT: 3}
+VERDICT_ORDER = {copies.SAME: 0, copies.POSSIBLE: 1, None: 2, copies.EXPORT: 3, copies.DIFFERENT: 3}
 _cache = {}
 
 
@@ -72,11 +74,18 @@ def _apply(groups):
     # hides what's sure, unless a person has already decided otherwise
     photos = {photo['id']: photo for photo in exif.duplicate_photos()}
     handled = exif.handled_duplicates()
-    hide, approve, favorite, dates = [], [], [], []
+    hide, approve, favorite, dates, swaps = [], [], [], [], []
     for group in groups:
         members = [photos[photo_id] for photo_id in group['photos'] if photo_id in photos]
         # the others were only found to match that one, so without it they wait for the next check
         if not group['sure'] or len(members) < 2 or group['best'] not in photos:
+            continue
+        # an earlier check hid what's now the copy to keep, such as a camera's file before those came
+        # first, so that copy comes back, unless someone has decided about the group
+        if handled.get(group['best']) == copies.HIDDEN and not any(
+            handled.get(photo['id']) == copies.KEPT for photo in members
+        ):
+            swaps.append((group['best'], [photo['id'] for photo in members]))
             continue
         plan = copies.plan(members, photos[group['best']], handled)
         hide.extend(plan['hide'])
@@ -87,7 +96,29 @@ def _apply(groups):
         if plan['date']:
             dates.append((plan['best']['id'], plan['date']))
     _record(hide, approve, favorite, dates)
+    exports = _hidden_exports(photos, handled)
+    if exports:
+        show(exports)
+        logger.info(f"Showed {len(exports)} full-size exports that an earlier check hid as copies")
+    for best, photo_ids in swaps:
+        keep([best], photo_ids)
+    if swaps:
+        logger.info(f"Kept {len(swaps)} copies that an earlier check hid, in place of the copy it kept")
     return len(hide)
+
+
+def _hidden_exports(photos, handled):
+    # full-size exports an earlier check hid as copies of a camera's photo, unless someone kept that
+    by_path = {photo['path']: photo for photo in photos.values()}
+    found = set()
+    for (path_a, path_b), verdict in _comparisons().items():
+        a, b = by_path.get(path_a), by_path.get(path_b)
+        if verdict == copies.DIFFERENT or not a or not b or not copies.full_size_export(a, b):
+            continue
+        for hidden, other in ((a, b), (b, a)):
+            if handled.get(hidden['id']) == copies.HIDDEN and handled.get(other['id']) != copies.KEPT:
+                found.add(hidden['id'])
+    return sorted(found)
 
 
 def apply_results():
@@ -98,10 +129,18 @@ def apply_results():
     worklog.save_json(APPLIED, {'finished': results['finished']})
 
 
+def _rules():
+    # which rules what's been compared was judged by
+    return (_read_json(RULES_PATH) or {}).get('rules', 1)
+
+
 def _should_start():
     global _resumed
     state = job.status()['progress']
     if state is None or state['index'] != _index():
+        return True
+    # pairs judged by older rules are looked at again, once, unless someone stopped that
+    if state['state'] == 'finished' and _rules() != copies.RULES:
         return True
     # a run cut off by a restart carries on, but not one that keeps falling over by itself
     if state['state'] == 'interrupted' and not _resumed:
@@ -342,13 +381,16 @@ def _pixels(photo):
     return (photo['width'] or 0) * (photo['height'] or 0)
 
 
+def _best_of(photos, details):
+    # which copy to keep, as the duplicate check would choose, going by pixels for any it didn't group
+    if not all(photo['id'] in details for photo in photos):
+        most = max(_pixels(photo) for photo in photos) or 1
+        details = {photo['id']: (_pixels(photo) / most) ** 0.5 for photo in photos}
+    return copies.best_copy(photos, details)
+
+
 def _better(a, b, details):
-    # which of two copies to keep, as the duplicate check would choose
-    if a['id'] in details and b['id'] in details:
-        return copies.best_copy([a, b], details)
-    if _pixels(a) != _pixels(b):
-        return a if _pixels(a) > _pixels(b) else b
-    return max((a, b), key=copies._preference)
+    return _best_of([a, b], details)
 
 
 def _described(photo, cameras):
@@ -384,6 +426,8 @@ def candidates(photo_id):
     shown = []
     for other in others:
         verdict = pairs.get(tuple(sorted((photo['path'], other['path']))))
+        if copies.full_size_export(photo, other):
+            verdict = copies.EXPORT
         better = _better(photo, other, details)
         shown.append({
             **_described(other, cameras),
@@ -405,3 +449,46 @@ def candidates(photo_id):
         'checked': near is not None,
         'candidates': shown[:CANDIDATES_SHOWN]
     }
+
+
+# the most that can be decided about at once, one for each number key
+SHOWN_WITH_PHOTO = 9
+
+
+def for_photo(photo_id, everything=False):
+    """
+    A photo and what may be copies of it as a group to decide about, as on the duplicates page:
+    those the check didn't find different, or everything that looks like it.  Also how many more
+    there would be with everything.  None for a photo that isn't in the index
+    """
+    found = candidates(photo_id)
+    if found is None:
+        return None
+    likely = [
+        other for other in found['candidates']
+        if everything or other['verdict'] not in (copies.DIFFERENT, copies.EXPORT)
+    ]
+    members = [{**found['photo'], 'this': True}, *likely][:SHOWN_WITH_PHOTO]
+    result = {
+        'photo': found['photo'],
+        'checked': found['checked'],
+        'more': len(found['candidates']) - len(likely),
+        'group': None
+    }
+    if len(members) < 2:
+        return result
+    group = next((group for group in _groups() if photo_id in group['photos']), None)
+    details = group['photos'] if group and isinstance(group['photos'], dict) else {}
+    best = _best_of(members, details)
+    described = [
+        {**photo, 'showing': photo['status'] != copies.REJECTED, 'best': photo['id'] == best['id']}
+        for photo in members
+    ]
+    result['group'] = {
+        'waiting': False,
+        'photo_ids': [photo['id'] for photo in described],
+        'showing_ids': [photo['id'] for photo in described if photo['showing']],
+        'best': best['id'],
+        'photos': sorted(described, key=lambda photo: (not photo['best'], not photo.get('this'), not photo['showing']))
+    }
+    return result

@@ -55,6 +55,21 @@ function detailLists(photos) {
 
 // ---- one group at a time
 
+const REVIEW = document.getElementById('review');
+// one photo and what may be copies of it, as the library's viewer opens this, in a frame of its own
+const PHOTO = REVIEW?.dataset.photo;
+const EMBEDDED = REVIEW?.hasAttribute('data-embed');
+// what the duplicate check made of each one next to this photo
+const VERDICTS = {
+  same: 'Same photo',
+  possible: 'May be the same',
+  different: 'Found different',
+  export: 'Full-size export'
+};
+// for the one photo: how many more look alike, which the check found different, and whether to show them
+let photoFound = null;
+let everything = false;
+
 let queue = [];
 let position = 0;
 // which copies of the group showing are marked to keep
@@ -84,19 +99,27 @@ function renderReview() {
   document.getElementById('review-undo').disabled = !undoable.length;
   const group = current();
   for (const id of ['review-back', 'review-skip']) {
-    document.getElementById(id).disabled = queue.length < 2;
+    const button = document.getElementById(id);
+    if (button) {
+      button.disabled = queue.length < 2;
+    }
+  }
+  if (PHOTO) {
+    renderMore();
   }
   if (!group) {
-    count.textContent = 'none left';
+    count.textContent = PHOTO ? '' : 'none left';
     copies.replaceChildren(Object.assign(document.createElement('p'), {
       className: 'no-images',
-      textContent: 'Nothing left to look at.'
+      textContent: PHOTO ? nothingForPhoto() : 'Nothing left to look at.'
     }));
     keep.disabled = different.disabled = true;
     keep.textContent = 'Keep';
     return;
   }
-  count.textContent = `${(position + 1).toLocaleString()} of ${plural(queue.length, 'group')} to look at`;
+  count.textContent = PHOTO
+    ? `${group.photos.find(photo => photo.this)?.name || ''} and ${plural(group.photos.length - 1, 'other')}`
+    : `${(position + 1).toLocaleString()} of ${plural(queue.length, 'group')} to look at`;
   const lists = detailLists(group.photos);
   // up to four in a row; more go in rows of three, with smaller pictures to fit two rows on the screen
   const copyCount = group.photos.length;
@@ -114,9 +137,17 @@ function renderReview() {
     state.className = 'dupe-state';
     state.textContent = kept ? 'Keep' : 'Hide';
     label.append(key, state);
+    if (photo.this) {
+      label.append(Object.assign(document.createElement('span'), {className: 'dupe-tag', textContent: 'This photo'}));
+    } else if (PHOTO) {
+      label.append(Object.assign(document.createElement('span'), {
+        className: 'dupe-tag',
+        textContent: VERDICTS[photo.verdict] || (photo.in_group ? 'Grouped with it' : 'Not compared')
+      }));
+    }
     if (photo.best) {
       const badge = document.createElement('span');
-      badge.className = 'compare-better';
+      badge.className = 'dupe-better';
       badge.textContent = 'Best copy';
       badge.title = 'More detail, or else from a camera, not a screenshot, with a date, in a named folder';
       label.append(badge);
@@ -183,12 +214,18 @@ function toggleMark(photoId) {
 function decide(url, body, message) {
   const group = current();
   const index = position;
-  const entry = {group, index, saved: postJson(url, body)};
+  const kept = body.keep || body.photo_ids;
+  // what leaves the library: those showing that aren't kept
+  const hidden = group.showing_ids.filter(id => !kept.includes(id));
+  const entry = {group, index, hidden, saved: postJson(url, body)};
   undoable.push(entry);
   queue.splice(index, 1);
   show(Math.min(index, queue.length - 1));
   entry.saved.then(
-    () => showToast(message, undo),
+    () => {
+      tellLibrary({hidden});
+      showToast(message, undo);
+    },
     error => {
       console.log(error);
       undoable.splice(undoable.indexOf(entry), 1);
@@ -196,6 +233,17 @@ function decide(url, body, message) {
       showToast(`Couldn't save: ${error.message}`);
     }
   );
+}
+
+// the library page this is open over, which takes hidden photos off its timeline
+function tellLibrary(change) {
+  if (EMBEDDED && window.parent !== window) {
+    window.parent.postMessage({duplicates: change}, window.location.origin);
+  }
+}
+
+function closeReview() {
+  tellLibrary({close: true});
 }
 
 function keepIds(ids) {
@@ -249,6 +297,7 @@ async function undo() {
   try {
     const {previous} = await entry.saved;
     await postJson('/api/duplicates/restore', {previous});
+    tellLibrary({shown: entry.hidden});
   } catch (error) {
     console.log(error);
     showToast(`Couldn't undo: ${error.message}`);
@@ -257,11 +306,20 @@ async function undo() {
 
 async function loadReview() {
   try {
-    const response = await fetch('/api/duplicates/review');
+    const url = PHOTO
+      ? `/api/duplicates/photo?${new URLSearchParams({photo_id: PHOTO, everything})}`
+      : '/api/duplicates/review';
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error('Status: ' + response.status);
     }
-    queue = await response.json();
+    const found = await response.json();
+    if (PHOTO) {
+      photoFound = found;
+      queue = found.group ? [found.group] : [];
+    } else {
+      queue = found;
+    }
   } catch (error) {
     document.getElementById('review-copies').textContent = `Couldn't load these: ${error.message}`;
     return;
@@ -269,8 +327,34 @@ async function loadReview() {
   show(0);
 }
 
+function nothingForPhoto() {
+  if (undoable.length) {
+    return 'Done.';
+  }
+  if (photoFound && !photoFound.checked) {
+    return "This photo hasn't been checked for duplicates yet, which happens after each scan.";
+  }
+  return photoFound?.more ? 'Nothing the duplicate check thinks may be a copy of this photo.' : 'Nothing else in the library looks like this photo.';
+}
+
+// those that look alike but that the check compared and found different, which may still be wanted
+function renderMore() {
+  const more = document.getElementById('review-more');
+  more.hidden = everything || !photoFound?.more || undoable.length > 0;
+  more.textContent = `Also show ${plural(photoFound?.more || 0, 'photo')} that look${photoFound?.more === 1 ? 's' : ''} alike but aren't copies to hide`;
+}
+
+function showEverything() {
+  everything = true;
+  loadReview();
+}
+
 document.addEventListener('keydown', event => {
-  if (!document.getElementById('review') || event.ctrlKey || event.metaKey || event.altKey) {
+  if (!REVIEW || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+  if (event.key === 'Escape' && EMBEDDED) {
+    closeReview();
     return;
   }
   if (event.target.closest('input, textarea, select')) {
@@ -292,8 +376,7 @@ document.addEventListener('keydown', event => {
   const actions = {
     Enter: keepMarked,
     n: notDuplicates,
-    ArrowRight: () => step(1),
-    ArrowLeft: () => step(-1),
+    ...(PHOTO ? {} : {ArrowRight: () => step(1), ArrowLeft: () => step(-1)}),
     u: undo,
     z: undo
   };
@@ -428,7 +511,7 @@ async function loadHidden() {
   }
 }
 
-if (document.getElementById('review')) {
+if (REVIEW) {
   loadReview();
 }
 if (document.getElementById('hidden-list')) {

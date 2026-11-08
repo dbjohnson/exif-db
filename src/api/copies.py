@@ -26,11 +26,47 @@ SCREEN_SHAPE = 1.6
 SAME_DETAIL = 1.25
 # iPhones name the copy of a photo that's been edited this way, and it's the one someone chose
 EDITED_NAME = re.compile(r'IMG_E\d')
+# changed whenever the duplicate check judges pairs differently, so that it looks at them again
+RULES = 3
+# what the check makes of a full-size export next to the camera's photo, which are both kept
+EXPORT = 'export'
+# a copy of a dedicated camera's photo with at least this share of its pixels, and this many, is an
+# export to keep.  Facebook's copies are at most 2048 pixels across, about 2.8 million
+FULL_SIZE = 0.5
+FULL_SIZE_PIXELS = 4_000_000
+PHONE_MAKES = {'apple', 'samsung', 'google', 'oppo', 'motorola', 'sony ericsson', 'huawei', 'xiaomi', 'oneplus', 'lg electronics'}
 
 
 def is_original(photo):
     # as it came from a camera, on a date it recorded itself
     return bool(photo['camera'] and photo['taken'])
+
+
+
+
+def _pixels(photo):
+    return (photo['width'] or 0) * (photo['height'] or 0)
+
+
+def from_dedicated_camera(photo):
+    # a camera's own photo, other than a phone's, which are what get exported at full size to keep
+    return is_original(photo) and (photo.get('make') or '').strip().lower() not in PHONE_MAKES
+
+
+def full_size_export(a, b):
+    """
+    Whether one is a dedicated camera's photo, such as a DSLR's, and the other an export of it at
+    (nearly) full size, such as a JPEG of a raw file.  Those are both kept, so they're never
+    duplicates: only small copies are, like those texted or posted online
+    """
+    for original, other in ((a, b), (b, a)):
+        exported = other['type'] != original['type'] or not is_original(other)
+        # made from it, so no bigger, as a raw file is never an export of the camera's JPEG
+        size = _pixels(other) / max(1, _pixels(original))
+        big = _pixels(other) >= FULL_SIZE_PIXELS
+        if from_dedicated_camera(original) and exported and big and FULL_SIZE <= size <= 1:
+            return True
+    return False
 
 
 def looks_like_screenshot(photo):
@@ -73,10 +109,17 @@ def _preference(photo):
 
 
 def best_copy(photos, details):
-    # the most detail comes first, as that can't be got back, and then the most complete copy
-    sharpest = max(details[photo['id']] for photo in photos)
+    """
+    A camera's own file always comes first, such as a DSLR's over an export of it, as the export was
+    made from it.  An iPhone's edit keeps the camera's details and is someone's choice, so it comes
+    before the photo it was made from, even cropped.  Among those, or among the rest if there are
+    none, the most detail, as that can't be got back, and then the most complete copy
+    """
+    originals = [photo for photo in photos if is_original(photo)]
+    pool = [photo for photo in originals if EDITED_NAME.match(photo['name'])] or originals or photos
+    sharpest = max(details[photo['id']] for photo in pool)
     return max(
-        (photo for photo in photos if details[photo['id']] * SAME_DETAIL >= sharpest),
+        (photo for photo in pool if details[photo['id']] * SAME_DETAIL >= sharpest),
         key=_preference
     )
 

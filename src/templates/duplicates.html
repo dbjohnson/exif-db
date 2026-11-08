@@ -6,23 +6,34 @@
     <script src="/static/toast.js"></script>
     <script src="/static/duplicates.js" defer></script>
   </head>
-  <body class="library-page">
+  <body class="library-page{{ ' embedded' if embed }}">
+    {% if not embed %}
     {% include '_nav.html' %}
-    {% if possible %}
-    <section id="review" class="library-year dupe-review" aria-label="Might be duplicates">
+    {% endif %}
+    {% if possible or photo %}
+    <section id="review" class="library-year dupe-review" aria-label="Might be duplicates"{% if photo %} data-photo="{{ photo }}"{% endif %}{% if embed %} data-embed{% endif %}>
       <div class="dupe-bar">
-        <h2>Might be duplicates <span id="review-count">{{ "{:,}".format(possible) }} to look at</span></h2>
+        {% if embed %}
+        <button class="control" onclick="closeReview()" title="Close (Esc)" aria-label="Close">✕</button>
+        {% endif %}
+        <h2>{{ 'Possible duplicates' if photo else 'Might be duplicates' }} <span id="review-count">{% if not photo %}{{ "{:,}".format(possible) }} to look at{% endif %}</span></h2>
         <span class="dupe-actions">
           <button class="control dupe-primary" id="review-keep" onclick="keepMarked()" title="Enter">Keep</button>
           <button class="control" id="review-different" onclick="notDuplicates()" title="N">Not duplicates</button>
+          {% if not photo %}
           <button class="control" id="review-back" onclick="step(-1)" title="Previous (←)" aria-label="Previous">‹</button>
           <button class="control" id="review-skip" onclick="step(1)" title="Skip for now (→)" aria-label="Skip">›</button>
+          {% endif %}
           <button class="control" id="review-undo" onclick="undo()" title="Undo (U)" disabled>Undo</button>
         </span>
       </div>
+      {% if photo %}
+      <p class="library-hint dupe-hint">This photo next to what the duplicate check found may be copies of it. Copies you don't keep are hidden, not deleted, and are listed under Hidden copies on the Duplicates page. <button class="link-like" id="review-more" onclick="showEverything()" hidden></button></p>
+      {% else %}
       <p class="library-hint dupe-hint">These look alike, but not enough to be sure, so nothing has been hidden. Copies you don't keep are hidden, not deleted, and are listed under Hidden copies below.</p>
+      {% endif %}
       <div id="review-copies" class="dupe-copies"><p class="no-images">Loading…</p></div>
-      <p class="dupe-keys">Keys: <kbd>1</kbd>–<kbd>9</kbd> keep only that copy, <kbd>Shift</kbd>+number or a click on a photo to mark it kept or hidden, <kbd>Enter</kbd> keep the marked ones, <kbd>N</kbd> not duplicates, <kbd>←</kbd> <kbd>→</kbd> back and skip, <kbd>U</kbd> undo.</p>
+      <p class="dupe-keys">Keys: <kbd>1</kbd>–<kbd>9</kbd> keep only that copy, <kbd>Shift</kbd>+number or a click on a photo to mark it kept or hidden, <kbd>Enter</kbd> keep the marked ones, <kbd>N</kbd> not duplicates,{% if not photo %} <kbd>←</kbd> <kbd>→</kbd> back and skip,{% endif %} <kbd>U</kbd> undo{% if embed %}, <kbd>Esc</kbd> close{% endif %}.</p>
     </section>
     {% endif %}
     {% if hidden_groups %}
@@ -33,7 +44,7 @@
       <p id="hidden-more" class="no-images">Loading…</p>
     </section>
     {% endif %}
-    {% if not possible and not hidden_groups %}
+    {% if not possible and not hidden_groups and not photo %}
     <div class="no-images">No duplicates found</div>
     {% endif %}
   </body>
