@@ -24,7 +24,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # only these: importing the api package would also start a web app
 sys.path.insert(0, os.path.join(APP_DIR, 'api'))
 import worklog  # noqa: E402
-from copies import DIFFERENT, POSSIBLE, RULES, SAME, best_copy, full_size_export, is_original, looks_like_screenshot, separate_shots  # noqa: E402
+from copies import DIFFERENT, POSSIBLE, RULES, SAME, best_copy, full_size_export, is_original, looks_like_screenshot, separate_shots, small_copy  # noqa: E402
 
 # how many photos or comparisons could be redone if this is killed
 SAVE_EVERY = 20
@@ -61,6 +61,8 @@ MAX_POSSIBLE_GROUP = 12
 # block like a different photo, but line up feature for feature.  Below this many, as many pairs
 # are the next shot in a burst as are copies, judging by a contact sheet of the library's 441
 EXPORT_MIN_MATCHES = 400
+# from here, nearly every such pair on that sheet was the same photo, so a small copy is hidden
+SMALL_COPY_MIN_MATCHES = 600
 
 
 def flat_run(spread):
@@ -318,11 +320,16 @@ def judge(result, photo_a, photo_b, matches=0):
     smaller, larger = sorted((result['cover_a'], result['cover_b']))
     if not math.isfinite(result['worst']) or larger < MIN_COVER:
         return DIFFERENT
+    # a small copy of a camera's photo, such as one texted or posted, framed alike: it's sure however
+    # it was edited, as it's worth nothing next to the photo itself
+    small = smaller >= MIN_COVER and (small_copy(photo_a, photo_b) or small_copy(photo_b, photo_a))
     # an export next to the camera's file it came from, framed alike, however it was edited.  Only
-    # ever possible, as an edit is something a person decides about
+    # possible unless it's small, as an edit is something a person decides about
     exported = is_original(photo_a) != is_original(photo_b)
     if exported and smaller >= MIN_COVER and matches >= EXPORT_MIN_MATCHES and result['worst'] > SAME_FRAMING[POSSIBLE]:
-        return POSSIBLE
+        return SAME if small and matches >= SMALL_COPY_MIN_MATCHES else POSSIBLE
+    if small and result['worst'] <= SAME_FRAMING[POSSIBLE]:
+        return SAME
     same_size = (photo_a['width'], photo_a['height']) == (photo_b['width'], photo_b['height'])
     if same_size and result['shift'] > MAX_SHIFT:
         return DIFFERENT
@@ -497,11 +504,12 @@ def main(queue_path, fingerprints_path, pairs_path, results_path, index, progres
         comparisons = read_log(pairs_path)
         pairs = candidates(np, photos, fingerprints)
         rules_path = os.path.join(os.path.dirname(pairs_path), RULES_FILE)
-        if read_rules(rules_path) < 2:
-            # from before EXPORT_MIN_MATCHES: an export and its original found different are looked at again
+        if read_rules(rules_path) < RULES:
+            # a camera's photo next to an export or a small copy is looked at again, unless it was sure
             for a, b in pairs:
                 key = pair_key(*sorted((a, b), key=lambda photo: photo['path']))
-                if comparisons.get(key, '').startswith(DIFFERENT) and is_original(a) != is_original(b):
+                exported = is_original(a) != is_original(b) or small_copy(a, b) or small_copy(b, a)
+                if exported and not comparisons.get(key, SAME).startswith(SAME):
                     del comparisons[key]
         comparer = Comparer(cv2, np, thumbs)
         progress.update(phase='comparing', started=int(time.time()), total=len(pairs), done=0)

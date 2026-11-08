@@ -27,7 +27,10 @@ SAME_DETAIL = 1.25
 # iPhones name the copy of a photo that's been edited this way, and it's the one someone chose
 EDITED_NAME = re.compile(r'IMG_E\d')
 # changed whenever the duplicate check judges pairs differently, so that it looks at them again
-RULES = 3
+RULES = 4
+# a copy of a camera's photo with at most this share of its pixels is a small copy, like one texted
+# or posted, which is hidden even edited
+SMALL_COPY = 0.25
 # what the check makes of a full-size export next to the camera's photo, which are both kept
 EXPORT = 'export'
 # a copy of a dedicated camera's photo with at least this share of its pixels, and this many, is an
@@ -67,6 +70,11 @@ def full_size_export(a, b):
         if from_dedicated_camera(original) and exported and big and FULL_SIZE <= size <= 1:
             return True
     return False
+
+
+def small_copy(original, copy):
+    # whether copy is much smaller than a camera's own photo, original
+    return is_original(original) and _pixels(copy) <= SMALL_COPY * _pixels(original)
 
 
 def looks_like_screenshot(photo):
