@@ -3490,10 +3490,6 @@ html.navigating::before {
   background: var(--surface);
 }
 
-.duplicate-tile.hidden-copy img {
-  opacity: 0.55;
-}
-
 .duplicate-tile.kept img {
   outline: 2px solid var(--accent);
 }
@@ -3585,10 +3581,6 @@ html.navigating::before {
 
 .dupe-copy.marked-keep {
   border-color: var(--accent);
-}
-
-.dupe-copy.marked-hide .dupe-picture img {
-  opacity: 0.45;
 }
 
 .dupe-label {
