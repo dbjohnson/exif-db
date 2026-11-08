@@ -27,7 +27,7 @@ SAME_DETAIL = 1.25
 # iPhones name the copy of a photo that's been edited this way, and it's the one someone chose
 EDITED_NAME = re.compile(r'IMG_E\d')
 # changed whenever the duplicate check judges pairs differently, so that it looks at them again
-RULES = 4
+RULES = 5
 # a copy of a camera's photo with at most this share of its pixels is a small copy, like one texted
 # or posted, which is hidden even edited
 SMALL_COPY = 0.25

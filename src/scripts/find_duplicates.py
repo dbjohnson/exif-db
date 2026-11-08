@@ -406,6 +406,7 @@ class Groups:
 
 
 RULES_FILE = 'duplicate_rules.json'
+CR2 = 'CR2'
 
 
 def read_rules(path):
@@ -504,13 +505,17 @@ def main(queue_path, fingerprints_path, pairs_path, results_path, index, progres
         comparisons = read_log(pairs_path)
         pairs = candidates(np, photos, fingerprints)
         rules_path = os.path.join(os.path.dirname(pairs_path), RULES_FILE)
-        if read_rules(rules_path) < RULES:
+        rules = read_rules(rules_path)
+        for a, b in pairs:
+            key = pair_key(*sorted((a, b), key=lambda photo: photo['path']))
+            if key not in comparisons:
+                continue
             # a camera's photo next to an export or a small copy is looked at again, unless it was sure
-            for a, b in pairs:
-                key = pair_key(*sorted((a, b), key=lambda photo: photo['path']))
-                exported = is_original(a) != is_original(b) or small_copy(a, b) or small_copy(b, a)
-                if exported and not comparisons.get(key, SAME).startswith(SAME):
-                    del comparisons[key]
+            exported = is_original(a) != is_original(b) or small_copy(a, b) or small_copy(b, a)
+            # before 5, older Canon CR2 files were taken for their preview's size
+            raw = CR2 in (a['type'], b['type'])
+            if (rules < RULES and exported and not comparisons[key].startswith(SAME)) or (rules < 5 and raw):
+                del comparisons[key]
         comparer = Comparer(cv2, np, thumbs)
         progress.update(phase='comparing', started=int(time.time()), total=len(pairs), done=0)
         worklog.save_json(progress_path, progress)

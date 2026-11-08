@@ -74,6 +74,7 @@ def _apply(groups):
     # hides what's sure, unless a person has already decided otherwise
     photos = {photo['id']: photo for photo in exif.duplicate_photos()}
     handled = exif.handled_duplicates()
+    chosen = _hidden_by_a_person()
     hide, approve, favorite, dates, swaps = [], [], [], [], []
     for group in groups:
         members = [photos[photo_id] for photo_id in group['photos'] if photo_id in photos]
@@ -81,8 +82,9 @@ def _apply(groups):
         if not group['sure'] or len(members) < 2 or group['best'] not in photos:
             continue
         # an earlier check hid what's now the copy to keep, such as a camera's file before those came
-        # first, so that copy comes back, unless someone has decided about the group
-        if handled.get(group['best']) == copies.HIDDEN and not any(
+        # first, so that copy comes back, unless someone has decided about the group.  A person may
+        # have kept a copy outside it, like the next shot, so what they hid stays hidden
+        if handled.get(group['best']) == copies.HIDDEN and group['best'] not in chosen and not any(
             handled.get(photo['id']) == copies.KEPT for photo in members
         ):
             swaps.append((group['best'], [photo['id'] for photo in members]))
@@ -96,7 +98,7 @@ def _apply(groups):
         if plan['date']:
             dates.append((plan['best']['id'], plan['date']))
     _record(hide, approve, favorite, dates)
-    exports = _hidden_exports(photos, handled)
+    exports = _hidden_exports(photos, handled, chosen)
     if exports:
         show(exports)
         logger.info(f"Showed {len(exports)} full-size exports that an earlier check hid as copies")
@@ -107,8 +109,19 @@ def _apply(groups):
     return len(hide)
 
 
-def _hidden_exports(photos, handled):
-    # full-size exports an earlier check hid as copies of a camera's photo, unless someone kept that
+def _hidden_by_a_person():
+    """
+    Photos a person hid as copies, rather than the check: keeping a copy writes the copies it hides
+    at the same moment, while the check only ever hides
+    """
+    history = _history(exif.DUPLICATES_CSV)
+    kept_at = {time for rows in history.values() for value, time in rows if value == copies.KEPT}
+    return {photo_id for photo_id, rows in history.items() if rows[-1][0] == copies.HIDDEN and rows[-1][1] in kept_at}
+
+
+def _hidden_exports(photos, handled, chosen):
+    # full-size exports an earlier check hid as copies of a camera's photo, unless a person hid one
+    # or kept the other
     by_path = {photo['path']: photo for photo in photos.values()}
     found = set()
     for (path_a, path_b), verdict in _comparisons().items():
@@ -116,7 +129,7 @@ def _hidden_exports(photos, handled):
         if verdict == copies.DIFFERENT or not a or not b or not copies.full_size_export(a, b):
             continue
         for hidden, other in ((a, b), (b, a)):
-            if handled.get(hidden['id']) == copies.HIDDEN and handled.get(other['id']) != copies.KEPT:
+            if handled.get(hidden['id']) == copies.HIDDEN and hidden['id'] not in chosen and handled.get(other['id']) != copies.KEPT:
                 found.add(hidden['id'])
     return sorted(found)
 

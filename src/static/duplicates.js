@@ -23,10 +23,16 @@ function formatBytes(bytes) {
   return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round((bytes || 0) / 1e3)} KB`;
 }
 
+// as it's shown, so a photo stored on its side reads as it looks
+function shownSize(photo) {
+  return photo.turned ? [photo.height, photo.width] : [photo.width, photo.height];
+}
+
 function fields(photo) {
   const pixels = (photo.width || 0) * (photo.height || 0);
+  const [width, height] = shownSize(photo);
   return [
-    ['Size', photo.width ? `${photo.width.toLocaleString()} × ${photo.height.toLocaleString()} (${(pixels / 1e6).toFixed(1)} MP)` : 'Unknown'],
+    ['Size', width && height ? `${width.toLocaleString()} × ${height.toLocaleString()} (${(pixels / 1e6).toFixed(1)} MP)` : 'Unknown'],
     ['File', `${photo.type || 'Unknown'}, ${formatBytes(photo.size)}`],
     ['Taken', photo.taken ? formatTaken(photo.taken) : photo.dated && photo.date ? `${formatTaken(photo.date)}, set by hand` : 'No date of its own'],
     ['Camera', photo.camera_name || (photo.screenshot ? 'None: looks like a screenshot' : 'None')],
@@ -419,7 +425,7 @@ function hiddenTile(group, photo) {
     line(photo.name),
     line(photo.folder),
     line([
-      photo.width && photo.height ? `${photo.width} × ${photo.height}` : null,
+      photo.width && photo.height ? shownSize(photo).join(' × ') : null,
       photo.type,
       photo.screenshot ? 'screenshot' : null
     ].filter(Boolean).join(' · '))

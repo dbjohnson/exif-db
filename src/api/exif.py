@@ -56,6 +56,13 @@ RECENT_FILTER = "DateTimeOriginal >= ? AND DateTimeOriginal < ?"
 # which camera took a photo, as text with nothing for none, so that every camera has one name to go by
 CAMERA_MAKE = "NULLIF(TRIM(CAST(Make AS VARCHAR)), '')"
 CAMERA_MODEL = "NULLIF(TRIM(CAST(Model AS VARCHAR)), '')"
+# a photo's own size as "width height".  ImageWidth and ImageHeight can be those of a preview inside
+# the file, as in the CR2 files of older Canons, where exiftool's ImageSize has the photo's own
+_SIZE = "string_split(NULLIF(TRIM(CAST(ImageSize AS VARCHAR)), ''), ' ')"
+WIDTH = f"TRY_CAST(COALESCE({_SIZE}[1], CAST(ImageWidth AS VARCHAR)) AS BIGINT)"
+HEIGHT = f"TRY_CAST(COALESCE({_SIZE}[2], CAST(ImageHeight AS VARCHAR)) AS BIGINT)"
+# stored on its side and shown turned, so its width and height trade places on screen
+TURNED = "COALESCE(TRY_CAST(Orientation AS INTEGER) BETWEEN 5 AND 8, false)"
 # a photo's "YYYY:MM" in the library, or NULL if its date can't be trusted
 LIBRARY_MONTH = f"""
     CASE WHEN regexp_matches(DateTimeOriginal, '^\\d{{4}}:(0[1-9]|1[0-2]):')
@@ -838,7 +845,7 @@ def duplicate_photos(photo_ids=None, paths=()):
         f"""
         SELECT
             photo_id, SourceFile, FileName, FileType,
-            TRY_CAST(FileSize AS BIGINT), TRY_CAST(ImageWidth AS BIGINT), TRY_CAST(ImageHeight AS BIGINT),
+            TRY_CAST(FileSize AS BIGINT), {WIDTH}, {HEIGHT}, {TURNED},
             Make IS NOT NULL OR Model IS NOT NULL,
             ({LIBRARY_MONTH}) IS NOT NULL,
             date_assigned,
@@ -857,6 +864,7 @@ def duplicate_photos(photo_ids=None, paths=()):
             'size': size,
             'width': width,
             'height': height,
+            'turned': turned,
             'camera': camera,
             'dated': dated,
             # when it was taken, by its own account
@@ -867,7 +875,7 @@ def duplicate_photos(photo_ids=None, paths=()):
             'rotation': rotation,
             'make': make
         }
-        for photo_id, path, name, file_type, size, width, height, camera, dated, assigned, taken, status, favorite, rotation, make
+        for photo_id, path, name, file_type, size, width, height, turned, camera, dated, assigned, taken, status, favorite, rotation, make
         in rows
     ]
 

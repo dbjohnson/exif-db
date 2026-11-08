@@ -78,9 +78,16 @@ def size(row):
 
 
 def dimensions(row):
-    width, height = _number(row.get('ImageWidth')), _number(row.get('ImageHeight'))
+    # ImageSize is the photo's own, where ImageWidth and ImageHeight can be a preview's inside the file
+    size = str(row.get('ImageSize') or '').split()
+    if len(size) != 2:
+        size = row.get('ImageWidth'), row.get('ImageHeight')
+    width, height = map(_number, size)
     if not width or not height:
         return None
+    if 5 <= (_number(row.get('Orientation')) or 1) <= 8:
+        # stored on its side, and shown turned
+        width, height = height, width
     megapixels = width * height / 1e6
     return f"{int(width):,} × {int(height):,} ({_trim(megapixels)} MP)"
 
