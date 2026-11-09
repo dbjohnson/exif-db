@@ -139,12 +139,24 @@
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
 
       // the very copy this face was found in, so that its box needs no turning
+      // this page with a face's photo open, which opens it again when loaded or shared
+      function faceAddress(faceId) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('face', faceId);
+        return url;
+      }
+
       function showInPhoto(faceId) {
+        // so that the back button closes the photo rather than leaving the page
+        history.pushState({facePhoto: true}, '', faceAddress(faceId));
+        drawFacePhoto(faceId);
+      }
+
+      function drawFacePhoto(faceId) {
         const face = FACES.get(faceId);
         const viewer = document.getElementById('face-photo');
         const image = document.getElementById('face-photo-image');
         const boxes = document.getElementById('face-photo-boxes');
-        history.pushState({facePhoto: true}, '');
         document.body.classList.add('viewing');
         viewer.hidden = false;
         document.getElementById('face-photo-caption').textContent = face.path.split('/').pop();
@@ -162,7 +174,15 @@
         document.getElementById('face-photo-boxes').replaceChildren();
       }
 
-      window.addEventListener('popstate', hideFacePhoto);
+      // back closes the photo, and forward opens it again
+      window.addEventListener('popstate', event => {
+        const faceId = event.state?.facePhoto && new URLSearchParams(window.location.search).get('face');
+        if (faceId && FACES.has(faceId)) {
+          drawFacePhoto(faceId);
+        } else {
+          hideFacePhoto();
+        }
+      });
       window.addEventListener('resize', () => coverPhoto(document.getElementById('face-photo-boxes'), document.getElementById('face-photo-image')));
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape' && !document.getElementById('face-photo').hidden) {
@@ -245,6 +265,14 @@
 
       window.addEventListener('DOMContentLoaded', () => {
         render();
+        // opened on a face's photo from a link to it, with the page's own address under it
+        const asked = new URLSearchParams(window.location.search).get('face');
+        if (asked && FACES.has(asked)) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('face');
+          history.replaceState(history.state, '', url);
+          showInPhoto(asked);
+        }
         if (WORKING) {
           setTimeout(waitForComparing, 1000);
         }

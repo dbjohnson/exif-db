@@ -18,6 +18,8 @@
       const PRELOADED_PHOTOS = {{ (photos or none) | tojson }};
       // On this day's address stays bare, so that a bookmark of it is always today's
       const BARE_ADDRESS = {{ 'true' if day_steps else 'false' }};
+      // what the address asked for, such as a photo to open, read before it's made bare
+      const ASKED = new URLSearchParams(window.location.search);
       if (BARE_ADDRESS && window.location.search) {
         history.replaceState(history.state, '', window.location.pathname);
       }
@@ -338,7 +340,8 @@
       // the address and the date chosen follow along, so that reloading stays in the same place
       function noteShowing() {
         const month = timeline.showing();
-        if (!month || month.key === showingKey) {
+        // the viewer's photo has the address while it's open
+        if (!month || month.key === showingKey || current) {
           return;
         }
         showingKey = month.key;
@@ -392,7 +395,7 @@
           sideJumper = sideDates('side-years', 'side-months', timeline, goTo);
         }
         sideFilters();
-        const asked = new URLSearchParams(window.location.search).get('date');
+        const asked = ASKED.get('date');
         if (asked && MONTHS.length) {
           // once the header's height is known
           requestAnimationFrame(() => goTo(asked));
@@ -781,6 +784,7 @@
         current = photo;
         lastPicked = photo;
         chosenFace = null;
+        history.replaceState(history.state, '', photoAddress(photo));
         renderViewerDetails();
         renderViewerImage();
         renderFaces();
@@ -1237,9 +1241,25 @@
         }
       }
 
+      // this page with a photo open, which opens it again when loaded or shared
+      function photoAddress(photo) {
+        const url = new URL(window.location.href);
+        if (BARE_ADDRESS) {
+          // the day it's on, as a bare address is today's
+          url.search = new URLSearchParams({day: FILTERS.day});
+        }
+        url.searchParams.set('date', photo.month);
+        url.searchParams.set('open', photo.id);
+        return url;
+      }
+
       function openViewer(photo) {
         // so that the back button closes the viewer rather than leaving the month
-        history.pushState({viewer: true}, '');
+        history.pushState({viewer: true}, '', photoAddress(photo));
+        showViewer(photo);
+      }
+
+      function showViewer(photo) {
         document.body.classList.add('viewing');
         document.getElementById('viewer').hidden = false;
         showPhoto(photo);
@@ -1623,7 +1643,16 @@
         shareLink(`${window.location.origin}/photo?${new URLSearchParams({id: current.id})}`, fileName(current));
       }
 
-      window.addEventListener('popstate', hideViewer);
+      // back closes the viewer, and forward opens it again on the photo the address names
+      window.addEventListener('popstate', event => {
+        const id = event.state?.viewer && new URLSearchParams(window.location.search).get('open');
+        const photo = id && loadedPhotos().find(found => found.id === id && !found.removed);
+        if (!photo) {
+          hideViewer();
+        } else {
+          showViewer(photo);
+        }
+      });
 
       window.addEventListener('beforeunload', event => {
         if (deletesRunning) {
@@ -1674,13 +1703,20 @@
         }
         startTimeline();
         renderSelection();
-        // opened on a particular photo, from the map
-        const query = new URLSearchParams(window.location.search);
-        if (query.get('open')) {
-          timeline.ensure(nearestMonth(query.get('date') || UNDATED)).then(() => {
-            const asked = loadedPhotos().find(photo => photo.id === query.get('open'));
+        // opened on a particular photo, from the map or a link to it.  The page's own address goes
+        // under it, so that closing the viewer goes back to the page rather than to the photo
+        if (ASKED.get('open')) {
+          if (!BARE_ADDRESS) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('open');
+            history.replaceState(history.state, '', url);
+          }
+          timeline.ensure(nearestMonth(ASKED.get('date') || UNDATED)).then(() => {
+            const asked = loadedPhotos().find(photo => photo.id === ASKED.get('open'));
             if (asked) {
               openViewer(asked);
+            } else {
+              showToast("That photo isn't here any more.");
             }
           });
         }

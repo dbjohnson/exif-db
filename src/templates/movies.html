@@ -462,6 +462,10 @@
           }
           renderClip();
           savePosition(true);
+          // the address names what's playing, so that it can be shared or reloaded
+          const url = new URL(window.location.href);
+          url.searchParams.set('path', clips[index].path);
+          history.replaceState(history.state, '', url);
         }
         if (play) {
           playActive();
@@ -581,18 +585,20 @@
       function restoredPosition() {
         // opened on a particular movie, from a place's page or a shared link
         const asked = new URLSearchParams(window.location.search).get('path');
-        const askedIndex = asked ? clips.findIndex(clip => clip.path === asked && !gone(clip)) : -1;
-        if (askedIndex >= 0) {
-          return {index: askedIndex, offset: 0};
-        }
+        let saved = null;
         try {
-          const saved = JSON.parse(localStorage.getItem(STORED_POSITION));
-          const index = clips.findIndex(clip => clip.path === saved?.path && !gone(clip));
-          if (index >= 0) {
-            return {index, offset: saved.offset || 0};
-          }
+          saved = JSON.parse(localStorage.getItem(STORED_POSITION));
         } catch (error) {
           console.log(error);
+        }
+        const askedIndex = asked ? clips.findIndex(clip => clip.path === asked && !gone(clip)) : -1;
+        if (askedIndex >= 0) {
+          // reloaded, rather than opened from a link, carries on where it was
+          return {index: askedIndex, offset: saved?.path === asked ? saved.offset || 0 : 0};
+        }
+        const index = clips.findIndex(clip => clip.path === saved?.path && !gone(clip));
+        if (index >= 0) {
+          return {index, offset: saved.offset || 0};
         }
         // the latest month has the movies that haven't been seen yet
         return {index: months.get(monthKeys.filter(key => key !== UNDATED).pop() ?? monthKeys[0]).first, offset: 0};
