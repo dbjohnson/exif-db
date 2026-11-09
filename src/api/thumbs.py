@@ -170,6 +170,21 @@ def display(path, rotation=0, at=None):
     return _cached(path, _display_variant(rotation), 85, make, at)
 
 
+def developed(path, rotation=0):
+    """
+    A raw file developed from what its sensor recorded, at the size of a copy for the screen.  The
+    preview inside a raw file can be much smaller than the photo, like an older Canon's
+    """
+    def make():
+        with rawpy.imread(path) as raw:
+            # half the size is still big enough for the screen, and much faster
+            half = max(raw.sizes.width, raw.sizes.height) >= 2 * max_image_size()
+            im = Image.fromarray(raw.postprocess(use_camera_wb=True, half_size=half))
+        return _rotate(limit_size(im), rotation)
+
+    return _cached(path, _developed_variant(rotation), 85, make)
+
+
 def _thumb_variant(rotation):
     return f":{rotation}" if rotation else ''
 
@@ -178,13 +193,17 @@ def _display_variant(rotation):
     return f":display:{rotation}"
 
 
+def _developed_variant(rotation):
+    return f":developed:{rotation}"
+
+
 def forget(path, at):
     """
     Delete the thumbnails and screen-sized copies made from a photo in the trash, at any rotation.
     Not pictures of its faces, which are only found by face
     """
     for rotation in CLOCKWISE.keys() | {0}:
-        for variant in (_thumb_variant(rotation), _display_variant(rotation)):
+        for variant in (_thumb_variant(rotation), _display_variant(rotation), _developed_variant(rotation)):
             try:
                 os.remove(_cache_file(path, variant, at))
             except FileNotFoundError:

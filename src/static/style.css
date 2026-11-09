@@ -1905,8 +1905,24 @@ button:disabled {
   display: none;
 }
 
-.viewer-bar #viewer-faces[aria-pressed="true"] {
+.viewer-bar #viewer-faces[aria-pressed="true"],
+.viewer-bar #viewer-raw[aria-pressed="true"] {
   color: var(--highlight);
+}
+
+.viewer-bar .viewer-raw {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.viewer-bar .viewer-raw[hidden] {
+  display: none;
+}
+
+/* where faces were found in the file made from the raw file, which can be cropped */
+.library-viewer.showing-raw #viewer-boxes {
+  visibility: hidden;
 }
 
 .viewer-caption {

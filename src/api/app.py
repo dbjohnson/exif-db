@@ -268,6 +268,12 @@ def _image(path: str, rotate: int = Depends(rotation_param)):
     return cached_image(thumbs.display, path, rotate)
 
 
+# not async, for the same reason.  A raw file behind a photo, developed, for the viewer's raw button
+@app.get("/api/raw{path:path}")
+def _raw(path: str, rotate: int = Depends(rotation_param)):
+    return cached_image(thumbs.developed, path, rotate)
+
+
 @app.get("/api/original{path:path}")
 def _original(path: str):
     path = library_path(path)

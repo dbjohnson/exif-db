@@ -52,6 +52,9 @@
       let deletesRunning = 0;
       // a person's page is about whose face is where, so it starts out showing them
       let showingFaces = PERSON !== null;
+      // the viewer shows a photo's raw file, developed, in place of the file it's shown from.  It
+      // stays on from photo to photo, for those with one
+      let showingRaw = ASKED.get('raw') === '1';
       let chosenFace = null;
       const photoFaces = new Map();
       const photoTags = new Map();
@@ -61,6 +64,9 @@
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
       const photoUrl = (api, photo) =>
         `/api/${IN_TRASH ? 'trash/' : ''}${api}${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+      const rawUrl = photo => `/api/raw${encodePath(photo.raw)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+      // what the viewer shows of a photo, which is its raw file if that's been asked for
+      const viewerUrl = photo => showingRaw && photo.raw ? rawUrl(photo) : photoUrl('image', photo);
 
       function renderTile(photo) {
         const tile = document.createElement('a');
@@ -722,8 +728,10 @@
         const list = shown();
         const position = list.indexOf(current);
         const when = current.when ? `${current.when} · ` : '';
+        // whichever file is showing
+        const file = showingRaw && current.raw ? current.raw : current.path;
         document.getElementById('viewer-caption').textContent =
-          `${when}${fileName(current)} · ${position + 1} of ${list.length.toLocaleString()}`;
+          `${when}${file.split('/').pop()} · ${position + 1} of ${list.length.toLocaleString()}`;
         // there can be more in months that haven't loaded yet
         const months = timeline ? timeline.months : [];
         const month = months.findIndex(entry => entry.key === current.month);
@@ -733,8 +741,22 @@
         favorite.setAttribute('aria-pressed', current.favorite);
         favorite.querySelector('i').className = current.favorite ? 'fa fa-heart' : 'fa fa-heart-o';
         document.getElementById('viewer-approve').hidden = current.status !== 'unreviewed';
-        document.getElementById('viewer-download').href = `/api/original${encodePath(current.path)}`;
-        document.getElementById('viewer-download').download = fileName(current);
+        document.getElementById('viewer-download').href = `/api/original${encodePath(file)}`;
+        document.getElementById('viewer-download').download = file.split('/').pop();
+        const raw = document.getElementById('viewer-raw');
+        raw.hidden = !current.raw;
+        raw.setAttribute('aria-pressed', showingRaw && !!current.raw);
+        raw.title = showingRaw ? `Show ${fileName(current)}` : `Show the raw file, ${(current.raw || '').split('/').pop()}`;
+        raw.setAttribute('aria-label', showingRaw ? 'Show the file made from the raw file' : 'Show the raw file');
+        document.getElementById('viewer').classList.toggle('showing-raw', showingRaw && !!current.raw);
+      }
+
+      function toggleRaw() {
+        showingRaw = !showingRaw;
+        history.replaceState(history.state, '', photoAddress(current));
+        renderViewerDetails();
+        renderViewerImage();
+        preloadNeighbors();
       }
 
       // the thumbnail shows straight away, so that the old photo never sits under the new one's
@@ -742,7 +764,8 @@
       function renderViewerImage() {
         const photo = current;
         const rotation = photo.rotation;
-        const isCurrent = () => photo === current && rotation === photo.rotation;
+        const url = viewerUrl(photo);
+        const isCurrent = () => photo === current && rotation === photo.rotation && url === viewerUrl(photo);
         const image = document.getElementById('viewer-image');
         const missing = document.getElementById('viewer-missing');
         image.hidden = false;
@@ -758,10 +781,10 @@
           if (isCurrent()) {
             image.hidden = true;
             missing.hidden = false;
-            missing.textContent = `No preview: ${fileName(photo)}`;
+            missing.textContent = `No preview: ${url === rawUrl(photo) ? photo.raw.split('/').pop() : fileName(photo)}`;
           }
         };
-        large.src = photoUrl('image', photo);
+        large.src = url;
       }
 
       function preloadNeighbors() {
@@ -769,7 +792,7 @@
         const position = list.indexOf(current);
         for (const neighbor of [list[position + 1], list[position - 1]]) {
           if (neighbor) {
-            new Image().src = photoUrl('image', neighbor);
+            new Image().src = viewerUrl(neighbor);
           }
         }
       }
@@ -1250,6 +1273,11 @@
         }
         url.searchParams.set('date', photo.month);
         url.searchParams.set('open', photo.id);
+        if (showingRaw && photo.raw) {
+          url.searchParams.set('raw', '1');
+        } else {
+          url.searchParams.delete('raw');
+        }
         return url;
       }
 
@@ -1272,6 +1300,8 @@
         disarmButton(document.getElementById('viewer-delete'));
         current.tile.scrollIntoView({block: 'nearest'});
         current = null;
+        // the next photo opened shows its own file
+        showingRaw = false;
         document.body.classList.remove('viewing');
         document.getElementById('viewer').hidden = true;
         document.getElementById('viewer-image').removeAttribute('src');
@@ -1647,6 +1677,7 @@
       window.addEventListener('popstate', event => {
         const id = event.state?.viewer && new URLSearchParams(window.location.search).get('open');
         const photo = id && loadedPhotos().find(found => found.id === id && !found.removed);
+        showingRaw = new URLSearchParams(window.location.search).get('raw') === '1';
         if (!photo) {
           hideViewer();
         } else {
@@ -1709,6 +1740,7 @@
           if (!BARE_ADDRESS) {
             const url = new URL(window.location.href);
             url.searchParams.delete('open');
+            url.searchParams.delete('raw');
             history.replaceState(history.state, '', url);
           }
           timeline.ensure(nearestMonth(ASKED.get('date') || UNDATED)).then(() => {
@@ -1970,6 +2002,7 @@
           <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
             <i class="fa fa-tags" aria-hidden="true"></i>
           </button>
+          <button id="viewer-raw" class="viewer-raw" onclick="toggleRaw()" aria-pressed="false" hidden>RAW</button>
           <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
             <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
           </a>

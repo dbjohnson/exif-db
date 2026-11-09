@@ -470,7 +470,7 @@ def _library_rows(where, params, hidden=False):
     # hidden photos only appear if asked for
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned, raw_file
         FROM {_with_status()}
         WHERE ({where}) AND (review_status <> ? OR ?)
         ORDER BY DateTimeOriginal DESC, photo_id
@@ -492,9 +492,11 @@ def _library_rows(where, params, hidden=False):
             'status': status,
             'favorite': favorite,
             'rotation': rotation,
-            'date_assigned': date_assigned
+            'date_assigned': date_assigned,
+            # the raw file behind the one shown, if there is one
+            'raw': raw
         }
-        for photo_id, path, taken, status, favorite, rotation, date_assigned in rows
+        for photo_id, path, taken, status, favorite, rotation, date_assigned, raw in rows
     ]
 
 
