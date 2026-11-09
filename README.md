@@ -144,7 +144,7 @@ Like faces, it only starts once a library has been gone through.  This one's was
 
 ## Info cards
 
-The info button on a photo, or `i` in the viewer, shows who's in it, where it was taken, its camera, exposure and file details, and every tag in the index.  In the library, a mouse also gets favorite, rotate, hide, delete and info buttons on hovering over a thumbnail.
+The info button on a photo, or `i` in the viewer, shows who's in it, where it was taken, its camera, exposure and file details, and every tag in the index.  A photo with a camera's raw file behind it, such as a JPEG made from a CR2 with the same name and time, is shown from the other file, and its card names the raw file under File with a link to download it.  Its camera, lens and exposure come from the raw file, since an export can lose them: 84 JPEGs of the Canon EOS 20D's photos had none of their own, and now count under that camera on `/library/cameras`.  In the library, a mouse also gets favorite, rotate, hide, delete and info buttons on hovering over a thumbnail.
 
 ## Videos
 

@@ -4,7 +4,7 @@ rather than its descriptions, since it's read with -n.
 """
 import datetime
 import os
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from api import exif, people, places
 
@@ -118,6 +118,14 @@ def camera_url(make, model):
     return '/library/camera?' + urlencode({key: value for key, value in (('make', make), ('model', model)) if value})
 
 
+def raw_file(path):
+    # the raw file behind the one shown, as its place in the library, linked for downloading it
+    path = _text(path)
+    if not path:
+        return ('Raw file', None)
+    return ('Raw file', os.path.relpath(path, exif.LIBRARY_ROOT), '/api/original' + quote(path))
+
+
 def photo_info(path):
     """
     The card's sections, its location, who's in it and every tag the index holds, or None if the
@@ -161,6 +169,8 @@ def photo_info(path):
             ('Dimensions', dimensions(row)),
             ('Size', size(row)),
             ('Type', _text(row.get('FileType'))),
+            # the camera and exposure above come from it
+            raw_file(row.get('raw_file')),
             ('Color space', named(COLOR_SPACE, row.get('ColorSpace')))
         )
     ]
@@ -178,6 +188,6 @@ def photo_info(path):
         'all': {
             tag: str(value)
             for tag, value in sorted(row.items())
-            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation') and _text(value)
+            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation', 'raw_file') and _text(value)
         }
     }

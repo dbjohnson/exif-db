@@ -56,6 +56,16 @@ RECENT_FILTER = "DateTimeOriginal >= ? AND DateTimeOriginal < ?"
 # which camera took a photo, as text with nothing for none, so that every camera has one name to go by
 CAMERA_MAKE = "NULLIF(TRIM(CAST(Make AS VARCHAR)), '')"
 CAMERA_MODEL = "NULLIF(TRIM(CAST(Model AS VARCHAR)), '')"
+# a camera's raw files, as exiftool's FileType names them
+RAW_TYPES = ('ARW', 'CR2', 'CR3', 'CRW', 'DNG', 'NEF', 'NRW', 'ORF', 'PEF', 'RAF', 'RW2', 'SRW')
+# what a camera records about how a photo was taken.  An export of a raw file, such as a JPEG, can
+# lose these, so a photo with a raw file takes them from that file
+SHOT_TAGS = (
+    'Make', 'Model', 'LensID', 'ExposureTime', 'ShutterSpeed', 'ShutterSpeedValue', 'FNumber',
+    'Aperture', 'ApertureValue', 'ISO', 'FocalLength', 'FocalLength35efl', 'ScaleFactor35efl',
+    'CircleOfConfusion', 'FOV', 'HyperfocalDistance', 'LightValue', 'ExposureCompensation',
+    'ExposureMode', 'ExposureProgram', 'MeteringMode', 'Flash', 'WhiteBalance'
+)
 # a photo's own size as "width height".  ImageWidth and ImageHeight can be those of a preview inside
 # the file, as in the CR2 files of older Canons, where exiftool's ImageSize has the photo's own
 _SIZE = "string_split(NULLIF(TRIM(CAST(ImageSize AS VARCHAR)), ''), ' ')"
@@ -105,28 +115,46 @@ def load_csv(force_reload=False):
         )
         # every file of each photo, as only one of them is kept below
         db.execute("CREATE OR REPLACE TABLE photo_files AS SELECT photo_id, SourceFile FROM scanned")
+        columns = {name for name, *_ in db.execute("DESCRIBE scanned").fetchall()}
+        from_raw = ', '.join(f"COALESCE(raw.{tag}, kept.{tag}) AS {tag}" for tag in SHOT_TAGS if tag in columns)
+        db.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE raw_files AS
+            SELECT * FROM scanned
+            WHERE FileType IN (SELECT UNNEST(?::VARCHAR[])) AND SourceFile NOT IN (SELECT photo_id FROM deletions)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY photo_id ORDER BY SourceFile) = 1
+            """,
+            [list(RAW_TYPES)]
+        )
         db.execute(
             f"""
             CREATE OR REPLACE TABLE exif AS
-            SELECT * REPLACE (COALESCE(DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal)
-            FROM scanned
-            -- so that another copy of a deleted photo can take its place
-            WHERE SourceFile NOT IN (SELECT photo_id FROM deletions)
-            -- prefer JPEGs, then PNGs, then HEICs, then everything else
-            QUALIFY ROW_NUMBER() OVER (
-               PARTITION BY photo_id
-               ORDER BY CASE FileType
-                    WHEN 'JPEG' THEN 1
-                    WHEN 'PNG'  THEN 2
-                    WHEN 'HEIC' THEN 3
-                    ELSE 4
-                END,
-                -- the same file each time, as different photos can share an identity
-                SourceFile
-            ) = 1
+            SELECT
+                kept.* REPLACE (COALESCE(kept.DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal{', ' + from_raw if from_raw else ''}),
+                -- the raw file behind a photo shown from another file, such as a JPEG made from it
+                CASE WHEN raw.SourceFile <> kept.SourceFile THEN raw.SourceFile END AS raw_file
+            FROM (
+                SELECT * FROM scanned
+                -- so that another copy of a deleted photo can take its place
+                WHERE SourceFile NOT IN (SELECT photo_id FROM deletions)
+                -- prefer JPEGs, then PNGs, then HEICs, then everything else
+                QUALIFY ROW_NUMBER() OVER (
+                   PARTITION BY photo_id
+                   ORDER BY CASE FileType
+                        WHEN 'JPEG' THEN 1
+                        WHEN 'PNG'  THEN 2
+                        WHEN 'HEIC' THEN 3
+                        ELSE 4
+                    END,
+                    -- the same file each time, as different photos can share an identity
+                    SourceFile
+                ) = 1
+            ) kept
+            LEFT JOIN raw_files raw USING (photo_id)
             """
         )
         db.execute("DROP TABLE scanned")
+        db.execute("DROP TABLE raw_files")
 
 
 def last_modified():
@@ -155,7 +183,7 @@ def tags():
     return [
         col
         for col in db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
-        if col not in ('last_modified', 'photo_id')
+        if col not in ('last_modified', 'photo_id', 'raw_file')
     ]
 
 
