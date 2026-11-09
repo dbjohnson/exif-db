@@ -66,6 +66,10 @@ SHOT_TAGS = (
     'CircleOfConfusion', 'FOV', 'HyperfocalDistance', 'LightValue', 'ExposureCompensation',
     'ExposureMode', 'ExposureProgram', 'MeteringMode', 'Flash', 'WhiteBalance'
 )
+# the raw file's own size, kept beside the shown file's as raw_<tag>, such as raw_FileSize
+RAW_FILE_TAGS = ('FileSize', 'ImageSize', 'ImageWidth', 'ImageHeight', 'Orientation')
+# columns of the exif table about the raw file behind a photo, which aren't the shown file's tags
+RAW_PREFIX = 'raw_'
 # a photo's own size as "width height".  ImageWidth and ImageHeight can be those of a preview inside
 # the file, as in the CR2 files of older Canons, where exiftool's ImageSize has the photo's own
 _SIZE = "string_split(NULLIF(TRIM(CAST(ImageSize AS VARCHAR)), ''), ' ')"
@@ -117,6 +121,10 @@ def load_csv(force_reload=False):
         db.execute("CREATE OR REPLACE TABLE photo_files AS SELECT photo_id, SourceFile FROM scanned")
         columns = {name for name, *_ in db.execute("DESCRIBE scanned").fetchall()}
         from_raw = ', '.join(f"COALESCE(raw.{tag}, kept.{tag}) AS {tag}" for tag in SHOT_TAGS if tag in columns)
+        raw_details = ''.join(
+            f",\n CASE WHEN raw.SourceFile <> kept.SourceFile THEN raw.{tag} END AS {RAW_PREFIX}{tag}"
+            for tag in RAW_FILE_TAGS if tag in columns
+        )
         db.execute(
             f"""
             CREATE OR REPLACE TEMP TABLE raw_files AS
@@ -132,7 +140,7 @@ def load_csv(force_reload=False):
             SELECT
                 kept.* REPLACE (COALESCE(kept.DateTimeOriginal, '{NO_DATE}') AS DateTimeOriginal{', ' + from_raw if from_raw else ''}),
                 -- the raw file behind a photo shown from another file, such as a JPEG made from it
-                CASE WHEN raw.SourceFile <> kept.SourceFile THEN raw.SourceFile END AS raw_file
+                CASE WHEN raw.SourceFile <> kept.SourceFile THEN raw.SourceFile END AS raw_file{raw_details}
             FROM (
                 SELECT * FROM scanned
                 -- so that another copy of a deleted photo can take its place
@@ -183,7 +191,7 @@ def tags():
     return [
         col
         for col in db.execute("PRAGMA table_info('exif');").fetchdf()['name'].tolist()
-        if col not in ('last_modified', 'photo_id', 'raw_file')
+        if col not in ('last_modified', 'photo_id') and not col.startswith(RAW_PREFIX)
     ]
 
 

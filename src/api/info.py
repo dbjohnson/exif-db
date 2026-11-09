@@ -118,12 +118,17 @@ def camera_url(make, model):
     return '/library/camera?' + urlencode({key: value for key, value in (('make', make), ('model', model)) if value})
 
 
-def raw_file(path):
+def raw_file(row):
     # the raw file behind the one shown, as its place in the library, linked for downloading it
-    path = _text(path)
+    path = _text(row.get('raw_file'))
     if not path:
         return ('Raw file', None)
     return ('Raw file', os.path.relpath(path, exif.LIBRARY_ROOT), '/api/original' + quote(path))
+
+
+def raw_details(row):
+    # the raw file's own tags, from the columns that hold them beside the shown file's
+    return {tag: row.get(exif.RAW_PREFIX + tag) for tag in exif.RAW_FILE_TAGS}
 
 
 def photo_info(path):
@@ -170,7 +175,9 @@ def photo_info(path):
             ('Size', size(row)),
             ('Type', _text(row.get('FileType'))),
             # the camera and exposure above come from it
-            raw_file(row.get('raw_file')),
+            raw_file(row),
+            ('Raw dimensions', dimensions(raw_details(row))),
+            ('Raw size', size(raw_details(row))),
             ('Color space', named(COLOR_SPACE, row.get('ColorSpace')))
         )
     ]
@@ -188,6 +195,7 @@ def photo_info(path):
         'all': {
             tag: str(value)
             for tag, value in sorted(row.items())
-            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation', 'raw_file') and _text(value)
+            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation')
+            and not tag.startswith(exif.RAW_PREFIX) and _text(value)
         }
     }
