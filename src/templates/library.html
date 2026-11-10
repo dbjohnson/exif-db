@@ -15,7 +15,7 @@
     <a class="month-tile{{ ' empty-folder' if not tile.cover }}" href="{{ tile.url }}">
       {% if tile.cover %}
       <img
-        src="/api/{{ 'trash/' if tile.trash }}thumb{{ tile.cover.path | urlencode }}{% if tile.cover.rotation %}?rotate={{ tile.cover.rotation }}{% endif %}"
+        src="/api/{{ 'trash/' if tile.trash }}thumb{{ tile.cover.path | urlencode }}{{ look_query(tile.cover) }}"
         loading="lazy"
         decoding="async"
         alt=""

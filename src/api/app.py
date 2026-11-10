@@ -44,6 +44,7 @@ templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(
 # for suggesting tags wherever photos can be tagged
 templates.env.globals['tag_names'] = tags.names
 templates.env.globals['earliest_year'] = exif.LIBRARY_EARLIEST_YEAR
+templates.env.globals['look_query'] = lambda photo: look_query(photo)
 
 
 @app.middleware("http")
@@ -94,6 +95,15 @@ def rotation_param(rotate: int = 0):
     return rotate
 
 
+def look_query(photo):
+    # what to add to an image's address to show a photo turned and enhanced as it's been set to be
+    look = urlencode({
+        **({'rotate': photo['rotation']} if photo.get('rotation') else {}),
+        **({'enhance': 1} if photo.get('enhanced') else {})
+    })
+    return f"?{look}" if look else ''
+
+
 def library_path(path):
     normalized = os.path.normpath(path)
     if not normalized.startswith(f"{exif.LIBRARY_ROOT}/"):
@@ -101,10 +111,10 @@ def library_path(path):
     return normalized
 
 
-def cached_image(make, path, rotation):
+def cached_image(make, path, rotation, enhanced=False):
     path = library_path(path)
     try:
-        cached = make(path, rotation)
+        cached = make(path, rotation, enhanced)
     except Exception as e:
         # decoders each raise their own errors; pages show a placeholder or move on instead
         logger.warning(f"Can't make an image from {path}: {e}")
@@ -247,13 +257,19 @@ def _purge(request: RestoreRequest):
 
 # for a photo in the trash, by where it was in the library.  Not async, as with the library's
 @app.get("/api/trash/thumb{path:path}")
-def _trash_thumb(path: str, rotate: int = Depends(rotation_param)):
-    return cached_image(lambda found, rotation: thumbs.thumbnail(trash.trashed(found), rotation, found), path, rotate)
+def _trash_thumb(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(
+        lambda found, rotation, enhanced: thumbs.thumbnail(trash.trashed(found), rotation, enhanced, at=found),
+        path, rotate, enhance
+    )
 
 
 @app.get("/api/trash/image{path:path}")
-def _trash_image(path: str, rotate: int = Depends(rotation_param)):
-    return cached_image(lambda found, rotation: thumbs.display(trash.trashed(found), rotation, found), path, rotate)
+def _trash_image(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(
+        lambda found, rotation, enhanced: thumbs.display(trash.trashed(found), rotation, enhanced, at=found),
+        path, rotate, enhance
+    )
 
 
 @app.delete("/api/trash")
@@ -264,14 +280,14 @@ def _empty_trash():
 
 # not async: decoding is slow, and would otherwise hold up every other request
 @app.get("/api/image{path:path}")
-def _image(path: str, rotate: int = Depends(rotation_param)):
-    return cached_image(thumbs.display, path, rotate)
+def _image(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(thumbs.display, path, rotate, enhance)
 
 
 # not async, for the same reason.  A raw file behind a photo, developed, for the viewer's raw button
 @app.get("/api/raw{path:path}")
-def _raw(path: str, rotate: int = Depends(rotation_param)):
-    return cached_image(thumbs.developed, path, rotate)
+def _raw(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(thumbs.developed, path, rotate, enhance)
 
 
 @app.get("/api/original{path:path}")
@@ -284,8 +300,8 @@ def _original(path: str):
 
 # not async: decoding is slow, and would otherwise hold up every other request
 @app.get("/api/thumb{path:path}")
-def _thumb(path: str, rotate: int = Depends(rotation_param)):
-    return cached_image(thumbs.thumbnail, path, rotate)
+def _thumb(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(thumbs.thumbnail, path, rotate, enhance)
 
 
 @app.get("/api/tags")
@@ -393,6 +409,18 @@ async def _set_rotation(change: RotationChange):
 @app.post("/api/rotations")
 async def _set_rotations(change: RotationsChange):
     exif.set_rotations(change.rotations)
+    return "saved"
+
+
+class EnhancedChange(BaseModel):
+    photo_ids: list[str]
+    enhanced: bool
+
+
+# shown brighter and more colorful, which only changes the copies made for the screen, not the file
+@app.post("/api/enhanced")
+async def _set_enhanced(change: EnhancedChange):
+    exif.set_enhanced(change.photo_ids, change.enhanced)
     return "saved"
 
 
@@ -817,13 +845,12 @@ async def _photo_link(request: Request, id: str):
     place = "/library/hidden" if photo['status'] == exif.REJECTED else "/library"
     target = f"{place}?{urlencode({'date': timeline_month_key(photo['date']), 'open': id})}"
     when = library_photo({'taken': photo['date'], 'date_assigned': True})['day'] if photo['dated'] else None
-    rotation = f"?rotate={photo['rotation']}" if photo['rotation'] else ''
     return share_page(
         request,
         target,
         f"Photo from {when}" if when else photo['name'],
         place_words(photo['path']),
-        image=f"/api/image{quote(photo['path'])}{rotation}"
+        image=f"/api/image{quote(photo['path'])}{look_query(photo)}"
     )
 
 
@@ -978,12 +1005,13 @@ async def trash_photos():
     """
     # going through the trash is slow on a NAS, unlike the index, which is only used from here
     photos = await run_in_threadpool(trash.library_photos)
-    rotations = exif.rotations_by_path(photo['path'] for photo in photos)
+    looks = exif.looks_by_path(photo['path'] for photo in photos)
     logged = exif.deletion_times()
     photos = [
         {
             **photo,
-            'rotation': rotations.get(photo['path']) or 0,
+            'rotation': looks.get(photo['path'], (0, False))[0],
+            'enhanced': looks.get(photo['path'], (0, False))[1],
             'deleted': max((logged[f] for f in photo['files'] if f in logged), default=photo['deleted'])
         }
         for photo in photos
@@ -1000,6 +1028,7 @@ def trash_photo(photo):
         'path': photo['path'],
         'files': photo['files'],
         'rotation': photo['rotation'],
+        'enhanced': photo['enhanced'],
         'status': None,
         'favorite': False,
         'date_assigned': False,
@@ -1545,7 +1574,10 @@ async def _map_area(key: str):
         'photos': len(photos),
         'movies': len(clips),
         'shown_photos': [
-            {'id': photo['id'], 'path': photo['path'], 'rotation': photo['rotation'], 'month': timeline_month_key(photo['taken'])}
+            {
+                'id': photo['id'], 'path': photo['path'], 'rotation': photo['rotation'], 'enhanced': photo['enhanced'],
+                'month': timeline_month_key(photo['taken'])
+            }
             for photo in photos[:places.AREA_PHOTOS]
         ],
         'shown_movies': [{'path': clip['path'], 'title': clip.get('title')} for clip in clips[:places.AREA_MOVIES]]
@@ -1994,7 +2026,7 @@ async def _delete_movie(path: str):
 
 @app.get("/api/poster{path:path}")
 def _poster(path: str, size: Literal['M', 'XL'] = 'M', rotate: int = Depends(rotation_param)):
-    return cached_image(lambda video, rotation: thumbs.video_poster(video, size, rotation), path, rotate)
+    return cached_image(lambda video, rotation, enhanced: thumbs.video_poster(video, size, rotation), path, rotate)
 
 
 # declared after /api/movies, which this would otherwise also match
@@ -2120,7 +2152,7 @@ def slides(df, bursts=None):
         ),
         burst=df['photo_id'].map(lambda photo_id: (bursts or {}).get(photo_id, []))
     )[[
-        'SourceFile', 'date', 'photo_id', 'favorite', 'rotation', 'review_status', 'burst'
+        'SourceFile', 'date', 'photo_id', 'favorite', 'rotation', 'enhanced', 'review_status', 'burst'
     ]].to_dict(orient='records')
 
 

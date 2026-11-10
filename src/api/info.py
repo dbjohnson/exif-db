@@ -195,7 +195,7 @@ def photo_info(path):
         'all': {
             tag: str(value)
             for tag, value in sorted(row.items())
-            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation')
+            if tag not in ('photo_id', 'last_modified', 'date_assigned', 'review_status', 'favorite', 'rotation', 'enhanced')
             and not tag.startswith(exif.RAW_PREFIX) and _text(value)
         }
     }

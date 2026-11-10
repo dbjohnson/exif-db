@@ -16,7 +16,7 @@
         {% for camera in cameras %}
         <a class="month-tile" href="{{ camera.url }}" title="{{ camera.name }}{% if camera.years %}, {{ camera.years }}{% endif %}">
           <img
-            src="/api/thumb{{ camera.cover.path | urlencode }}{% if camera.cover.rotation %}?rotate={{ camera.cover.rotation }}{% endif %}"
+            src="/api/thumb{{ camera.cover.path | urlencode }}{{ look_query(camera.cover) }}"
             loading="lazy"
             decoding="async"
             alt=""

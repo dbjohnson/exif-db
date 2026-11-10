@@ -37,6 +37,8 @@ Photos can be favorited from the library or kiosk (stored in `favorites.csv`).  
 
 Photos can be rotated from the library or kiosk (stored in `rotations.csv`).  Originals are never changed: a rotated copy is cached in `thumbs/` for display.
 
+Photos can also be enhanced from the library, with the magic wand in the viewer (or `e`) or in the selection bar (stored in `enhanced.csv`).  An enhanced photo is shown brighter and more colorful everywhere it appears: thumbnails, the viewer, its raw file, the review queue, the kiosk and shared links.  The duplicates page shows photos as their files are, for comparing copies.  The curve is worked out from each photo (`enhance` in `api/thumbs.py`): it stretches the tones so a few pixels reach black and white, lifts the shadows more the more of the photo is dark, lightens a photo that's still dark overall, and raises saturation by 20%.  As with rotating, the file isn't changed: the enhanced copy is cached in `thumbs/` next to the plain one, and pressing the button again shows the photo as taken.
+
 Deleting moves a photo to `deleted/` in the storage volume and records it in `deletions.csv`, and can be undone straight afterwards, or later from the library's Recycle bin.  `/manage` shows how much is in the trash and can empty it.
 
 ## Photos
@@ -53,7 +55,7 @@ Both links first give a short page with Open Graph tags, which Messages and othe
 
 A person's, tag's, place's or camera's photos, and Favorites, Hidden and Screenshots, are the same list narrowed to them, with the same date boxes.  The navigation bar and that one row stay at the top of every page while scrolling.
 
-Select, then photos one by one or Select all in the bar, picks many photos at once, for approving, favoriting, rotating, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
+Select, then photos one by one or Select all in the bar, picks many photos at once, for approving, favoriting, rotating, enhancing, hiding, deleting, tagging, or setting their date or place (shift-click selects a range).  A list of up to 3,000 can be selected all at once.  Undated also offers the date a folder's name suggests, such as `2002.03.11 - Escalante` or `2024/04`, for each folder, or for every folder that has one at once from the button at the top of Undated, which can be undone.  Dates set this way are stored in `dates.csv`, apply everywhere a photo's date is used, and survive a full rebuild.  Original files aren't changed.
 
 ## Folders
 

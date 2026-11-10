@@ -47,7 +47,15 @@
         image.alt = '';
         image.loading = 'lazy';
         image.decoding = 'async';
-        image.src = `/api/thumb${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+        const look = new URLSearchParams();
+        if (photo.rotation) {
+          look.set('rotate', photo.rotation);
+        }
+        if (photo.enhanced) {
+          look.set('enhance', 1);
+        }
+        const query = look.toString();
+        image.src = `/api/thumb${encodePath(photo.path)}${query ? `?${query}` : ''}`;
         image.onerror = () => image.remove();
         tile.append(image);
         return tile;

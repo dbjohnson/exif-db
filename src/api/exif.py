@@ -13,6 +13,8 @@ EXIF_CSV = '/storage/exif.csv'
 REVIEWS_CSV = '/storage/reviews.csv'
 FAVORITES_CSV = '/storage/favorites.csv'
 ROTATIONS_CSV = '/storage/rotations.csv'
+# photos shown brighter and more colorful than their files, as in api/thumbs.py
+ENHANCED_CSV = '/storage/enhanced.csv'
 # dates given to photos by hand, which take the place of what's in the file
 DATES_CSV = '/storage/dates.csv'
 # where photos were taken, given by hand: "<lat> <lon>", NO_LOCATION, or empty for the photo's own
@@ -38,6 +40,8 @@ FAVORITE = 'favorite'
 NOT_FAVORITE = 'not_favorite'
 DELETED = 'deleted'
 HIDDEN = 'hidden'
+ENHANCED = 'enhanced'
+NOT_ENHANCED = 'not_enhanced'
 NOT_HIDDEN = 'not_hidden'
 RESTORED = 'restored'
 # photos this close together from one camera are reviewed as one if they also look alike, up to a
@@ -297,7 +301,7 @@ def photos_version():
     Changes whenever the photos to show might have, so that a page can tell without fetching them
     """
     # fingerprints decide which recent photos count as one burst
-    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, DATES_CSV, DELETIONS_CSV, FINGERPRINTS_CSV)
+    files = (EXIF_CSV, REVIEWS_CSV, FAVORITES_CSV, ROTATIONS_CSV, ENHANCED_CSV, DATES_CSV, DELETIONS_CSV, FINGERPRINTS_CSV)
     stats = [os.stat(path) if os.path.exists(path) else None for path in files]
     return ':'.join(f"{stat.st_mtime_ns}-{stat.st_size}" if stat else '' for stat in stats)
 
@@ -353,11 +357,16 @@ def set_rotations(rotations):
     _append_log(ROTATIONS_CSV, list(rotations.items()))
 
 
+def set_enhanced(photo_ids, enhanced):
+    _append_log(ENHANCED_CSV, [(photo_id, ENHANCED if enhanced else NOT_ENHANCED) for photo_id in photo_ids])
+
+
 def _with_status():
     load_csv()
     _load_log('reviews', REVIEWS_CSV)
     _load_log('favorites', FAVORITES_CSV)
     _load_log('rotations', ROTATIONS_CSV)
+    _load_log('enhanced', ENHANCED_CSV)
     _load_log('dates', DATES_CSV)
     _load_log('locations_set', LOCATIONS_SET_CSV)
     _load_deletions()
@@ -368,11 +377,13 @@ def _with_status():
                 dates.value IS NOT NULL AS date_assigned,
                 COALESCE(reviews.value, '{UNREVIEWED}') AS review_status,
                 COALESCE(favorites.value = '{FAVORITE}', false) AS favorite,
-                COALESCE(TRY_CAST(rotations.value AS INTEGER), 0) AS rotation
+                COALESCE(TRY_CAST(rotations.value AS INTEGER), 0) AS rotation,
+                COALESCE(enhanced.value = '{ENHANCED}', false) AS enhanced
             FROM exif
             LEFT JOIN reviews USING (photo_id)
             LEFT JOIN favorites USING (photo_id)
             LEFT JOIN rotations USING (photo_id)
+            LEFT JOIN enhanced USING (photo_id)
             LEFT JOIN dates USING (photo_id)
             WHERE exif.SourceFile NOT IN (SELECT photo_id FROM deletions)
         )
@@ -401,13 +412,13 @@ def favorite_photos(limit):
     any favorites, approved photos from anywhere
     """
     query = f"""
-        SELECT SourceFile, rotation FROM {_with_status()}
+        SELECT SourceFile, rotation, enhanced FROM {_with_status()}
         WHERE review_status = ? AND (favorite OR ?)
         ORDER BY random()
         LIMIT ?
     """
     rows = db.execute(query, [APPROVED, False, limit]).fetchall() or db.execute(query, [APPROVED, True, limit]).fetchall()
-    return [{'SourceFile': path, 'rotation': rotation} for path, rotation in rows]
+    return [{'SourceFile': path, 'rotation': rotation, 'enhanced': enhanced} for path, rotation, enhanced in rows]
 
 
 def recent_photos(recent, limit):
@@ -470,7 +481,7 @@ def _library_rows(where, params, hidden=False):
     # hidden photos only appear if asked for
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, date_assigned, raw_file
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, favorite, rotation, enhanced, date_assigned, raw_file
         FROM {_with_status()}
         WHERE ({where}) AND (review_status <> ? OR ?)
         ORDER BY DateTimeOriginal DESC, photo_id
@@ -478,7 +489,7 @@ def _library_rows(where, params, hidden=False):
         [*params, REJECTED, hidden]
     ).fetchall()
     # the date in the file of each given another by hand, as a starting point for changing it again
-    assigned = [row[0] for row in rows if row[6]]
+    assigned = [row[0] for row in rows if row[7]]
     own = dict(db.execute(
         "SELECT photo_id, DateTimeOriginal FROM exif WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))",
         [assigned]
@@ -492,11 +503,12 @@ def _library_rows(where, params, hidden=False):
             'status': status,
             'favorite': favorite,
             'rotation': rotation,
+            'enhanced': enhanced,
             'date_assigned': date_assigned,
             # the raw file behind the one shown, if there is one
             'raw': raw
         }
-        for photo_id, path, taken, status, favorite, rotation, date_assigned, raw in rows
+        for photo_id, path, taken, status, favorite, rotation, enhanced, date_assigned, raw in rows
     ]
 
 
@@ -564,20 +576,24 @@ def hidden_photos():
     )
 
 
-def rotations_by_path(paths):
+def looks_by_path(paths):
     """
-    How each of these files was turned, by path, including files deleted since the index was
-    loaded, such as those in the trash.  Those are only known until a scan leaves them out
+    How each of these files was turned and whether it's enhanced, by path, including files deleted
+    since the index was loaded, such as those in the trash.  Those are only known until a scan
+    leaves them out
     """
     _with_status()
-    return dict(db.execute(
-        """
-        SELECT SourceFile, TRY_CAST(rotations.value AS INTEGER)
-        FROM photo_files JOIN rotations USING (photo_id)
-        WHERE SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
-        """,
-        [list(paths)]
-    ).fetchall())
+    return {
+        path: (rotation or 0, enhanced)
+        for path, rotation, enhanced in db.execute(
+            f"""
+            SELECT SourceFile, TRY_CAST(rotations.value AS INTEGER), COALESCE(enhanced.value = '{ENHANCED}', false)
+            FROM photo_files LEFT JOIN rotations USING (photo_id) LEFT JOIN enhanced USING (photo_id)
+            WHERE SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
+            """,
+            [list(paths)]
+        ).fetchall()
+    }
 
 
 def deletion_times():
@@ -776,7 +792,7 @@ def cameras():
         SELECT
             {CAMERA_MAKE} AS make, {CAMERA_MODEL} AS model, COUNT(*),
             MIN({LIBRARY_MONTH}), MAX({LIBRARY_MONTH}),
-            first(struct_pack(path := SourceFile, rotation := rotation) ORDER BY
+            first(struct_pack(path := SourceFile, rotation := rotation, enhanced := enhanced) ORDER BY
                 favorite DESC, review_status = ? DESC, DateTimeOriginal DESC
             )
         FROM {_with_status()}
@@ -887,7 +903,7 @@ def duplicate_photos(photo_ids=None, paths=()):
             Make IS NOT NULL OR Model IS NOT NULL,
             ({LIBRARY_MONTH}) IS NOT NULL,
             date_assigned,
-            DateTimeOriginal, review_status, favorite, rotation, {CAMERA_MAKE}
+            DateTimeOriginal, review_status, favorite, rotation, enhanced, {CAMERA_MAKE}
         FROM {table}
         WHERE ? OR photo_id IN (SELECT UNNEST(?::VARCHAR[])) OR SourceFile IN (SELECT UNNEST(?::VARCHAR[]))
         """,
@@ -911,9 +927,10 @@ def duplicate_photos(photo_ids=None, paths=()):
             'status': status,
             'favorite': favorite,
             'rotation': rotation,
+            'enhanced': enhanced,
             'make': make
         }
-        for photo_id, path, name, file_type, size, width, height, turned, camera, dated, assigned, taken, status, favorite, rotation, make
+        for photo_id, path, name, file_type, size, width, height, turned, camera, dated, assigned, taken, status, favorite, rotation, enhanced, make
         in rows
     ]
 
@@ -940,13 +957,14 @@ def record_duplicates(rows):
     _append_log(DUPLICATES_CSV, rows)
 
 
-def _review_item(photo_id, path, taken, review_status, rotation, no_camera=False):
+def _review_item(photo_id, path, taken, review_status, rotation, enhanced, no_camera=False):
     return {
         'id': photo_id,
         'path': path,
         'date': taken.split(' ')[0].replace(':', '/'),
         'status': review_status,
         'rotation': rotation,
+        'enhanced': enhanced,
         'no_camera': no_camera,
         'burst': []
     }
@@ -967,7 +985,7 @@ def review_page(datestring, status, offset, limit, recent=None):
     offset = min(offset, max(total - limit, 0))
     rows = db.execute(
         f"""
-        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, rotation FROM {table}
+        SELECT photo_id, SourceFile, DateTimeOriginal, review_status, rotation, enhanced FROM {table}
         WHERE {where} AND list_contains(?, review_status)
         ORDER BY DateTimeOriginal DESC, photo_id
         LIMIT ? OFFSET ?
@@ -992,7 +1010,7 @@ def _review_queue_page(where, params, offset, limit):
     tiles = f"""
         WITH queue AS (
             SELECT
-                photos.photo_id, SourceFile, DateTimeOriginal, review_status, rotation, Make, Model,
+                photos.photo_id, SourceFile, DateTimeOriginal, review_status, rotation, enhanced, Make, Model,
                 TRY_STRPTIME(LEFT(DateTimeOriginal, 19), '%Y:%m:%d %H:%M:%S') AS taken,
                 -- the first of a fingerprint's two hashes covers the whole photo
                 TRY_CAST('0x' || LEFT(fingerprints.value, 16) AS UBIGINT) AS fingerprint
@@ -1037,7 +1055,7 @@ def _review_queue_page(where, params, offset, limit):
             SELECT
                 (SELECT MAX(tile) FROM numbered), (SELECT COUNT(*) FROM numbered),
                 tile, position = (size + 1) // 2 AS shows_tile,
-                photo_id, SourceFile, DateTimeOriginal, review_status, rotation,
+                photo_id, SourceFile, DateTimeOriginal, review_status, rotation, enhanced,
                 Make IS NULL AND Model IS NULL AS no_camera
             FROM numbered
             WHERE tile > ? AND tile <= ?

@@ -44,6 +44,7 @@
       let current = null;
       // keeps a run of quick presses saving in order
       let savingRotation = Promise.resolve();
+      let savingEnhanced = Promise.resolve();
       let selecting = false;
       const selected = new Set();
       // where a shift-click's range starts from
@@ -62,9 +63,20 @@
       const shown = () => loadedPhotos().filter(photo => !photo.removed);
       const fileName = photo => photo.path.split('/').pop();
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
-      const photoUrl = (api, photo) =>
-        `/api/${IN_TRASH ? 'trash/' : ''}${api}${encodePath(photo.path)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
-      const rawUrl = photo => `/api/raw${encodePath(photo.raw)}${photo.rotation ? `?rotate=${photo.rotation}` : ''}`;
+      // how a photo has been set to be shown: turned, and brighter and more colorful
+      const lookQuery = photo => {
+        const look = new URLSearchParams();
+        if (photo.rotation) {
+          look.set('rotate', photo.rotation);
+        }
+        if (photo.enhanced) {
+          look.set('enhance', 1);
+        }
+        const query = look.toString();
+        return query ? `?${query}` : '';
+      };
+      const photoUrl = (api, photo) => `/api/${IN_TRASH ? 'trash/' : ''}${api}${encodePath(photo.path)}${lookQuery(photo)}`;
+      const rawUrl = photo => `/api/raw${encodePath(photo.raw)}${lookQuery(photo)}`;
       // what the viewer shows of a photo, which is its raw file if that's been asked for
       const viewerUrl = photo => showingRaw && photo.raw ? rawUrl(photo) : photoUrl('image', photo);
 
@@ -455,6 +467,10 @@
         favorite.title = allFavorites ? 'Unfavorite' : 'Favorite';
         favorite.setAttribute('aria-label', favorite.title);
         favorite.querySelector('i').className = allFavorites ? 'fa fa-heart-o' : 'fa fa-heart';
+        const allEnhanced = selected.size && [...selected].every(photo => photo.enhanced);
+        const enhance = document.getElementById('select-enhance');
+        enhance.title = allEnhanced ? 'Show as taken' : 'Enhance. Brighter and more colorful, without changing the files';
+        enhance.setAttribute('aria-label', allEnhanced ? 'Show as taken' : 'Enhance');
       }
 
       function setPicked(photo, picked) {
@@ -647,6 +663,17 @@
           });
       }
 
+      // all enhanced, unless they already are.  Undone back to what each one was
+      function enhanceSelected() {
+        const enhanced = ![...selected].every(photo => photo.enhanced);
+        const photos = [...selected].filter(photo => photo.enhanced !== enhanced);
+        clearPicks();
+        saveEnhanced(photos, enhanced, () => showToast(
+          `${enhanced ? 'Enhanced' : 'Stopped enhancing'} ${plural(photos.length, 'photo')}`,
+          () => saveEnhanced(photos, !enhanced)
+        ));
+      }
+
       // back to what each one was, rather than all to one status
       function statusesOf(photos) {
         const statuses = {};
@@ -743,6 +770,9 @@
         document.getElementById('viewer-approve').hidden = current.status !== 'unreviewed';
         document.getElementById('viewer-download').href = `/api/original${encodePath(file)}`;
         document.getElementById('viewer-download').download = file.split('/').pop();
+        const enhance = document.getElementById('viewer-enhance');
+        enhance.setAttribute('aria-pressed', Boolean(current.enhanced));
+        enhance.title = current.enhanced ? 'Enhanced. Press to show as taken' : 'Enhance. Brighter and more colorful, without changing the file';
         const raw = document.getElementById('viewer-raw');
         raw.hidden = !current.raw;
         raw.setAttribute('aria-pressed', showingRaw && !!current.raw);
@@ -1404,6 +1434,39 @@
         }
       }
 
+      // shown straight away, and put back if saving fails
+      function setEnhanced(photos, enhanced) {
+        for (const photo of photos) {
+          photo.enhanced = enhanced;
+          const thumb = photo.tile.querySelector('img');
+          if (thumb) {
+            thumb.src = photoUrl('thumb', photo);
+          }
+          photo.tile.href = photoUrl('image', photo);
+        }
+        if (current && photos.includes(current)) {
+          renderViewerDetails();
+          renderViewerImage();
+          preloadNeighbors();
+        }
+      }
+
+      function saveEnhanced(photos, enhanced, saved = () => {}) {
+        setEnhanced(photos, enhanced);
+        savingEnhanced = savingEnhanced
+          .then(() => postJson('/api/enhanced', {photo_ids: ids(photos), enhanced}))
+          .then(saved)
+          .catch(error => {
+            console.log(error);
+            setEnhanced(photos, !enhanced);
+            showToast(`Couldn't ${enhanced ? 'enhance' : 'undo enhancing'}: ${error.message}`);
+          });
+      }
+
+      function toggleEnhanced(photo = current) {
+        saveEnhanced([photo], !photo.enhanced);
+      }
+
       function rotatePhoto(photo = current) {
         const rotation = (photo.rotation + 90) % 360;
         setRotation(photo, rotation);
@@ -1710,6 +1773,8 @@
         }
         if (event.key === 'i' && !IN_TRASH) {
           showInfo(current.path);
+        } else if (event.key === 'e' && !IN_TRASH) {
+          toggleEnhanced();
         } else if (event.key === 'ArrowLeft') {
           step(-1);
         } else if (event.key === 'ArrowRight') {
@@ -1921,6 +1986,9 @@
         <button class="select-action" onclick="rotateSelected()" title="Rotate 90° clockwise" aria-label="Rotate" disabled>
           <i class="fa fa-rotate-right" aria-hidden="true"></i>
         </button>
+        <button id="select-enhance" class="select-action" onclick="enhanceSelected()" title="Enhance" aria-label="Enhance" disabled>
+          <i class="fa fa-magic" aria-hidden="true"></i>
+        </button>
         <button class="select-action" onclick="toggleTagging()" title="Tag these, or say who's in them" aria-label="Tag" disabled>
           <i class="fa fa-tags" aria-hidden="true"></i>
         </button>
@@ -1998,6 +2066,9 @@
           {% endif %}
           <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
             <i class="fa fa-rotate-right" aria-hidden="true"></i>
+          </button>
+          <button id="viewer-enhance" onclick="toggleEnhanced()" title="Enhance" aria-label="Enhance" aria-pressed="false">
+            <i class="fa fa-magic" aria-hidden="true"></i>
           </button>
           <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
             <i class="fa fa-tags" aria-hidden="true"></i>

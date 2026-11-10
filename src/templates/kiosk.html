@@ -36,8 +36,19 @@
       // image -> {element, ready, failed}, for photos fetched before they're shown
       const preloads = new Map();
 
-      const imageUrl = (path, rotation) =>
-        `/api/image${path.split('/').map(encodeURIComponent).join('/')}${rotation ? `?rotate=${rotation}` : ''}`;
+      const fileUrl = path => `/api/image${path.split('/').map(encodeURIComponent).join('/')}`;
+      // as the photo has been set to be shown: turned, and brighter and more colorful
+      const imageUrl = image => {
+        const look = new URLSearchParams();
+        if (image.rotation) {
+          look.set('rotate', image.rotation);
+        }
+        if (image.enhanced) {
+          look.set('enhance', 1);
+        }
+        const query = look.toString();
+        return fileUrl(image.SourceFile) + (query ? `?${query}` : '');
+      };
 
       // leaves the slideshow on the photo before it, ready to move on to whatever follows it
       function removeFromShow(image) {
@@ -92,7 +103,7 @@
         }
         disarmDelete();
         try {
-          const response = await fetch(imageUrl(image.SourceFile), {method: 'DELETE'});
+          const response = await fetch(fileUrl(image.SourceFile), {method: 'DELETE'});
           if (!response.ok) {
             throw new Error('Network response was not ok. Status: ' + response.status);
           }
@@ -123,12 +134,11 @@
       let savingRotation = Promise.resolve();
 
       function showRotation(image) {
-        const rotation = image.rotation;
-        const url = imageUrl(image.SourceFile, rotation);
-        // keep the current one up until the rotated copy has been made
+        const url = imageUrl(image);
+        // keep the current one up until the rotated or enhanced copy has been made
         const element = new Image();
         element.onload = () => {
-          if (image === shown && image.rotation === rotation) {
+          if (image === shown && imageUrl(image) === url) {
             document.getElementById('img').src = url;
           }
         };
@@ -261,10 +271,10 @@
         const kept = images.filter(image => byId.has(image.photo_id));
         kept.forEach(image => {
           const update = byId.get(image.photo_id);
-          const rotated = update.rotation !== image.rotation;
+          const changed = update.rotation !== image.rotation || update.enhanced !== image.enhanced;
           Object.assign(image, update);
-          if (rotated) {
-            // anything already fetched for it is now the wrong way round
+          if (changed) {
+            // anything already fetched for it is now the wrong way round, or enhanced or not
             preloads.delete(image);
             if (image === shown) {
               showRotation(image);
@@ -394,7 +404,7 @@
             element.onload = resolve;
             element.onerror = reject;
           });
-          element.src = imageUrl(image.SourceFile, image.rotation);
+          element.src = imageUrl(image);
           preloads.set(image, entry);
           entry.ready.catch(() => {
             entry.failed = true;
@@ -439,7 +449,7 @@
         currentIndex = currentIndex % images.length;
         let image = images[currentIndex];
         const thisLoad = ++latestLoad;
-        const url = imageUrl(image.SourceFile, image.rotation);
+        const url = imageUrl(image);
         // an earlier failure may just have been the NAS being unreachable
         if (preloads.get(image)?.failed) {
           preloads.delete(image);
@@ -492,7 +502,7 @@
       function nextBackground() {
         backgroundIndex = (backgroundIndex + 1) % backgrounds.length;
         const image = backgrounds[backgroundIndex];
-        const url = imageUrl(image.SourceFile, image.rotation);
+        const url = imageUrl(image);
         // the one on screen stays up until the next has loaded; one that fails waits its turn
         const element = new Image();
         element.onload = () => {

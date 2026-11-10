@@ -46,8 +46,19 @@
       const tilesOnPage = () => items.filter(item => !item.inBurst).length;
       const isChecked = item => changes.has(item.id) ? changes.get(item.id) : startsChecked(item);
       const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
-      const photoUrl = (api, item) =>
-        `/api/${api}${encodePath(item.path)}${item.rotation ? `?rotate=${item.rotation}` : ''}`;
+      // how a photo has been set to be shown: turned, and brighter and more colorful
+      const lookQuery = photo => {
+        const look = new URLSearchParams();
+        if (photo.rotation) {
+          look.set('rotate', photo.rotation);
+        }
+        if (photo.enhanced) {
+          look.set('enhance', 1);
+        }
+        const query = look.toString();
+        return query ? `?${query}` : '';
+      };
+      const photoUrl = (api, item) => `/api/${api}${encodePath(item.path)}${lookQuery(item)}`;
       const pageUrl = (start, count) => '/api/review?' + new URLSearchParams({...QUERY, offset: start, limit: count});
 
       function fitPage() {

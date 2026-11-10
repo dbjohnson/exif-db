@@ -1,11 +1,12 @@
 import hashlib
+import math
 import os
 import threading
 from io import BytesIO
 
 import pyheif
 import rawpy
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageOps
 
 
 CACHE_DIR = '/storage/thumbs'
@@ -19,6 +20,25 @@ CLOCKWISE = {
     180: Image.Transpose.ROTATE_180,
     270: Image.Transpose.ROTATE_90
 }
+# Enhancing a photo first stretches its tones, so that these shares of its pixels end up pure black
+# and pure white.  It never moves black above, or white below, these levels (0 to 1), so that a
+# misty or snowy photo isn't given hard contrast it never had
+ENHANCE_BLACK_CLIP = 0.002
+ENHANCE_WHITE_CLIP = 0.005
+ENHANCE_MAX_BLACK = 0.06
+ENHANCE_MIN_WHITE = 0.85
+# Then it lifts the shadows, as a flash would fill them in, by up to ENHANCE_MAX_FILL.  How much
+# depends on the share of the photo below ENHANCE_SHADOW: none for a photo with none, and the most
+# for one with ENHANCE_FULL_FILL or more.  A backlit face gets the most
+ENHANCE_SHADOW = 64
+ENHANCE_FULL_FILL = 0.4
+ENHANCE_MAX_FILL = 1.0
+# Then it lightens a photo that's still dark overall towards this average brightness, by a gamma
+# of at most ENHANCE_MAX_GAMMA, and makes its colors this much stronger.  Tried on photos from
+# across the library, CLAHE (local contrast) brought out more in the shadows but made faces gritty
+ENHANCE_BRIGHTNESS = 0.45
+ENHANCE_MAX_GAMMA = 0.75
+ENHANCE_SATURATION = 1.2
 # Synology's indexer keeps upright copies of each photo in @eaDir, which cost nothing to serve
 SYNOLOGY_DISPLAY = 'XL'
 SYNOLOGY_THUMB = 'B'
@@ -79,6 +99,45 @@ def _rotate(im, rotation):
     return im.transpose(CLOCKWISE[rotation]) if rotation else im
 
 
+def _level(histogram, share):
+    # the brightness, from 0 to 1, with this share of the pixels darker than it
+    target = share * sum(histogram)
+    seen = 0
+    for level, count in enumerate(histogram):
+        seen += count
+        if seen > target:
+            return level / 255
+    return 1
+
+
+def enhance(im):
+    """
+    A photo made brighter and more colorful, by a curve worked out from the photo itself.  The same
+    curve goes on each color, so that colors keep their hue
+    """
+    im = im.convert('RGB')
+    histogram = im.convert('L').histogram()
+    total = sum(histogram)
+    black = min(_level(histogram, ENHANCE_BLACK_CLIP), ENHANCE_MAX_BLACK)
+    white = max(_level(histogram, 1 - ENHANCE_WHITE_CLIP), ENHANCE_MIN_WHITE)
+    fill = ENHANCE_MAX_FILL * min(sum(histogram[:ENHANCE_SHADOW]) / total / ENHANCE_FULL_FILL, 1)
+    curve = []
+    for level in range(256):
+        value = min(max((level / 255 - black) / (white - black), 0), 1)
+        # most at a third of the way up, and none at black or white, so nothing crosses over
+        curve.append(value + fill * value * (1 - value) ** 2)
+    average = sum(count * curve[level] for level, count in enumerate(histogram)) / total
+    if 0 < average < ENHANCE_BRIGHTNESS:
+        gamma = max(math.log(ENHANCE_BRIGHTNESS) / math.log(average), ENHANCE_MAX_GAMMA)
+        curve = [value ** gamma for value in curve]
+    lookup = [round(255 * value) for value in curve]
+    return ImageEnhance.Color(im.point(lookup * 3)).enhance(ENHANCE_SATURATION)
+
+
+def _adjust(im, rotation, enhanced):
+    return _rotate(enhance(im) if enhanced else im, rotation)
+
+
 def synology_folder(path):
     # where Synology keeps what it made from a photo or video
     folder, filename = os.path.split(path)
@@ -131,17 +190,17 @@ def _cached(path, variant, quality, make, at=None):
     return cached
 
 
-def thumbnail(path, rotation=0, at=None):
+def thumbnail(path, rotation=0, enhanced=False, at=None):
     copy = _synology_copy(path, SYNOLOGY_THUMB, at)
-    if copy and not rotation:
+    if copy and not rotation and not enhanced:
         return copy
 
     def make():
         im = Image.open(copy) if copy else _decode(path, THUMB_SIZE)
         im.thumbnail((THUMB_SIZE, THUMB_SIZE))
-        return _rotate(im, rotation)
+        return _adjust(im, rotation, enhanced)
 
-    return _cached(path, _thumb_variant(rotation), 80, make, at)
+    return _cached(path, _thumb_variant(rotation, enhanced), 80, make, at)
 
 
 def video_poster(path, size, rotation=0):
@@ -154,23 +213,23 @@ def video_poster(path, size, rotation=0):
     return _cached(path, f":poster:{size}:{rotation}", 85, lambda: _rotate(Image.open(poster), rotation))
 
 
-def display(path, rotation=0, at=None):
+def display(path, rotation=0, enhanced=False, at=None):
     """
     A copy for showing on screen, never the original: browsers can't show every format
     the library holds, and full size photos use up the frame's memory
     """
     copy = _synology_copy(path, SYNOLOGY_DISPLAY, at)
-    if copy and not rotation:
+    if copy and not rotation and not enhanced:
         return copy
 
     def make():
         im = Image.open(copy) if copy else limit_size(_decode(path, max_image_size()))
-        return _rotate(im, rotation)
+        return _adjust(im, rotation, enhanced)
 
-    return _cached(path, _display_variant(rotation), 85, make, at)
+    return _cached(path, _display_variant(rotation, enhanced), 85, make, at)
 
 
-def developed(path, rotation=0):
+def developed(path, rotation=0, enhanced=False):
     """
     A raw file developed from what its sensor recorded, at the size of a copy for the screen.  The
     preview inside a raw file can be much smaller than the photo, like an older Canon's
@@ -180,34 +239,40 @@ def developed(path, rotation=0):
             # half the size is still big enough for the screen, and much faster
             half = max(raw.sizes.width, raw.sizes.height) >= 2 * max_image_size()
             im = Image.fromarray(raw.postprocess(use_camera_wb=True, half_size=half))
-        return _rotate(limit_size(im), rotation)
+        return _adjust(limit_size(im), rotation, enhanced)
 
-    return _cached(path, _developed_variant(rotation), 85, make)
-
-
-def _thumb_variant(rotation):
-    return f":{rotation}" if rotation else ''
+    return _cached(path, _developed_variant(rotation, enhanced), 85, make)
 
 
-def _display_variant(rotation):
-    return f":display:{rotation}"
+# an enhanced copy is cached next to the plain one, so that turning enhancing off is instant
+def _enhanced_variant(enhanced):
+    return ':enhanced' if enhanced else ''
 
 
-def _developed_variant(rotation):
-    return f":developed:{rotation}"
+def _thumb_variant(rotation, enhanced=False):
+    return (f":{rotation}" if rotation else '') + _enhanced_variant(enhanced)
+
+
+def _display_variant(rotation, enhanced=False):
+    return f":display:{rotation}" + _enhanced_variant(enhanced)
+
+
+def _developed_variant(rotation, enhanced=False):
+    return f":developed:{rotation}" + _enhanced_variant(enhanced)
 
 
 def forget(path, at):
     """
-    Delete the thumbnails and screen-sized copies made from a photo in the trash, at any rotation.
-    Not pictures of its faces, which are only found by face
+    Delete the thumbnails and screen-sized copies made from a photo in the trash, at any rotation,
+    enhanced or not.  Not pictures of its faces, which are only found by face
     """
     for rotation in CLOCKWISE.keys() | {0}:
-        for variant in (_thumb_variant(rotation), _display_variant(rotation), _developed_variant(rotation)):
-            try:
-                os.remove(_cache_file(path, variant, at))
-            except FileNotFoundError:
-                pass
+        for enhanced in (False, True):
+            for variant in (_thumb_variant(rotation, enhanced), _display_variant(rotation, enhanced), _developed_variant(rotation, enhanced)):
+                try:
+                    os.remove(_cache_file(path, variant, at))
+                except FileNotFoundError:
+                    pass
 
 
 def face(path, rotation, box, face_id):
