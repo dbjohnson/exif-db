@@ -1911,7 +1911,7 @@ button:disabled {
   color: var(--highlight);
 }
 
-.viewer-bar .viewer-raw {
+.viewer-bar .viewer-raw-mark {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -2300,6 +2300,16 @@ a.movie-tile {
 }
 
 .viewer-library-actions[hidden] {
+  display: none;
+}
+
+/* on a wide screen its buttons sit on the bar with the rest, and More isn't needed */
+.viewer-more-menu {
+  display: contents;
+}
+
+.viewer-more-label,
+.viewer-bar .viewer-more {
   display: none;
 }
 
@@ -3804,11 +3814,47 @@ kbd {
     flex: 1 1 100%;
     justify-content: space-between;
   }
-  /* up to ten buttons, which at full width run off a 390px phone */
+  /* up to thirteen buttons run off a 390px phone, so the less used ones go in a menu under More */
   .viewer-actions button,
   .viewer-actions .viewer-link {
     flex: 0 1 var(--control-height);
     min-width: 0;
+  }
+  .viewer-bar .viewer-more {
+    display: inline-block;
+  }
+  .viewer-more-menu {
+    display: none;
+  }
+  .viewer-more-menu.open {
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+    padding: 4px;
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: rgba(0, 0, 0, 0.8);
+  }
+  .viewer-more-menu.open button,
+  .viewer-more-menu.open .viewer-link {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 8px 12px;
+    text-align: left;
+  }
+  .viewer-more-menu.open i,
+  .viewer-more-menu.open .viewer-raw-mark {
+    width: 28px;
+    text-align: center;
+  }
+  .viewer-more-menu .viewer-more-label {
+    display: inline;
   }
   /* room for the two rows of controls under the middle of the movie */
   .movie-stage {
