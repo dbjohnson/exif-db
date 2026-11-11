@@ -781,6 +781,21 @@
         document.getElementById('viewer').classList.toggle('showing-raw', showingRaw && !!current.raw);
       }
 
+      // on a phone, the buttons that don't fit on the bar; it stays open while they're pressed,
+      // so a photo can be turned twice, and closes on a tap anywhere else
+      function toggleViewerMore(open) {
+        const button = document.getElementById('viewer-more');
+        open ??= button.getAttribute('aria-expanded') !== 'true';
+        button.setAttribute('aria-expanded', open);
+        document.getElementById('viewer-more-menu').classList.toggle('open', open);
+      }
+
+      document.addEventListener('pointerdown', event => {
+        if (!event.target.closest('#viewer-more, #viewer-more-menu')) {
+          toggleViewerMore(false);
+        }
+      });
+
       function toggleRaw() {
         showingRaw = !showingRaw;
         history.replaceState(history.state, '', photoAddress(current));
@@ -1328,6 +1343,7 @@
           return;
         }
         disarmButton(document.getElementById('viewer-delete'));
+        toggleViewerMore(false);
         current.tile.scrollIntoView({block: 'nearest'});
         current = null;
         // the next photo opened shows its own file
@@ -2064,28 +2080,34 @@
             <i class="fa fa-eye-slash" aria-hidden="true"></i>
           </button>
           {% endif %}
-          <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
-            <i class="fa fa-rotate-right" aria-hidden="true"></i>
-          </button>
-          <button id="viewer-enhance" onclick="toggleEnhanced()" title="Enhance" aria-label="Enhance" aria-pressed="false">
-            <i class="fa fa-magic" aria-hidden="true"></i>
-          </button>
           <button id="viewer-faces" onclick="toggleFaces()" title="Who's here, and tags" aria-label="Show people and tags" aria-pressed="false">
             <i class="fa fa-tags" aria-hidden="true"></i>
           </button>
-          <button id="viewer-raw" class="viewer-raw" onclick="toggleRaw()" aria-pressed="false" hidden>RAW</button>
+          <!-- a row of buttons on a wide screen, and on a phone a menu that the More button opens -->
+          <span id="viewer-more-menu" class="viewer-more-menu">
+          <button onclick="rotatePhoto()" title="Rotate 90° clockwise" aria-label="Rotate">
+            <i class="fa fa-rotate-right" aria-hidden="true"></i><span class="viewer-more-label">Rotate</span>
+          </button>
+          <button id="viewer-enhance" onclick="toggleEnhanced()" title="Enhance" aria-label="Enhance" aria-pressed="false">
+            <i class="fa fa-magic" aria-hidden="true"></i><span class="viewer-more-label">Enhance</span>
+          </button>
+          <button id="viewer-raw" class="viewer-raw" onclick="toggleRaw()" aria-pressed="false" hidden><span class="viewer-raw-mark">RAW</span><span class="viewer-more-label">Raw file</span></button>
           <a id="viewer-download" class="viewer-link" title="Download original" aria-label="Download original">
-            <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i>
+            <i class="fa fa-arrow-circle-o-down" aria-hidden="true"></i><span class="viewer-more-label">Download</span>
           </a>
           <button onclick="sharePhoto()" title="Share a link to this photo" aria-label="Share">
-            <i class="fa fa-share-square-o" aria-hidden="true"></i>
+            <i class="fa fa-share-square-o" aria-hidden="true"></i><span class="viewer-more-label">Share</span>
           </button>
+          </span>
           <button id="viewer-compare" class="viewer-compare" onclick="openCompare()" title="Compare with possible duplicates" aria-label="Compare with possible duplicates">
             <i class="fa fa-clone" aria-hidden="true"></i>
             <span id="viewer-compare-count" class="viewer-badge" hidden></span>
           </button>
           <button onclick="showInfo(current.path)" title="Info" aria-label="Info">
             <i class="fa fa-info-circle" aria-hidden="true"></i>
+          </button>
+          <button id="viewer-more" class="viewer-more" onclick="toggleViewerMore()" title="More" aria-label="More" aria-expanded="false" aria-controls="viewer-more-menu">
+            <i class="fa fa-ellipsis-h" aria-hidden="true"></i>
           </button>
           {% if folder != 'trash' %}
           <button id="viewer-delete" onclick="deletePhoto(current, this)" title="Delete" aria-label="Delete">
