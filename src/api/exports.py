@@ -1,5 +1,5 @@
 """
-Exports: the photos of chosen people copied out of the library into a folder of their own, by year
+Exports: photos selected in the library copied out of it into a folder of their own, by year
 and month, with a website for looking through them that needs no server, so the folder can be put
 on S3 or any other static host as it is.  scripts/export_photos.py does the copying, in the
 background, and each export is kept in the storage volume until it's deleted.
@@ -86,23 +86,6 @@ def chosen_photos(names, match):
     each = [set(people.person_photo_ids(name)) for name in names]
     ids = set.union(*each) if match == ANY else set.intersection(*each)
     return exif.photos_with_ids(list(ids)) if ids else []
-
-
-def preview(names, match):
-    """
-    How many photos an export of these people would have, from which years, and how big their
-    files are, as of the last scan
-    """
-    photos = chosen_photos(names, match)
-    dates = [_when(photo)['date'] for photo in photos]
-    years = sorted({date[:4] for date in dates if date})
-    return {
-        'photos': len(photos),
-        'bytes': sum(size or 0 for size in exif.file_sizes(photo['id'] for photo in photos).values()),
-        'first_year': years[0] if years else None,
-        'last_year': years[-1] if years else None,
-        'undated': dates.count(None)
-    }
 
 
 def _when(photo):
@@ -207,22 +190,23 @@ def _with_password(spec, password):
     return spec
 
 
-def create(title, names, match, files=JPEG, password='', zipped=True, photo_ids=None, publish=False):
+def create(title, photo_ids, files=JPEG, password='', zipped=True, publish=False):
     """
-    An export of the photos of these people, or of these photos, chosen from the library, whose
-    site then names nobody.  With publish, it goes on R2 once it's made
+    An export of these photos, selected in the library, whose site names nobody.  With publish,
+    it goes on R2 once it's made
     """
     spec = _with_password({
         'slug': _make_slug(title),
         'title': title,
-        'names': [] if photo_ids else names,
-        'match': match,
+        'photo_ids': list(photo_ids),
+        # whose photos it has, for exports once made from people, which can still be updated
+        'names': [],
+        'match': ANY,
         'files': files,
         # a zip of the photos in it, for downloading them all from the site
         'zip': zipped,
         'publish': publish,
-        'created': int(time.time()),
-        **({'photo_ids': list(photo_ids)} if photo_ids else {})
+        'created': int(time.time())
     }, password)
     os.makedirs(EXPORTS_DIR, exist_ok=True)
     save_json(_spec_path(spec['slug']), spec)

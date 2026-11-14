@@ -1504,35 +1504,25 @@ async def _person(request: Request, name: str):
 # ---- exports: photos of chosen people copied into a folder of their own, with a site for sharing
 
 
-class ExportPeople(BaseModel):
-    names: list[str] = []
-    match: Literal['any', 'all'] = 'any'
-
-
 class ExportPassword(BaseModel):
     # one password shared by everyone the export is for, or '' for none
     password: str = Field(default='', max_length=200)
 
 
-class ExportRequest(ExportPeople, ExportPassword):
+class ExportRequest(ExportPassword):
     title: str = Field(min_length=1, max_length=80)
     files: Literal['original', 'jpeg'] = 'jpeg'
     # a zip of the export's photos, for its site to offer
     zip: bool = True
-    # photos chosen in the library, instead of people
-    photo_ids: list[str] = Field(default=[], max_length=10000)
+    # the photos selected in the library
+    photo_ids: list[str] = Field(min_length=1)
     # to go on R2 as soon as it's made
     publish: bool = False
 
 
 @app.get("/exports")
 def _exports(request: Request):
-    update_hidden_faces()
-    return templates.TemplateResponse(
-        request=request,
-        name="exports.html",
-        context={"people": people.named_people(), "chosen": request.query_params.getlist('person')}
-    )
+    return templates.TemplateResponse(request=request, name="exports.html")
 
 
 @app.get("/api/exports")
@@ -1540,27 +1530,16 @@ def _list_exports():
     return {'exports': exports.listing(), 'running': exports.job.running(), 'can_publish': exports.can_publish()}
 
 
-# not async: finding a family's photos takes the NAS a moment
-@app.post("/api/exports/preview")
-def _preview_export(choice: ExportPeople):
-    return exports.preview(choice.names, choice.match)
-
-
 @app.post("/api/exports")
 def _create_export(request: ExportRequest):
     if exports.job.running():
         raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
-    if not request.names and not request.photo_ids:
-        raise HTTPException(status_code=422, detail="Choose someone to export photos of")
     if request.publish and not exports.can_publish():
         raise HTTPException(status_code=409, detail="Set CLOUDFLARE_API_TOKEN to publish exports")
     title = ' '.join(request.title.split())
     if not title:
         raise HTTPException(status_code=422, detail="Give the export a name")
-    made = exports.create(
-        title, request.names, request.match, request.files, request.password.strip(), request.zip,
-        photo_ids=request.photo_ids, publish=request.publish
-    )
+    made = exports.create(title, request.photo_ids, request.files, request.password.strip(), request.zip, request.publish)
     if made is None:
         raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
     return {'slug': made['slug'], 'total': made['total']}

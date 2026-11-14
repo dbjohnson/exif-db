@@ -8,90 +8,20 @@
     {% include '_nav.html' %}
     <div class="manage exports">
       <h1>Exports</h1>
-      <p class="hint">An export copies the photos of the people chosen into a folder of its own, by year and month, with a website for looking through them. The website needs no server, so the folder can be shared as it is, on S3 or any other static host, with none of this app's managing in it.</p>
+      <p class="hint">An export copies photos into a folder of its own, by year and month, with a website for looking through them. The website needs no server, so the folder can be shared as it is, on S3 or any other static host, with none of this app's managing in it. To make one, select photos in <a href="/library">Photos</a> or any other list of them, and press Export in the selection bar.</p>
 
-      <h2>New export</h2>
-      <div class="export-fields">
-        <label class="export-title">
-          Name
-          <input id="export-title" type="text" maxlength="80" value="Family photos" />
-        </label>
-        <label class="export-title">
-          Password
-          <input id="export-password" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="None" />
-        </label>
-      </div>
-      <p class="hint">With a password, the website asks for it before showing anything, and its photos are kept in a folder named after it, so they can't be found without it. Everyone it's shared with uses the same one. A long password is safest, as anyone with the address can keep guessing.</p>
-
-      <div class="export-people-head">
-        <span class="export-label">People</span>
-        <span class="people-filter">
-          <button type="button" id="select-family" hidden>Choose all family</button>
-          <button type="button" id="select-none" disabled>Clear</button>
-          <button type="button" data-show="family" aria-pressed="false" hidden>Family</button>
-          <button type="button" data-show="everyone" aria-pressed="false" hidden>Everyone</button>
-        </span>
-      </div>
-      {% if people %}
-      <div id="export-people" class="people-grid export-people">
-        {% for person in people %}
-        <button type="button" class="person-tile month-tile export-person{{ ' is-family' if person.family }}" data-name="{{ person.name }}" aria-pressed="{{ 'true' if person.name in chosen else 'false' }}">
-          <img src="/api/face/{{ person.cover }}" loading="lazy" decoding="async" alt="" />
-          <span class="month-label">
-            <span>{{ person.name }}</span>
-            <span class="month-count">{{ "{:,}".format(person.photos) }}</span>
-          </span>
-        </button>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="hint">Nobody has been named yet. Name people on <a href="/people">People</a> to export their photos.</p>
-      {% endif %}
-
-      <fieldset class="export-options">
-        <legend>Photos with</legend>
-        <label><input type="radio" name="match" value="any" checked /> any of them</label>
-        <label><input type="radio" name="match" value="all" /> all of them together</label>
-      </fieldset>
-      <fieldset class="export-options">
-        <legend>Files</legend>
-        <label><input type="radio" name="files" value="jpeg" checked /> JPEGs, turned and enhanced as shown here</label>
-        <label><input type="radio" name="files" value="original" /> the original files</label>
-      </fieldset>
-      <p class="hint">JPEGs can be opened anywhere, at full size, with their camera, date and place kept, and take about 1.5 seconds a photo to make. Original files are as they are in the library, which can include HEIC and raw files that some computers can't open.</p>
-      <label class="export-zip"><input id="export-zip" type="checkbox" checked /> Add a zip of the photos, for the website to download in one go</label>
-      <p class="hint">It has a folder for each year with a folder for each month in it. It takes as much room again as the photos, in the storage volume and wherever the export is shared.</p>
-
-      <div class="actions">
-        <button id="export-start" disabled>Start export</button>
-        <span id="export-preview" class="trash-summary">Choose people to export.</span>
-      </div>
       <div id="error" class="error" role="alert"></div>
 
       <h2>Exports</h2>
       <div id="export-list" class="export-list"><p class="hint">Loading…</p></div>
-      <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download folder gives as a zip, website and all, for putting it somewhere else. Update brings an export up to date with the library, adding photos since named and taking away those since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
+      <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download folder gives as a zip, website and all, for putting it somewhere else. Update makes an export again, leaving out photos since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
       <p id="publish-hint" class="hint" hidden>To publish exports on Cloudflare R2 from here, set <code>CLOUDFLARE_API_TOKEN</code> to a token with Workers R2 Storage: Edit, and <code>CLOUDFLARE_ACCOUNT_ID</code>, in the app's environment.</p>
     </div>
 
     <script>
-      const PEOPLE_SHOWN = 'exportPeopleShown';
-      const grid = document.getElementById('export-people');
-      const tiles = grid ? [...grid.querySelectorAll('.export-person')] : [];
-      const anyFamily = tiles.some(tile => tile.classList.contains('is-family'));
-      let previewing = 0;
-      let previewTimer = null;
       let running = false;
       // whether CLOUDFLARE_API_TOKEN is set, for putting exports on R2
       let canPublish = false;
-
-      function chosenNames() {
-        return tiles.filter(tile => tile.getAttribute('aria-pressed') === 'true').map(tile => tile.dataset.name);
-      }
-
-      function option(name) {
-        return document.querySelector(`input[name="${name}"]:checked`).value;
-      }
 
       function formatSize(bytes) {
         if (bytes < 1e6) {
@@ -111,99 +41,6 @@
       async function failure(response) {
         const body = await response.json().catch(() => ({}));
         return typeof body.detail === 'string' ? body.detail : `Request failed. Status: ${response.status}`;
-      }
-
-      // family only once anyone is family, as on People, keeping anyone chosen in view
-      function showPeople() {
-        let shown = 'everyone';
-        try {
-          shown = anyFamily && localStorage.getItem(PEOPLE_SHOWN) !== 'everyone' ? 'family' : 'everyone';
-        } catch (error) {
-          shown = anyFamily ? 'family' : 'everyone';
-        }
-        tiles.forEach(tile => {
-          tile.hidden = shown === 'family' && !tile.classList.contains('is-family') && tile.getAttribute('aria-pressed') !== 'true';
-        });
-        document.querySelectorAll('[data-show]').forEach(button => {
-          button.hidden = !anyFamily;
-          button.setAttribute('aria-pressed', String(button.dataset.show === shown));
-        });
-        document.getElementById('select-family').hidden = !anyFamily;
-      }
-
-      function chosenChanged() {
-        const names = chosenNames();
-        document.getElementById('select-none').disabled = !names.length;
-        clearTimeout(previewTimer);
-        previewTimer = setTimeout(preview, 250);
-      }
-
-      async function preview() {
-        const names = chosenNames();
-        const shown = document.getElementById('export-preview');
-        const start = document.getElementById('export-start');
-        const asked = ++previewing;
-        if (!names.length) {
-          shown.textContent = 'Choose people to export.';
-          start.disabled = true;
-          return;
-        }
-        shown.textContent = 'Counting…';
-        start.disabled = true;
-        try {
-          const response = await fetch('/api/exports/preview', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({names, match: option('match')})
-          });
-          if (!response.ok) {
-            throw new Error(await failure(response));
-          }
-          const found = await response.json();
-          if (asked !== previewing) {
-            return;
-          }
-          if (!found.photos) {
-            shown.textContent = names.length > 1 && option('match') === 'all' ? 'No photos have all of them together.' : 'No photos.';
-            return;
-          }
-          const years = !found.first_year ? '' : found.first_year === found.last_year ? ` from ${found.first_year}` : ` from ${found.first_year} to ${found.last_year}`;
-          const undated = found.undated ? ` (${found.undated.toLocaleString()} undated)` : '';
-          const waiting = running ? ' Another export is being made, so this one can start when it has finished.' : '';
-          shown.textContent = `${plural(found.photos, 'photo')}${years}${undated}, ${formatSize(found.bytes)} of original files.${waiting}`;
-          start.disabled = running;
-        } catch (error) {
-          if (asked === previewing) {
-            shown.textContent = `Couldn't count the photos: ${error.message}`;
-          }
-        }
-      }
-
-      async function startExport() {
-        showError('');
-        const start = document.getElementById('export-start');
-        start.disabled = true;
-        try {
-          const response = await fetch('/api/exports', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              title: document.getElementById('export-title').value,
-              names: chosenNames(),
-              match: option('match'),
-              files: option('files'),
-              password: document.getElementById('export-password').value,
-              zip: document.getElementById('export-zip').checked
-            })
-          });
-          if (!response.ok) {
-            throw new Error(await failure(response));
-          }
-          await refreshList();
-        } catch (error) {
-          showError(error.message);
-          start.disabled = false;
-        }
       }
 
       function formatRemaining(secs) {
@@ -391,7 +228,6 @@
           const {exports, running: busy, can_publish: publishing} = await response.json();
           canPublish = publishing;
           document.getElementById('publish-hint').hidden = canPublish;
-          const changed = busy !== running;
           running = busy;
           const list = document.getElementById('export-list');
           if (!exports.length) {
@@ -399,44 +235,11 @@
           } else {
             list.replaceChildren(...exports.map(exportCard));
           }
-          if (changed) {
-            preview();
-          }
         } catch (error) {
           showError(`Couldn't load the exports: ${error.message}`);
         }
       }
 
-      tiles.forEach(tile => tile.addEventListener('click', () => {
-        tile.setAttribute('aria-pressed', String(tile.getAttribute('aria-pressed') !== 'true'));
-        chosenChanged();
-      }));
-      document.querySelectorAll('[data-show]').forEach(button => button.addEventListener('click', () => {
-        try {
-          localStorage.setItem(PEOPLE_SHOWN, button.dataset.show);
-        } catch (error) {
-          // a private window: it's only remembered until the page closes
-        }
-        showPeople();
-      }));
-      document.getElementById('select-family').addEventListener('click', () => {
-        tiles.forEach(tile => {
-          if (tile.classList.contains('is-family')) {
-            tile.setAttribute('aria-pressed', 'true');
-          }
-        });
-        chosenChanged();
-      });
-      document.getElementById('select-none').addEventListener('click', () => {
-        tiles.forEach(tile => tile.setAttribute('aria-pressed', 'false'));
-        showPeople();
-        chosenChanged();
-      });
-      document.querySelectorAll('input[name="match"]').forEach(input => input.addEventListener('change', chosenChanged));
-      document.getElementById('export-start').addEventListener('click', startExport);
-
-      showPeople();
-      chosenChanged();
       refreshList();
       setInterval(refreshList, 3000);
     </script>
