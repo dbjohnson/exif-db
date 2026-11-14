@@ -185,6 +185,8 @@ def _place(path):
 
 
 def _covers(names):
+    if not names:
+        return []
     covers = {person['name']: person['cover'] for person in people.named_people()}
     return [{'name': name, 'face': covers.get(name) and people.face_box(covers[name])} for name in names]
 
@@ -205,16 +207,22 @@ def _with_password(spec, password):
     return spec
 
 
-def create(title, names, match, files=JPEG, password='', zipped=True):
+def create(title, names, match, files=JPEG, password='', zipped=True, photo_ids=None, publish=False):
+    """
+    An export of the photos of these people, or of these photos, chosen from the library, whose
+    site then names nobody.  With publish, it goes on R2 once it's made
+    """
     spec = _with_password({
         'slug': _make_slug(title),
         'title': title,
-        'names': names,
+        'names': [] if photo_ids else names,
         'match': match,
         'files': files,
         # a zip of the photos in it, for downloading them all from the site
         'zip': zipped,
-        'created': int(time.time())
+        'publish': publish,
+        'created': int(time.time()),
+        **({'photo_ids': list(photo_ids)} if photo_ids else {})
     }, password)
     os.makedirs(EXPORTS_DIR, exist_ok=True)
     save_json(_spec_path(spec['slug']), spec)
@@ -234,7 +242,8 @@ def start(slug):
     if job.running():
         return None
     spec = _load(slug)
-    photos = chosen_photos(spec['names'], spec['match'])
+    # those chosen from the library stay the same photos, less any since hidden or deleted
+    photos = exif.photos_with_ids(spec['photo_ids']) if spec.get('photo_ids') else chosen_photos(spec['names'], spec['match'])
     spec.update(
         action='export',
         folder=folder(slug),
@@ -316,6 +325,8 @@ def listing():
                 spec['progress'] = {key: progress.get(key) for key in ('phase', 'done', 'total', 'failed', 'remaining_secs')}
             for internal in ('people', 'folder', 'secret', 'salt', 'iterations', 'zip_signature', 'action'):
                 spec.pop(internal, None)
+            # how many, rather than thousands of ids every few seconds
+            spec['selected'] = len(spec.pop('photo_ids', None) or []) or None
             found.append(spec)
     return sorted(found, key=lambda spec: spec['created'], reverse=True)
 

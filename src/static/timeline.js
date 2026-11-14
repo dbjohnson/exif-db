@@ -352,6 +352,105 @@ function datedYears(timeline) {
   return years;
 }
 
+// ---- narrowing a list to a year or month, from the same boxes and the sidebar's dates
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// the year a date filter is for, or 'undated', or '' for none
+function filteredYear(current) {
+  if (current.month) {
+    return current.month === 'undated' ? 'undated' : current.month.slice(0, 4);
+  }
+  return current.year || '';
+}
+
+// a year, a month (YYYY-MM or 'undated'), or '' for every date.  Where the list had scrolled to
+// and a photo open don't carry over to another date
+function filterDate(year, month) {
+  filterTo({year: month ? null : year, month, date: null, open: null});
+}
+
+// the header's year and month boxes as filters: every year the list has, whatever it's narrowed
+// to, with Undated last, and the months of the year chosen
+function dateFilter(years, months, allMonths, current) {
+  const yearSelect = document.getElementById(years);
+  const monthSelect = document.getElementById(months);
+  const present = datedYears({months: allMonths});
+  const option = (value, text, disabled = false) => {
+    const element = document.createElement('option');
+    element.value = value;
+    element.textContent = text;
+    element.disabled = disabled;
+    return element;
+  };
+  const year = filteredYear(current);
+  yearSelect.replaceChildren(
+    option('', 'All years'),
+    ...[...present.keys()].map(each => option(each, each)),
+    ...(allMonths.some(month => month.key === 'undated') ? [option('undated', 'Undated')] : [])
+  );
+  yearSelect.value = year;
+  yearSelect.setAttribute('aria-label', 'Show only a year');
+  const has = new Set((present.get(year) || []).map(month => month.key));
+  monthSelect.hidden = !has.size;
+  monthSelect.replaceChildren(
+    option('', 'All months'),
+    ...MONTH_NAMES.map((name, index) => {
+      const key = `${year}-${String(index + 1).padStart(2, '0')}`;
+      return option(key, name, !has.has(key));
+    }).reverse()
+  );
+  monthSelect.value = current.month && current.month !== 'undated' ? current.month : '';
+  monthSelect.setAttribute('aria-label', 'Show only a month');
+  yearSelect.addEventListener('change', () => yearSelect.value === 'undated' ? filterDate(null, 'undated') : filterDate(yearSelect.value || null, null));
+  monthSelect.addEventListener('change', () => filterDate(year, monthSelect.value || null));
+  // nothing follows scrolling: the boxes say what the list is narrowed to
+  return {show() {}, refill() {}};
+}
+
+// the sidebar's years and months as filters: pressing the one chosen again takes it off
+function sideDateFilter(yearsId, monthsId, allMonths, current) {
+  const yearsList = document.getElementById(yearsId);
+  const monthsGrid = document.getElementById(monthsId);
+  const present = datedYears({months: allMonths});
+  const year = filteredYear(current);
+  const button = (text, title, on, chosen) => {
+    const element = document.createElement('button');
+    element.type = 'button';
+    element.textContent = text;
+    element.title = title;
+    element.toggleAttribute('aria-current', on);
+    element.onclick = chosen;
+    return element;
+  };
+  const count = months => months.reduce((sum, month) => sum + month.count, 0).toLocaleString();
+  const undatedMonth = allMonths.find(month => month.key === 'undated');
+  yearsList.replaceChildren(
+    button('All', 'Every year', !year, () => filterDate(null, null)),
+    ...[...present].map(([each, months]) => button(each, `${count(months)} in ${each}`, each === year, () => filterDate(each === year ? null : each, null)))
+  );
+  const has = new Set((present.get(year) || []).map(month => month.key));
+  monthsGrid.replaceChildren(...(has.size ? MONTH_NAMES.map((name, index) => {
+    const key = `${year}-${String(index + 1).padStart(2, '0')}`;
+    const element = button(name, '', current.month === key, () => filterDate(year, current.month === key ? null : key));
+    element.disabled = !has.has(key);
+    return element;
+  }) : []));
+  if (undatedMonth) {
+    monthsGrid.after(button('Undated', `${undatedMonth.count.toLocaleString()} with no usable date`, year === 'undated', () => filterDate(null, year === 'undated' ? null : 'undated')));
+    monthsGrid.nextElementSibling.className = 'side-undated';
+  }
+  return {show() {}, refill() {}};
+}
+
+// photos with all of the tags and people chosen, or any of them
+document.addEventListener('click', event => {
+  const match = event.target.closest?.('[data-match]');
+  if (match) {
+    filterTo({match: match.dataset.match === 'any' ? 'any' : null});
+  }
+});
+
 // ---- narrowing a list, which loads the page again with the change in its address
 
 function filterTo(changes) {

@@ -1901,6 +1901,17 @@ button:disabled {
   border-radius: var(--radius);
 }
 
+.select-exporting label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--control-font);
+}
+
+.select-exporting input[type="text"] {
+  width: 150px;
+}
+
 .select-tagging[hidden] {
   display: none;
 }
@@ -4140,6 +4151,41 @@ kbd {
 
 .manage code {
   overflow-wrap: anywhere;
+}
+
+/* whether photos need all of the tags and people chosen, or any of them */
+.match-toggle {
+  display: inline-flex;
+  flex: none;
+}
+
+.library-toolbar .match-toggle button,
+.match-toggle button {
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.library-toolbar .match-toggle button:first-child,
+.match-toggle button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.library-toolbar .match-toggle button:last-child,
+.match-toggle button:last-child {
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.library-toolbar .match-toggle button[aria-pressed="true"],
+.match-toggle button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--text-strong);
 }
 
 /* last, so that an armed delete is red whichever kind of button it is */
