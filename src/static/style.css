@@ -271,6 +271,7 @@ button:disabled {
   .app-header:has(~ .library-layout .library-sidebar) .date-jump,
   .app-header:has(~ .library-layout .library-sidebar) .filter-pick,
   .app-header:has(~ .library-layout .library-sidebar) .filter-chip,
+  .app-header:has(~ .library-layout .library-sidebar) .match-toggle,
   .app-header:has(~ .library-layout .library-sidebar) .toolbar-folders {
     display: none;
   }
@@ -1899,6 +1900,11 @@ button:disabled {
   flex: 1 1 100%;
   height: 240px;
   border-radius: var(--radius);
+}
+
+/* the whole list selected, without loading it: every photo looks picked */
+.whole-list-selected #days img {
+  opacity: 0.75;
 }
 
 .select-exporting label {

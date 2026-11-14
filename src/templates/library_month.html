@@ -51,6 +51,9 @@
       let savingEnhanced = Promise.resolve();
       let selecting = false;
       const selected = new Set();
+      // the whole list, when Select all is pressed on more than can be loaded at once, as how many
+      // photos that is.  Only exporting it is offered, which then goes by the list's filters
+      let wholeList = null;
       // where a shift-click's range starts from
       let lastPicked = null;
       const groups = [];
@@ -335,7 +338,16 @@
       function selectEverything() {
         const total = timeline.months.reduce((sum, month) => sum + month.count, 0);
         if (total > SELECT_ALL_MAX) {
-          showToast(`That's ${plural(total, 'photo')}, more than ${SELECT_ALL_MAX.toLocaleString()} can be selected at once`);
+          // too many to load, so the list itself is selected, which can only be exported
+          if (IN_TRASH || FOLDER === 'hidden') {
+            showToast(`That's ${plural(total, 'photo')}, more than ${SELECT_ALL_MAX.toLocaleString()} can be selected at once`);
+            return;
+          }
+          clearPicks();
+          selecting = true;
+          wholeList = total;
+          renderSelection();
+          showToast(`All ${plural(total, 'photo')} selected, which can be exported. Other changes take up to ${SELECT_ALL_MAX.toLocaleString()} at once`);
           return;
         }
         selectMonths(timeline.months.map(month => month.key));
@@ -455,15 +467,24 @@
         toggle.setAttribute('aria-label', toggle.title);
         toggle.querySelector('i').className = `fa ${selecting ? 'fa-check' : 'fa-check-square-o'}`;
         toggle.setAttribute('aria-pressed', selecting);
-        document.getElementById('select-count').textContent = `${selected.size.toLocaleString()} selected`;
-        document.querySelectorAll('.select-action').forEach(button => button.disabled = !selected.size);
+        document.getElementById('select-count').textContent = wholeList ? `All ${wholeList.toLocaleString()} selected` : `${selected.size.toLocaleString()} selected`;
+        document.querySelectorAll('.select-action').forEach(button => button.disabled = wholeList ? !button.closest('#select-exporting, .select-export') : !selected.size);
+        document.body.classList.toggle('whole-list-selected', Boolean(wholeList));
+        if (wholeList) {
+          ['select-tagging', 'select-placing'].forEach(id => {
+            const row = document.getElementById(id);
+            if (row) {
+              row.hidden = true;
+            }
+          });
+        }
         if (IN_TRASH) {
           return;
         }
         // the picker's own Clear or Reset takes them back to their files' dates, so it's only
         // offered where one was set by hand
         const date = document.getElementById('select-date');
-        date.disabled = !selected.size;
+        date.disabled = !selected.size || Boolean(wholeList);
         date.required = ![...selected].some(photo => photo.date_assigned);
         date.value = startingDay([...selected][0]);
         const allFavorites = selected.size && [...selected].every(photo => photo.favorite);
@@ -489,6 +510,7 @@
       function setSelecting(on) {
         selecting = on;
         if (!on) {
+          wholeList = null;
           [...selected].forEach(photo => setPicked(photo, false));
           lastPicked = null;
           // so that one batch's date can't quietly carry over to the next
@@ -500,6 +522,8 @@
       }
 
       function pick(photo, range) {
+        // picking a photo starts again from nothing after the whole list
+        wholeList = null;
         const picked = !selected.has(photo);
         const list = shown();
         const from = range && lastPicked ? list.indexOf(lastPicked) : -1;
@@ -511,6 +535,7 @@
       }
 
       function pickAll(photos) {
+        wholeList = null;
         const remaining = photos.filter(photo => !photo.removed);
         const picked = !remaining.every(photo => selected.has(photo));
         remaining.forEach(photo => setPicked(photo, picked));
@@ -580,6 +605,7 @@
       const ids = photos => photos.map(photo => photo.id);
 
       function clearPicks() {
+        wholeList = null;
         [...selected].forEach(photo => setPicked(photo, false));
         lastPicked = null;
         renderSelection();
@@ -1307,13 +1333,15 @@
         }
         const publish = document.getElementById('select-export-publish')?.checked || false;
         const photos = [...selected];
+        // a whole list goes by its filters, so its export also takes in photos added to it later
+        const which = wholeList ? {filters: FILTERS} : {photo_ids: photos.map(photo => photo.id)};
         return run(async () => {
           const response = await fetch('/api/exports', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               title: title.value,
-              photo_ids: photos.map(photo => photo.id),
+              ...which,
               password: document.getElementById('select-export-password').value,
               files: document.getElementById('select-export-files').value,
               zip: document.getElementById('select-export-zip').checked,
@@ -2070,7 +2098,7 @@
           <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" onclick="openDatePicker(this)" onchange="datePicked(this)" disabled />
         </span>
         {% if folder != 'hidden' %}
-        <button class="select-action" onclick="toggleExporting()" title="Export these, as a folder with a website for sharing them{{ ', and publish it' if can_publish() else '' }}" aria-label="Export" disabled>
+        <button class="select-action select-export" onclick="toggleExporting()" title="Export these, as a folder with a website for sharing them{{ ', and publish it' if can_publish() else '' }}" aria-label="Export" disabled>
           <i class="fa fa-share-square-o" aria-hidden="true"></i>
         </button>
         {% endif %}

@@ -97,7 +97,7 @@
         const who = document.createElement('div');
         who.className = 'export-card-detail';
         const joined = new Intl.ListFormat('en', {type: 'conjunction'}).format(item.names);
-        const whose = item.selected ? `${plural(item.selected, 'photo')} chosen in the library` : item.names.length < 2 ? `Photos of ${joined}` : item.match === 'all' ? `Photos with ${joined} together` : `Photos with any of ${joined}`;
+        const whose = item.description ? `${item.description}, as the list has them when made or updated` : item.selected ? `${plural(item.selected, 'photo')} chosen in the library` : item.names.length < 2 ? `Photos of ${joined}` : item.match === 'all' ? `Photos with ${joined} together` : `Photos with any of ${joined}`;
         const locked = [item.password ? 'a password' : '', item.zip ? 'a zip of the photos' : ''].filter(Boolean).join(' and ');
         who.textContent = `${whose}, as ${item.files === 'jpeg' ? 'JPEGs' : 'original files'}${locked ? `, with ${locked}` : ''}. In exports/${item.slug}.`;
         const state = document.createElement('div');

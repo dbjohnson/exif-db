@@ -1514,10 +1514,58 @@ class ExportRequest(ExportPassword):
     files: Literal['original', 'jpeg'] = 'jpeg'
     # a zip of the export's photos, for its site to offer
     zip: bool = True
-    # the photos selected in the library
-    photo_ids: list[str] = Field(min_length=1)
+    # the photos selected in the library, or else a whole list of them, by its filters
+    photo_ids: list[str] = []
+    filters: dict[str, str | list[str]] | None = None
     # to go on R2 as soon as it's made
     publish: bool = False
+
+
+def export_filters(filters):
+    """
+    A list's filters as the page has them, keeping only what a list can be narrowed to.  Hidden
+    photos are never exported, so not the Hidden folder
+    """
+    if filters.get('folder') not in (None, 'favorites', 'screenshots'):
+        raise HTTPException(status_code=422, detail="Hidden photos and the recycle bin can't be exported")
+    kept = {}
+    for key, value in filters.items():
+        if key not in TIMELINE_FILTERS:
+            continue
+        kept[key] = [str(each) for each in as_list(value)] if key in LIST_FILTERS else str(value)
+    return kept
+
+
+def list_photos(filters):
+    where, params, _ = timeline_spec(filters)
+    return exif.filtered_photos(where, params)
+
+
+exports.list_photos = list_photos
+
+
+def describe_list(filters):
+    # a list as words, for the Exports page: "Photos with Jane or Lucy, from 2019, at Home"
+    words = [{'favorites': 'Favorites', 'screenshots': 'Screenshots'}.get(filters.get('folder'), 'Photos')]
+    chosen = as_list(filters.get('person')) + as_list(filters.get('tag'))
+    if chosen:
+        words.append('with ' + (' or ' if filters.get('match') == MATCH_ANY else ' and ').join(chosen))
+    if filters.get('camera'):
+        words.append('from ' + camera_name(filters.get('make'), filters.get('model')))
+    if filters.get('place_kind') and filters.get('place_key'):
+        place = places.describe(filters['place_kind'], filters['place_key'])
+        if place:
+            words.append('at ' + place['label'])
+    month, year = filters.get('month'), filters.get('year')
+    if month == UNDATED_KEY:
+        words.append('with no date')
+    elif month and re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
+        words.append(f"from {datetime.date(int(month[:4]), int(month[5:]), 1):%B %Y}")
+    elif year:
+        words.append(f"from {year}")
+    if filters.get('day') and day_of_year(filters['day']):
+        words.append(f"taken on {day_label(day_of_year(filters['day']))}")
+    return ', '.join([' '.join(words[:2])] + words[2:]) if len(words) > 1 else words[0]
 
 
 @app.get("/exports")
@@ -1534,12 +1582,18 @@ def _list_exports():
 def _create_export(request: ExportRequest):
     if exports.job.running():
         raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    filters = export_filters(request.filters) if request.filters is not None else None
+    if not request.photo_ids and filters is None:
+        raise HTTPException(status_code=422, detail="Select some photos to export")
     if request.publish and not exports.can_publish():
         raise HTTPException(status_code=409, detail="Set CLOUDFLARE_API_TOKEN to publish exports")
     title = ' '.join(request.title.split())
     if not title:
         raise HTTPException(status_code=422, detail="Give the export a name")
-    made = exports.create(title, request.photo_ids, request.files, request.password.strip(), request.zip, request.publish)
+    made = exports.create(
+        title, request.photo_ids, request.files, request.password.strip(), request.zip, request.publish,
+        filters=filters, description=filters is not None and describe_list(filters)
+    )
     if made is None:
         raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
     return {'slug': made['slug'], 'total': made['total']}

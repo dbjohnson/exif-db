@@ -29,6 +29,9 @@ UNDATED = 'Undated'
 # break addresses, so anything but letters, digits, spaces and . _ - ( ) becomes _
 UNSAFE = re.compile(r'[^\w .()\-]')
 SLUG = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*')
+# the photos a list of them has now, from its filters, which the app sets, as working that out
+# needs what it knows of tags, people and places
+list_photos = None
 # A password-protected export keeps everything but the page itself in a folder named after the
 # password, worked out by PBKDF2 over it and the export's own salt, which the page works out again
 # in the browser.  Without the password there's no knowing where the photos are, as S3 and other
@@ -190,15 +193,16 @@ def _with_password(spec, password):
     return spec
 
 
-def create(title, photo_ids, files=JPEG, password='', zipped=True, publish=False):
+def create(title, photo_ids=None, files=JPEG, password='', zipped=True, publish=False, filters=None, description=None):
     """
-    An export of these photos, selected in the library, whose site names nobody.  With publish,
-    it goes on R2 once it's made
+    An export of these photos, selected in the library, or of a whole list of them by its filters,
+    which then takes in photos added to it later.  Its site names nobody.  With publish, it goes on
+    R2 once it's made
     """
     spec = _with_password({
         'slug': _make_slug(title),
         'title': title,
-        'photo_ids': list(photo_ids),
+        **({'filters': filters, 'description': description} if filters is not None else {'photo_ids': list(photo_ids)}),
         # whose photos it has, for exports once made from people, which can still be updated
         'names': [],
         'match': ANY,
@@ -226,8 +230,14 @@ def start(slug):
     if job.running():
         return None
     spec = _load(slug)
-    # those chosen from the library stay the same photos, less any since hidden or deleted
-    photos = exif.photos_with_ids(spec['photo_ids']) if spec.get('photo_ids') else chosen_photos(spec['names'], spec['match'])
+    # a whole list is what it has now; photos selected in it stay the same photos, less any since
+    # hidden or deleted
+    if spec.get('filters') is not None:
+        photos = list_photos(spec['filters'])
+    elif spec.get('photo_ids'):
+        photos = exif.photos_with_ids(spec['photo_ids'])
+    else:
+        photos = chosen_photos(spec['names'], spec['match'])
     spec.update(
         action='export',
         folder=folder(slug),
