@@ -337,7 +337,7 @@ def delete(slug):
     if status['running'] and (status['progress'] or {}).get('slug') == slug:
         return False
     shutil.rmtree(folder(slug), ignore_errors=True)
-    for path in (_spec_path(slug), os.path.join(EXPORTS_DIR, f"{slug}.files.json"), os.path.join(EXPORTS_DIR, f"{slug}.r2.json")):
+    for path in (_spec_path(slug), *(os.path.join(EXPORTS_DIR, f"{slug}.{kept}") for kept in ('files.json', 'r2.json', 'r2-redirect.html'))):
         try:
             os.remove(path)
         except FileNotFoundError:

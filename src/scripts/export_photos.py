@@ -366,7 +366,7 @@ def _export(spec, spec_path, queue, progress, progress_path, stopping):
 def _publish_order(key):
     # the photos first, then what lists them, and the page last, so that nobody gets a page whose
     # photos aren't there yet
-    if key.endswith('/index.html'):
+    if key.endswith(('/index.html', '/')) or '/' not in key:
         return 2
     return 1 if key.endswith(('.js', '.css')) else 0
 
@@ -397,6 +397,16 @@ def _publish(spec, spec_path, progress, progress_path, stopping):
                 stat = os.stat(full)
                 key = prefix + os.path.relpath(full, root).replace(os.sep, '/')
                 local[key] = (full, [stat.st_size, stat.st_mtime_ns])
+    # the export's own address, /<name>/, is its page too, and /<name> sends a browser there, so
+    # that a link to it needn't end in index.html
+    slug = spec['slug']
+    redirect_path = f"{spec_path[:-len('.json')]}.r2-redirect.html"
+    _write(redirect_path, _redirect_page(spec))
+    for key, path in ((prefix, os.path.join(root, 'index.html')), (slug, redirect_path)):
+        if os.path.exists(path):
+            stat = os.stat(path)
+            local[key] = (path, [stat.st_size, stat.st_mtime_ns])
+    remote.update({key: size for key, size in bucket.remote(slug).items() if key == slug})
     waiting = sorted(
         (key for key, (_, stamp) in local.items() if remote.get(key) != stamp[0] or sent.get(key) != stamp),
         key=lambda key: (_publish_order(key), key)
@@ -442,18 +452,32 @@ def _publish(spec, spec_path, progress, progress_path, stopping):
     # such as photos since hidden, or an earlier password's folder
     bucket.delete(set(remote) - set(local))
     worklog.save_json(sent_path, {key: stamp for key, (_, stamp) in local.items()})
-    return {'published': {'url': f"{bucket.address}/{prefix}index.html", 'at': int(time.time())}, 'publish_error': None}
+    return {'published': {'url': f"{bucket.address}/{slug}", 'at': int(time.time())}, 'publish_error': None}
+
+
+def _redirect_page(spec):
+    # sends /<name> on to /<name>/, keeping a link to a photo, which is after the #
+    slug, title = spec['slug'], html.escape(spec['title'])
+    return (
+        '<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'
+        f'<title>{title}</title>'
+        f'<meta http-equiv="refresh" content="0; url={slug}/">'
+        "<script>location.replace(location.pathname.replace(/\\/?$/, '/') + location.search + location.hash)</script>"
+        f'</head><body><a href="{slug}/">{title}</a></body></html>\n'
+    )
 
 
 def _unpublish(spec, spec_path):
     import r2
 
     bucket = r2.Bucket()
-    bucket.delete(bucket.remote(f"{spec['slug']}/"))
-    try:
-        os.remove(f"{spec_path[:-len('.json')]}.r2.json")
-    except FileNotFoundError:
-        pass
+    slug = spec['slug']
+    bucket.delete([*bucket.remote(f"{slug}/"), *(key for key in bucket.remote(slug) if key == slug)])
+    for kept in ('r2.json', 'r2-redirect.html'):
+        try:
+            os.remove(f"{spec_path[:-len('.json')]}.{kept}")
+        except FileNotFoundError:
+            pass
     return {'published': None, 'publish_error': None}
 
 

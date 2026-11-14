@@ -5,7 +5,8 @@ R2's S3 keys are the token's id and the SHA-256 of the token itself.  Used by ex
 it imports nothing from the api package.
 
 Set CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID unless the token reaches only one account.
-R2_BUCKET names the bucket, which is made if it isn't there.
+R2_BUCKET names the bucket, which is made if it isn't there.  R2_PUBLIC_URL, such as
+https://photos.example.org, is the address of a domain connected to the bucket, to use instead.
 """
 import hashlib
 import json
@@ -126,12 +127,15 @@ class Bucket:
             _api('POST', path, self.token, {'name': self.name})
 
     def _public_address(self):
-        # r2.dev serves a bucket to anyone, without listing what's in it
-        path = f"/accounts/{self.account}/r2/buckets/{self.name}/domains/managed"
-        managed = _api('GET', path, self.token)
-        if not managed.get('enabled'):
-            managed = _api('PUT', path, self.token, {'enabled': True})
-        address = f"https://{managed['domain']}"
+        # a domain of one's own connected to the bucket in Cloudflare's dashboard, or else r2.dev,
+        # which serves a bucket to anyone, without listing what's in it
+        address = (os.getenv('R2_PUBLIC_URL') or '').rstrip('/')
+        if not address:
+            path = f"/accounts/{self.account}/r2/buckets/{self.name}/domains/managed"
+            managed = _api('GET', path, self.token)
+            if not managed.get('enabled'):
+                managed = _api('PUT', path, self.token, {'enabled': True})
+            address = f"https://{managed['domain']}"
         try:
             with open(ADDRESS_JSON, 'w') as fh:
                 json.dump({'bucket': self.name, 'address': address}, fh)
@@ -148,6 +152,10 @@ class Bucket:
         return found
 
     def _headers(self, key):
+        # an export's own address, with or without the slash, is a page, as its index.html is
+        name = key.rsplit('/', 1)[-1]
+        if not name or '.' not in name:
+            return 'text/html; charset=utf-8', PAGE_CACHE
         content_type = mimetypes.guess_type(key)[0] or 'application/octet-stream'
         if content_type.startswith('text/') or content_type.endswith('javascript'):
             content_type += '; charset=utf-8'
