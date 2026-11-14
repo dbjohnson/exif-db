@@ -1,5 +1,5 @@
 {# tags and people a list is narrowed to, each with an × to take it off, and a list for adding another.
-   Photos have to have every one of them #}
+   Photos have to have every one of them, or with Any, one of them #}
 {% macro who_chips(chosen_tags, chosen_people) %}
 {% for name in chosen_tags %}
 <span class="filter-chip">
@@ -35,4 +35,14 @@
   </optgroup>
   {% endif %}
 </select>
+{% endmacro %}
+
+{# with two or more tags and people chosen, whether photos need all of them or any #}
+{% macro match_toggle(chosen_tags, chosen_people, match) %}
+{% if (chosen_tags | length) + (chosen_people | length) > 1 %}
+<span class="match-toggle" role="group" aria-label="Photos with">
+  <button type="button" data-match="all" aria-pressed="{{ 'false' if match == 'any' else 'true' }}" title="Photos with all of these">All</button>
+  <button type="button" data-match="any" aria-pressed="{{ 'true' if match == 'any' else 'false' }}" title="Photos with any of these">Any</button>
+</span>
+{% endif %}
 {% endmacro %}

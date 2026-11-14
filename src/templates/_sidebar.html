@@ -1,13 +1,13 @@
 {# finding your way on a wide screen: dates, filters and folders down the side, which on a phone are the icons in the header instead #}
 <aside class="library-sidebar" aria-label="Find">
-  <section class="side-section" aria-label="Go to a date">
+  <section class="side-section" aria-label="{{ 'Show only a year or month' if date_filter is mapping else 'Go to a date' }}">
     <div id="side-years" class="side-years"></div>
     <div id="side-months" class="side-months"{% if day_steps %} style="display: none"{% endif %}></div>
   </section>
   {% if filtering %}
   <section class="side-section" aria-label="{{ 'Tags and people' if side_people else 'Tags' }}">
-    {% from '_filters.html' import who_chips, who_select %}
-    <div class="side-chips">{{ who_chips(filter_tags, filter_people) }}</div>
+    {% from '_filters.html' import who_chips, who_select, match_toggle %}
+    <div class="side-chips">{{ who_chips(filter_tags, filter_people) }}{{ match_toggle(filter_tags, filter_people, filter_match) }}</div>
     {{ who_select('side-who', tag_names_shown, known_names, filter_tags, filter_people, side_people) }}
   </section>
   <section class="side-section" aria-label="Place">

@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from api import duplicates, exif, faces, info, movies, people, places, scans, tags, thumbs, trash
+from api import duplicates, exif, exports, faces, info, movies, people, places, scans, tags, thumbs, trash
 
 
 @asynccontextmanager
@@ -45,6 +45,8 @@ templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(
 templates.env.globals['tag_names'] = tags.names
 templates.env.globals['earliest_year'] = exif.LIBRARY_EARLIEST_YEAR
 templates.env.globals['look_query'] = lambda photo: look_query(photo)
+# whether an export made from the library's selection can be published straight away
+templates.env.globals['can_publish'] = exports.can_publish
 
 
 @app.middleware("http")
@@ -636,8 +638,12 @@ def undated_photos(photos):
 
 # what a timeline can be narrowed to, as query parameters.  camera is there for a camera's photos,
 # as "No camera" has no make or model to go by
-TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make', 'model', 'folder', 'day')
+TIMELINE_FILTERS = ('tag', 'person', 'place_kind', 'place_key', 'camera', 'make', 'model', 'folder', 'day', 'year', 'month', 'match')
 UNDATED_KEY = 'undated'
+# a year, or a month (YYYY-MM or undated), that any list of photos can be narrowed to
+DATE_FILTERS = ('year', 'month')
+# photos with any of the tags and people chosen, rather than all of them
+MATCH_ANY = 'any'
 
 
 # what can be more than one, each of which a photo has to have
@@ -665,14 +671,26 @@ def timeline_spec(filters):
     """
     where, params, hidden = [], [], False
     by_id = "photo_id IN (SELECT UNNEST(?::VARCHAR[]))"
-    for name in as_list(filters.get('tag')):
-        where.append(by_id)
-        params.append(tags.photo_ids(name))
     if filters.get('person'):
         update_hidden_faces()
-    for name in as_list(filters.get('person')):
-        where.append(by_id)
-        params.append(people.person_photo_ids(name))
+    chosen = [tags.photo_ids(name) for name in as_list(filters.get('tag'))]
+    chosen += [people.person_photo_ids(name) for name in as_list(filters.get('person'))]
+    if filters.get('match') == MATCH_ANY and len(chosen) > 1:
+        where.append(' OR '.join(f'({by_id})' for _ in chosen))
+        params += chosen
+    else:
+        for ids in chosen:
+            where.append(by_id)
+            params.append(ids)
+    month, year = filters.get('month'), filters.get('year')
+    if month == UNDATED_KEY:
+        where.append(f"({exif.LIBRARY_MONTH}) IS NULL")
+    elif month and re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
+        where.append(f"({exif.LIBRARY_MONTH}) = ?")
+        params.append(month.replace('-', ':'))
+    elif year and re.fullmatch(r'\d{4}', year):
+        where.append(f"LEFT(({exif.LIBRARY_MONTH}), 4) = ?")
+        params.append(year)
     if filters.get('place_kind') and filters.get('place_key'):
         where.append("SourceFile IN (SELECT UNNEST(?::VARCHAR[]))")
         params.append(list(places.paths_at(filters['place_kind'], filters['place_key'])))
@@ -726,12 +744,31 @@ def timeline_month_photos(key, filters):
     return undated_photos(photos) if month is None else list(map(library_photo, photos))
 
 
+def date_filters(query):
+    # a month, which says its year too, or else a year, as the address asks for them
+    month, year = query.get('month'), query.get('year')
+    if month == UNDATED_KEY or (month and re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month)):
+        return {'month': month}
+    if year and re.fullmatch(r'\d{4}', year):
+        return {'year': year}
+    return {}
+
+
 def timeline_page(request, title, filters, empty_hint=None, **context):
     """
     A list of photos from anywhere in the library, newest first, filled in a month at a time as it's
-    scrolled to.  filters are what it's narrowed to, which the page also asks for each month by
+    scrolled to.  filters are what it's narrowed to, which the page also asks for each month by.
+    Any list can also be narrowed to a year or month, but On this day, where the year box goes to a
+    year of that day
     """
+    dates = {} if context.get('day_steps') else date_filters(request.query_params)
+    filters = {**filters, **dates}
     months = timeline_months(filters)
+    # every year and month the list has without its date, for choosing another
+    undated_filters = {key: value for key, value in filters.items() if key not in DATE_FILTERS}
+    date_months = timeline_months(undated_filters) if dates else months
+    if dates and not months:
+        empty_hint = "Nothing from then matches."
     return templates.TemplateResponse(
         request=request,
         name="library_month.html",
@@ -742,6 +779,9 @@ def timeline_page(request, title, filters, empty_hint=None, **context):
             "today": datetime.date.today().isoformat(),
             "earliest": f"{exif.LIBRARY_EARLIEST_YEAR}-01-01",
             "known_names": people.known_names(),
+            "date_months": date_months,
+            # what the year and month boxes say, or None where they only go to a date
+            "date_filter": None if context.get('day_steps') else dates,
             **({"hint": empty_hint} if not months and empty_hint else {}),
             **context
         }
@@ -765,13 +805,16 @@ async def _library(
     tag: list[str] = Query(default=[]),
     person: list[str] = Query(default=[]),
     place_kind: str = None,
-    place_key: str = None
+    place_key: str = None,
+    match: str = None
 ):
     place = places.describe(place_kind, place_key) if place_kind and place_key else None
     tag, person = [name for name in tag if name], [name for name in person if name]
+    # any or all only means something with two or more
+    match = MATCH_ANY if match == MATCH_ANY and len(tag) + len(person) > 1 else None
     filters = {
         key: value
-        for key, value in (('tag', tag), ('person', person), ('place_kind', place and place_kind), ('place_key', place and place_key))
+        for key, value in (('tag', tag), ('person', person), ('place_kind', place and place_kind), ('place_key', place and place_key), ('match', match))
         if value
     }
     return timeline_page(
@@ -784,7 +827,8 @@ async def _library(
         tag_names_shown=tags.names(),
         person=None,
         filter_people=person,
-        filter_tags=tag
+        filter_tags=tag,
+        filter_match=match
     )
 
 
@@ -1455,6 +1499,194 @@ async def _person(request: Request, name: str):
         faces_url=f"/people/{quote(name)}/faces",
         person=name
     )
+
+
+# ---- exports: photos of chosen people copied into a folder of their own, with a site for sharing
+
+
+class ExportPassword(BaseModel):
+    # one password shared by everyone the export is for, or '' for none
+    password: str = Field(default='', max_length=200)
+
+
+class ExportRequest(ExportPassword):
+    title: str = Field(min_length=1, max_length=80)
+    files: Literal['original', 'jpeg'] = 'jpeg'
+    # a zip of the export's photos, for its site to offer
+    zip: bool = True
+    # the photos selected in the library, or else a whole list of them, by its filters
+    photo_ids: list[str] = []
+    filters: dict[str, str | list[str]] | None = None
+    # to go on R2 as soon as it's made
+    publish: bool = False
+
+
+def export_filters(filters):
+    """
+    A list's filters as the page has them, keeping only what a list can be narrowed to.  Hidden
+    photos are never exported, so not the Hidden folder
+    """
+    if filters.get('folder') not in (None, 'favorites', 'screenshots'):
+        raise HTTPException(status_code=422, detail="Hidden photos and the recycle bin can't be exported")
+    kept = {}
+    for key, value in filters.items():
+        if key not in TIMELINE_FILTERS:
+            continue
+        kept[key] = [str(each) for each in as_list(value)] if key in LIST_FILTERS else str(value)
+    return kept
+
+
+def list_photos(filters):
+    where, params, _ = timeline_spec(filters)
+    return exif.filtered_photos(where, params)
+
+
+exports.list_photos = list_photos
+
+
+def describe_list(filters):
+    # a list as words, for the Exports page: "Photos with Jane or Lucy, from 2019, at Home"
+    words = [{'favorites': 'Favorites', 'screenshots': 'Screenshots'}.get(filters.get('folder'), 'Photos')]
+    chosen = as_list(filters.get('person')) + as_list(filters.get('tag'))
+    if chosen:
+        words.append('with ' + (' or ' if filters.get('match') == MATCH_ANY else ' and ').join(chosen))
+    if filters.get('camera'):
+        words.append('from ' + camera_name(filters.get('make'), filters.get('model')))
+    if filters.get('place_kind') and filters.get('place_key'):
+        place = places.describe(filters['place_kind'], filters['place_key'])
+        if place:
+            words.append('at ' + place['label'])
+    month, year = filters.get('month'), filters.get('year')
+    if month == UNDATED_KEY:
+        words.append('with no date')
+    elif month and re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
+        words.append(f"from {datetime.date(int(month[:4]), int(month[5:]), 1):%B %Y}")
+    elif year:
+        words.append(f"from {year}")
+    if filters.get('day') and day_of_year(filters['day']):
+        words.append(f"taken on {day_label(day_of_year(filters['day']))}")
+    return ', '.join([' '.join(words[:2])] + words[2:]) if len(words) > 1 else words[0]
+
+
+@app.get("/exports")
+def _exports(request: Request):
+    return templates.TemplateResponse(request=request, name="exports.html")
+
+
+@app.get("/api/exports")
+def _list_exports():
+    return {'exports': exports.listing(), 'running': exports.job.running(), 'can_publish': exports.can_publish()}
+
+
+@app.post("/api/exports")
+def _create_export(request: ExportRequest):
+    if exports.job.running():
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    filters = export_filters(request.filters) if request.filters is not None else None
+    if not request.photo_ids and filters is None:
+        raise HTTPException(status_code=422, detail="Select some photos to export")
+    if request.publish and not exports.can_publish():
+        raise HTTPException(status_code=409, detail="Set CLOUDFLARE_API_TOKEN to publish exports")
+    title = ' '.join(request.title.split())
+    if not title:
+        raise HTTPException(status_code=422, detail="Give the export a name")
+    made = exports.create(
+        title, request.photo_ids, request.files, request.password.strip(), request.zip, request.publish,
+        filters=filters, description=filters is not None and describe_list(filters)
+    )
+    if made is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return {'slug': made['slug'], 'total': made['total']}
+
+
+# again, to add photos new to the library and take away those that have gone from it
+@app.post("/api/exports/{slug}/update")
+def _update_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.start(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+# moves the photos to where the new password says, so it waits for any export being made
+@app.post("/api/exports/{slug}/password")
+def _set_export_password(slug: str, change: ExportPassword):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.set_password(slug, change.password.strip()) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+# on Cloudflare R2, from its r2.dev address, and again after each update
+@app.post("/api/exports/{slug}/publish")
+def _publish_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if not exports.can_publish():
+        raise HTTPException(status_code=409, detail="Set CLOUDFLARE_API_TOKEN to publish exports")
+    if exports.publish(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+@app.post("/api/exports/{slug}/unpublish")
+def _unpublish_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.unpublish(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+@app.delete("/api/exports/running")
+def _stop_export():
+    if not exports.stop():
+        raise HTTPException(status_code=409, detail="No export is being made")
+    return "stopping"
+
+
+@app.delete("/api/exports/{slug}")
+def _delete_export(slug: str):
+    spec = exports.get(slug)
+    if not spec:
+        raise HTTPException(status_code=404)
+    if spec.get('published'):
+        raise HTTPException(status_code=409, detail="Unpublish this export before deleting it, so it's taken off the web too")
+    if not exports.delete(slug):
+        raise HTTPException(status_code=409, detail="Stop this export before deleting it")
+    return "deleted"
+
+
+@app.get("/api/exports/{slug}/download")
+def _download_export(slug: str):
+    spec = exports.get(slug)
+    if not spec or not os.path.isdir(exports.folder(slug)):
+        raise HTTPException(status_code=404)
+    return StreamingResponse(
+        exports.zipped(slug),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{slug}.zip"'}
+    )
+
+
+# an export's site, as it will be once shared, for looking at before sharing it.  Its addresses are
+# relative, so it needs the slash at the end
+@app.get("/exports/{slug}")
+def _export_site_root(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    return RedirectResponse(url=f"{quote(slug)}/")
+
+
+# HEAD too, which the site asks its zip's size with
+@app.api_route("/exports/{slug}/{path:path}", methods=["GET", "HEAD"])
+def _export_site(slug: str, path: str):
+    full = exports.get(slug) and exports.site_file(slug, path)
+    if not full:
+        raise HTTPException(status_code=404)
+    return FileResponse(full, headers={'Cache-Control': 'no-cache'})
 
 
 @app.get("/places")

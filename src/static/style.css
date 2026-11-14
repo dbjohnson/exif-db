@@ -271,6 +271,7 @@ button:disabled {
   .app-header:has(~ .library-layout .library-sidebar) .date-jump,
   .app-header:has(~ .library-layout .library-sidebar) .filter-pick,
   .app-header:has(~ .library-layout .library-sidebar) .filter-chip,
+  .app-header:has(~ .library-layout .library-sidebar) .match-toggle,
   .app-header:has(~ .library-layout .library-sidebar) .toolbar-folders {
     display: none;
   }
@@ -1899,6 +1900,22 @@ button:disabled {
   flex: 1 1 100%;
   height: 240px;
   border-radius: var(--radius);
+}
+
+/* the whole list selected, without loading it: every photo looks picked */
+.whole-list-selected #days img {
+  opacity: 0.75;
+}
+
+.select-exporting label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--control-font);
+}
+
+.select-exporting input[type="text"] {
+  width: 150px;
 }
 
 .select-tagging[hidden] {
@@ -3993,6 +4010,82 @@ kbd {
   border: 0;
 }
 
+
+/* exports: choosing people to export the photos of, and the exports made */
+.manage.exports {
+  max-width: 900px;
+}
+
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.export-card {
+  padding: 12px;
+  border: 1px solid var(--selected);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.manage.exports .export-card .actions {
+  margin-top: 10px;
+}
+
+.export-card-title {
+  color: var(--text-strong);
+  font-size: 16px;
+}
+
+.export-card-detail {
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.export-card-web a {
+  color: var(--text-strong);
+}
+
+.manage code {
+  overflow-wrap: anywhere;
+}
+
+/* whether photos need all of the tags and people chosen, or any of them */
+.match-toggle {
+  display: inline-flex;
+  flex: none;
+}
+
+.library-toolbar .match-toggle button,
+.match-toggle button {
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.library-toolbar .match-toggle button:first-child,
+.match-toggle button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.library-toolbar .match-toggle button:last-child,
+.match-toggle button:last-child {
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.library-toolbar .match-toggle button[aria-pressed="true"],
+.match-toggle button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--text-strong);
+}
 
 /* last, so that an armed delete is red whichever kind of button it is */
 button.confirming,

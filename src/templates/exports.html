@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Exports</title>
+    {% include '_head.html' %}
+  </head>
+  <body class="manage-page">
+    {% include '_nav.html' %}
+    <div class="manage exports">
+      <h1>Exports</h1>
+      <p class="hint">An export copies photos into a folder of its own, by year and month, with a website for looking through them. The website needs no server, so the folder can be shared as it is, on S3 or any other static host, with none of this app's managing in it. To make one, select photos in <a href="/library">Photos</a> or any other list of them, and press Export in the selection bar.</p>
+
+      <div id="error" class="error" role="alert"></div>
+
+      <h2>Exports</h2>
+      <div id="export-list" class="export-list"><p class="hint">Loading…</p></div>
+      <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download folder gives as a zip, website and all, for putting it somewhere else. Update makes an export again, leaving out photos since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
+      <p id="publish-hint" class="hint" hidden>To publish exports on Cloudflare R2 from here, set <code>CLOUDFLARE_API_TOKEN</code> to a token with Workers R2 Storage: Edit, and <code>CLOUDFLARE_ACCOUNT_ID</code>, in the app's environment.</p>
+    </div>
+
+    <script>
+      let running = false;
+      // whether CLOUDFLARE_API_TOKEN is set, for putting exports on R2
+      let canPublish = false;
+
+      function formatSize(bytes) {
+        if (bytes < 1e6) {
+          return `${Math.round(bytes / 1e3)} KB`;
+        }
+        return bytes < 1e9 ? `${(bytes / 1e6).toFixed(1)} MB` : `${(bytes / 1e9).toFixed(1)} GB`;
+      }
+
+      function plural(number, word) {
+        return `${number.toLocaleString()} ${word}${number === 1 ? '' : 's'}`;
+      }
+
+      function showError(message) {
+        document.getElementById('error').textContent = message;
+      }
+
+      async function failure(response) {
+        const body = await response.json().catch(() => ({}));
+        return typeof body.detail === 'string' ? body.detail : `Request failed. Status: ${response.status}`;
+      }
+
+      function formatRemaining(secs) {
+        if (secs === null || secs === undefined) {
+          return 'working out time left';
+        }
+        if (secs < 60) {
+          return 'less than a minute left';
+        }
+        const minutes = Math.ceil(secs / 60);
+        const hours = Math.floor(minutes / 60);
+        const parts = [];
+        if (hours) parts.push(`${hours} hr`);
+        if (minutes % 60) parts.push(`${minutes % 60} min`);
+        return `about ${parts.join(' ')} left`;
+      }
+
+      function stateText(item) {
+        if (item.progress && item.progress.phase === 'publishing') {
+          return item.progress.total
+            ? `Publishing to Cloudflare, ${formatSize(item.progress.done)} of ${formatSize(item.progress.total)}, ${formatRemaining(item.progress.remaining_secs)}`
+            : 'Publishing to Cloudflare: taking off what the export no longer has';
+        }
+        if (item.progress && item.progress.phase === 'zipping') {
+          return `Making the zip, ${formatSize(item.progress.done)} of ${formatSize(item.progress.total)}, ${formatRemaining(item.progress.remaining_secs)}`;
+        }
+        if (item.progress) {
+          const {done, total, failed} = item.progress;
+          return `Copying ${done.toLocaleString()} of ${total.toLocaleString()} photos, ${formatRemaining(item.progress.remaining_secs)}${failed ? `, ${failed.toLocaleString()} couldn't be read` : ''}`;
+        }
+        const failed = item.failed ? ` ${plural(item.failed, 'photo')} couldn't be read, and will be tried again by Update.` : '';
+        const made = item.finished ? new Date(item.finished * 1000).toLocaleString() : '';
+        return {
+          finished: `${plural(item.photos || 0, 'photo')}, ${formatSize(item.bytes || 0)}, made ${made}.${failed}`,
+          stopped: `Stopped at ${plural(item.photos || 0, 'photo')}. Update carries on from there.`,
+          interrupted: 'Interrupted, such as by a restart. Update carries on from where it got to.',
+          running: 'Starting…'
+        }[item.state] || '';
+      }
+
+      function exportCard(item) {
+        const card = document.createElement('div');
+        card.className = 'export-card';
+        const head = document.createElement('div');
+        head.className = 'export-card-head';
+        const title = document.createElement(item.state === 'running' ? 'span' : 'a');
+        title.className = 'export-card-title';
+        title.textContent = item.title;
+        if (item.state !== 'running') {
+          title.href = `/exports/${encodeURIComponent(item.slug)}/`;
+          title.target = '_blank';
+        }
+        head.append(title);
+        const who = document.createElement('div');
+        who.className = 'export-card-detail';
+        const joined = new Intl.ListFormat('en', {type: 'conjunction'}).format(item.names);
+        const whose = item.description ? `${item.description}, as the list has them when made or updated` : item.selected ? `${plural(item.selected, 'photo')} chosen in the library` : item.names.length < 2 ? `Photos of ${joined}` : item.match === 'all' ? `Photos with ${joined} together` : `Photos with any of ${joined}`;
+        const locked = [item.password ? 'a password' : '', item.zip ? 'a zip of the photos' : ''].filter(Boolean).join(' and ');
+        who.textContent = `${whose}, as ${item.files === 'jpeg' ? 'JPEGs' : 'original files'}${locked ? `, with ${locked}` : ''}. In exports/${item.slug}.`;
+        const state = document.createElement('div');
+        state.className = 'export-card-detail';
+        state.textContent = stateText(item);
+        card.append(head, who, state);
+        if (item.published) {
+          const web = document.createElement('div');
+          web.className = 'export-card-detail export-card-web';
+          const link = document.createElement('a');
+          link.href = item.published.url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = item.published.url;
+          web.append('On the web at ', link);
+          card.append(web);
+        }
+        if (item.publish_error) {
+          const problem = document.createElement('div');
+          problem.className = 'export-card-detail error';
+          problem.textContent = `Couldn't publish: ${item.publish_error}`;
+          card.append(problem);
+        }
+        if (item.progress) {
+          const bar = document.createElement('progress');
+          bar.max = item.progress.total || 1;
+          bar.value = item.progress.done;
+          card.append(bar);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const busy = item.state === 'running';
+        if (!busy) {
+          const open = document.createElement('a');
+          open.className = 'link-button';
+          open.href = `/exports/${encodeURIComponent(item.slug)}/`;
+          open.target = '_blank';
+          open.textContent = 'Open';
+          const download = document.createElement('a');
+          download.className = 'link-button';
+          download.href = `/api/exports/${encodeURIComponent(item.slug)}/download`;
+          download.textContent = 'Download folder';
+          actions.append(open, download);
+        }
+        const button = (label, action, disabled) => {
+          const element = document.createElement('button');
+          element.type = 'button';
+          element.textContent = label;
+          element.disabled = disabled;
+          element.addEventListener('click', action);
+          actions.append(element);
+        };
+        if (busy) {
+          button('Stop', () => send('/api/exports/running', 'DELETE'), false);
+        } else {
+          button('Update', () => send(`/api/exports/${encodeURIComponent(item.slug)}/update`, 'POST'), running);
+          button('Password', () => changePassword(item), running);
+          if (canPublish && item.publish) {
+            if (item.publish_error) {
+              button('Try again', () => send(`/api/exports/${encodeURIComponent(item.slug)}/publish`, 'POST'), running);
+            }
+            if (item.published) {
+              button('Copy link', async () => {
+                try {
+                  await navigator.clipboard.writeText(item.published.url);
+                } catch (error) {
+                  prompt('Copy this link', item.published.url);
+                }
+              }, false);
+            }
+            button('Unpublish', () => {
+              if (confirm(`Take "${item.title}" off the web? Its link stops working. The export stays here, and can be published again.`)) {
+                send(`/api/exports/${encodeURIComponent(item.slug)}/unpublish`, 'POST');
+              }
+            }, running);
+          } else if (canPublish) {
+            button('Publish', () => {
+              const warning = item.password ? '' : ' It has no password, so anyone with the link can see every photo.';
+              if (confirm(`Put "${item.title}" on the web, on Cloudflare R2?${warning} Updating it publishes it again.`)) {
+                send(`/api/exports/${encodeURIComponent(item.slug)}/publish`, 'POST');
+              }
+            }, running);
+          }
+          button('Delete', () => {
+            if (item.published) {
+              showError(`Unpublish "${item.title}" before deleting it, so it's taken off the web too.`);
+              return;
+            }
+            if (confirm(`Delete the export "${item.title}"? Its folder in the storage volume goes too. The photos stay in the library.`)) {
+              send(`/api/exports/${encodeURIComponent(item.slug)}`, 'DELETE');
+            }
+          }, false);
+        }
+        card.append(actions);
+        return card;
+      }
+
+      function changePassword(item) {
+        const password = prompt(
+          `Password for "${item.title}". Leave it empty for none. Changing it moves the photos to where the new one says, so links to the old place stop working, and anyone with the old password is asked for the new one.`,
+          item.password || ''
+        );
+        if (password === null || password.trim() === (item.password || '')) {
+          return;
+        }
+        send(`/api/exports/${encodeURIComponent(item.slug)}/password`, 'POST', {password});
+      }
+
+      async function send(url, method, body) {
+        showError('');
+        try {
+          const response = await fetch(url, body ? {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)} : {method});
+          if (!response.ok) {
+            throw new Error(await failure(response));
+          }
+        } catch (error) {
+          showError(error.message);
+        }
+        refreshList();
+      }
+
+      async function refreshList() {
+        try {
+          const response = await fetch('/api/exports');
+          if (!response.ok) {
+            throw new Error(await failure(response));
+          }
+          const {exports, running: busy, can_publish: publishing} = await response.json();
+          canPublish = publishing;
+          document.getElementById('publish-hint').hidden = canPublish;
+          running = busy;
+          const list = document.getElementById('export-list');
+          if (!exports.length) {
+            list.innerHTML = '<p class="hint">None yet.</p>';
+          } else {
+            list.replaceChildren(...exports.map(exportCard));
+          }
+        } catch (error) {
+          showError(`Couldn't load the exports: ${error.message}`);
+        }
+      }
+
+      refreshList();
+      setInterval(refreshList, 3000);
+    </script>
+  </body>
+</html>

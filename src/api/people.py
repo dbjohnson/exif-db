@@ -1193,6 +1193,64 @@ def person_photo_ids(name):
     )]
 
 
+def named_people():
+    """
+    Everyone with a name, most faces first, as {name, faces, photos, cover, family}
+    """
+    summary, _ = _summary()
+    return summary['people']
+
+
+def names_in_photos(names):
+    """
+    Which of these people are in each photo they're in, as {photo id: {name}}
+    """
+    found = {}
+    for start in range(0, len(names), 500):
+        part = list(names[start:start + 500])
+        marks = ','.join('?' * len(part))
+        for photo_id, name in _db().execute(
+            f"""
+            SELECT DISTINCT faces.photo_id, names.name FROM names JOIN faces ON faces.id = names.face_id
+            WHERE names.name IN ({marks}) AND {SHOWN}
+            """,
+            part
+        ):
+            found.setdefault(from_db(photo_id), set()).add(name)
+    return found
+
+
+def names_by_photo(photo_ids):
+    """
+    Everyone named in each of these photos, as {photo id: {name}}, leaving out photos with nobody
+    """
+    found = {}
+    for start in range(0, len(photo_ids), 500):
+        part = [to_db(photo_id) for photo_id in photo_ids[start:start + 500]]
+        marks = ','.join('?' * len(part))
+        for photo_id, name in _db().execute(
+            f"""
+            SELECT DISTINCT faces.photo_id, names.name FROM names JOIN faces ON faces.id = names.face_id
+            WHERE faces.photo_id IN ({marks}) AND names.name <> ?
+            """,
+            (*part, NOBODY)
+        ):
+            found.setdefault(from_db(photo_id), set()).add(name)
+    return found
+
+
+def face_box(face_id):
+    """
+    Where a face is, for making a picture of it somewhere thumbs is all there is, as
+    {path, rotation, box}, with no box for someone tagged by hand.  None if there's no such face
+    """
+    row = _db().execute('SELECT path, rotation, left, top, width, height FROM faces WHERE id = ?', (face_id,)).fetchone()
+    if row is None:
+        return None
+    box = dict(zip(('Left', 'Top', 'Width', 'Height'), row[2:])) if row[4] else None
+    return {'face_id': face_id, 'path': from_db(row[0]), 'rotation': row[1], 'box': box}
+
+
 def tag_person(photos, name):
     """
     Says someone is in these photos without a face to go on, such as when theirs is turned away.

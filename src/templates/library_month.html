@@ -14,6 +14,10 @@
     <script>
       // the months there are, newest first, which fill in as they're scrolled to
       const MONTHS = {{ months | tojson }};
+      // every month the list has whatever date it's narrowed to, for the year and month boxes
+      const DATE_MONTHS = {{ (date_months or months) | tojson }};
+      // the year or month it's narrowed to, {} for none, or null where the boxes only go to a date
+      const DATE_FILTER = {{ (date_filter if date_filter is defined else none) | tojson }};
       // a list with nothing to load, such as the recycle bin, or null
       const PRELOADED_PHOTOS = {{ (photos or none) | tojson }};
       // On this day's address stays bare, so that a bookmark of it is always today's
@@ -47,6 +51,9 @@
       let savingEnhanced = Promise.resolve();
       let selecting = false;
       const selected = new Set();
+      // the whole list, when Select all is pressed on more than can be loaded at once, as how many
+      // photos that is.  Only exporting it is offered, which then goes by the list's filters
+      let wholeList = null;
       // where a shift-click's range starts from
       let lastPicked = null;
       const groups = [];
@@ -331,7 +338,16 @@
       function selectEverything() {
         const total = timeline.months.reduce((sum, month) => sum + month.count, 0);
         if (total > SELECT_ALL_MAX) {
-          showToast(`That's ${plural(total, 'photo')}, more than ${SELECT_ALL_MAX.toLocaleString()} can be selected at once`);
+          // too many to load, so the list itself is selected, which can only be exported
+          if (IN_TRASH || FOLDER === 'hidden') {
+            showToast(`That's ${plural(total, 'photo')}, more than ${SELECT_ALL_MAX.toLocaleString()} can be selected at once`);
+            return;
+          }
+          clearPicks();
+          selecting = true;
+          wholeList = total;
+          renderSelection();
+          showToast(`All ${plural(total, 'photo')} selected, which can be exported. Other changes take up to ${SELECT_ALL_MAX.toLocaleString()} at once`);
           return;
         }
         selectMonths(timeline.months.map(month => month.key));
@@ -407,10 +423,10 @@
           headings: false
         });
         if (document.getElementById('jump-year')) {
-          dateJumper = dateJump('jump-year', 'jump-month', timeline, goTo);
+          dateJumper = DATE_FILTER ? dateFilter('jump-year', 'jump-month', DATE_MONTHS, DATE_FILTER) : dateJump('jump-year', 'jump-month', timeline, goTo);
         }
         if (document.getElementById('side-years')) {
-          sideJumper = sideDates('side-years', 'side-months', timeline, goTo);
+          sideJumper = DATE_FILTER ? sideDateFilter('side-years', 'side-months', DATE_MONTHS, DATE_FILTER) : sideDates('side-years', 'side-months', timeline, goTo);
         }
         sideFilters();
         const asked = ASKED.get('date');
@@ -451,15 +467,24 @@
         toggle.setAttribute('aria-label', toggle.title);
         toggle.querySelector('i').className = `fa ${selecting ? 'fa-check' : 'fa-check-square-o'}`;
         toggle.setAttribute('aria-pressed', selecting);
-        document.getElementById('select-count').textContent = `${selected.size.toLocaleString()} selected`;
-        document.querySelectorAll('.select-action').forEach(button => button.disabled = !selected.size);
+        document.getElementById('select-count').textContent = wholeList ? `All ${wholeList.toLocaleString()} selected` : `${selected.size.toLocaleString()} selected`;
+        document.querySelectorAll('.select-action').forEach(button => button.disabled = wholeList ? !button.closest('#select-exporting, .select-export') : !selected.size);
+        document.body.classList.toggle('whole-list-selected', Boolean(wholeList));
+        if (wholeList) {
+          ['select-tagging', 'select-placing'].forEach(id => {
+            const row = document.getElementById(id);
+            if (row) {
+              row.hidden = true;
+            }
+          });
+        }
         if (IN_TRASH) {
           return;
         }
         // the picker's own Clear or Reset takes them back to their files' dates, so it's only
         // offered where one was set by hand
         const date = document.getElementById('select-date');
-        date.disabled = !selected.size;
+        date.disabled = !selected.size || Boolean(wholeList);
         date.required = ![...selected].some(photo => photo.date_assigned);
         date.value = startingDay([...selected][0]);
         const allFavorites = selected.size && [...selected].every(photo => photo.favorite);
@@ -485,6 +510,7 @@
       function setSelecting(on) {
         selecting = on;
         if (!on) {
+          wholeList = null;
           [...selected].forEach(photo => setPicked(photo, false));
           lastPicked = null;
           // so that one batch's date can't quietly carry over to the next
@@ -496,6 +522,8 @@
       }
 
       function pick(photo, range) {
+        // picking a photo starts again from nothing after the whole list
+        wholeList = null;
         const picked = !selected.has(photo);
         const list = shown();
         const from = range && lastPicked ? list.indexOf(lastPicked) : -1;
@@ -507,6 +535,7 @@
       }
 
       function pickAll(photos) {
+        wholeList = null;
         const remaining = photos.filter(photo => !photo.removed);
         const picked = !remaining.every(photo => selected.has(photo));
         remaining.forEach(photo => setPicked(photo, picked));
@@ -576,6 +605,7 @@
       const ids = photos => photos.map(photo => photo.id);
 
       function clearPicks() {
+        wholeList = null;
         [...selected].forEach(photo => setPicked(photo, false));
         lastPicked = null;
         renderSelection();
@@ -1258,7 +1288,7 @@
 
       // one row of extra controls at a time
       function toggleRow(id) {
-        for (const other of ['select-tagging', 'select-placing']) {
+        for (const other of ['select-tagging', 'select-placing', 'select-exporting']) {
           if (other !== id) {
             document.getElementById(other).hidden = true;
           }
@@ -1280,6 +1310,55 @@
       // where the date picker starts: a photo's date in its file, else the one it was given, else its folder's
       function startingDay(photo) {
         return photo ? dayOf(photo.own_taken) || dayOf(photo.taken) || (photo.suggested || {}).date || '' : '';
+      }
+
+      function toggleExporting() {
+        const row = toggleRow('select-exporting');
+        const title = document.getElementById('select-export-title');
+        if (!row.hidden && !title.value && TITLE !== 'Photos') {
+          title.value = TITLE;
+        }
+        if (!row.hidden) {
+          title.focus();
+        }
+      }
+
+      // the photos selected, as an export of their own, which the Exports page then has
+      function exportSelected() {
+        const title = document.getElementById('select-export-title');
+        if (!title.value.trim()) {
+          showToast('Give the export a name');
+          title.focus();
+          return;
+        }
+        const publish = document.getElementById('select-export-publish')?.checked || false;
+        const photos = [...selected];
+        // a whole list goes by its filters, so its export also takes in photos added to it later
+        const which = wholeList ? {filters: FILTERS} : {photo_ids: photos.map(photo => photo.id)};
+        return run(async () => {
+          const response = await fetch('/api/exports', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              title: title.value,
+              ...which,
+              password: document.getElementById('select-export-password').value,
+              files: document.getElementById('select-export-files').value,
+              zip: document.getElementById('select-export-zip').checked,
+              publish
+            })
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(typeof body.detail === 'string' ? body.detail : `Status: ${response.status}`);
+          }
+          const made = await response.json();
+          document.getElementById('select-exporting').hidden = true;
+          title.value = '';
+          document.getElementById('select-export-password').value = '';
+          clearPicks();
+          showToast(`Exporting ${plural(made.total, 'photo')}${publish ? ', then publishing them' : ''}`, () => { window.location.href = '/exports'; }, 'Exports');
+        }, "Couldn't export");
       }
 
       function toggleTagging() {
@@ -1867,7 +1946,7 @@
       <a href="{{ day_steps.next }}" title="{{ day_steps.next_label }}" aria-label="{{ day_steps.next_label }}"><i class="fa fa-chevron-right" aria-hidden="true"></i></a>
       {% if day_steps.today %}<a href="/onthisday" title="Today" aria-label="Today"><i class="fa fa-calendar-check-o" aria-hidden="true"></i></a>{% endif %}
       {% elif not filtering %}<span class="toolbar-title">{{ title }}</span>{% endif %}
-      {% if months and not photos %}
+      {% if (date_months or months) and not photos %}
       <span class="date-jump">
         <select id="jump-year" aria-label="Go to a year"></select>
         {# every year has the one month on this day, so only the year is a choice #}
@@ -1875,8 +1954,9 @@
       </span>
       {% endif %}
       {% if filtering %}
-      {% from '_filters.html' import who_chips, who_select %}
+      {% from '_filters.html' import who_chips, who_select, match_toggle %}
       {{ who_chips(filter_tags, filter_people) }}
+      {{ match_toggle(filter_tags, filter_people, filter_match) }}
       <label class="filter-pick" title="Show only photos with a tag or a person">
         <i class="fa fa-tag" aria-hidden="true"></i>
         {{ who_select('filter-who', tag_names_shown, known_names, filter_tags, filter_people) }}
@@ -1906,7 +1986,7 @@
     </div>
     </header>
     <div class="library-layout">
-    {% if months and not photos %}{% set side_people = true %}{% set side_folders = filtering %}{% include '_sidebar.html' %}{% endif %}
+    {% if (date_months or months) and not photos %}{% set side_people = true %}{% set side_folders = filtering %}{% include '_sidebar.html' %}{% endif %}
     <main class="library-main">
     {% if person %}{% include '_person_edit.html' %}{% endif %}
     {% if place_label %}
@@ -2017,6 +2097,11 @@
           </button>
           <input id="select-date" type="date" min="{{ earliest }}" max="{{ today }}" aria-label="Date" onclick="openDatePicker(this)" onchange="datePicked(this)" disabled />
         </span>
+        {% if folder != 'hidden' %}
+        <button class="select-action select-export" onclick="toggleExporting()" title="Export these, as a folder with a website for sharing them{{ ', and publish it' if can_publish() else '' }}" aria-label="Export" disabled>
+          <i class="fa fa-share-square-o" aria-hidden="true"></i>
+        </button>
+        {% endif %}
         <button id="select-delete" class="select-action" onclick="deleteSelected(this)" title="Delete. They stay in the trash until it's emptied from Manage" aria-label="Delete" disabled>
           <i class="fa fa-trash-o" aria-hidden="true"></i>
         </button>
@@ -2032,6 +2117,19 @@
           <i class="fa fa-map-o" aria-hidden="true"></i>
         </button>
         <div id="select-place-map" class="select-place-map" hidden></div>
+      </div>
+      <div id="select-exporting" class="select-tagging select-exporting" hidden>
+        <input id="select-export-title" type="text" maxlength="80" placeholder="Name" aria-label="Name of the export" onkeydown="if (event.key === 'Enter') exportSelected();" />
+        <input id="select-export-password" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Password, if any" aria-label="Password, if any" />
+        <select id="select-export-files" aria-label="Files">
+          <option value="jpeg">JPEGs</option>
+          <option value="original">Originals</option>
+        </select>
+        <label title="A zip of the photos, for the website to download in one go"><input id="select-export-zip" type="checkbox" checked /> Zip</label>
+        {% if can_publish() %}
+        <label title="Put it on the web, on Cloudflare R2, once it's made"><input id="select-export-publish" type="checkbox" checked /> Publish</label>
+        {% endif %}
+        <button class="select-action" onclick="exportSelected()" title="Export" aria-label="Export" disabled><i class="fa fa-check" aria-hidden="true"></i></button>
       </div>
       <div id="select-tagging" class="select-tagging" hidden>
         <select id="select-tag-kind" aria-label="What to tag" onchange="tagKindChanged()">
