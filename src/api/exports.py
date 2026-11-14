@@ -13,6 +13,7 @@ import secrets
 import shutil
 import time
 import zipfile
+from collections import Counter
 
 from api import exif, people, places
 from api.jobs import Job
@@ -131,13 +132,12 @@ def _file_name(path, files, used):
     return name
 
 
-def _items(photos, names, files):
+def _items(photos, names, files, in_photos):
     """
     What the worker needs for each photo: where it comes from, where it goes, and what the site
     says about it, newest first.  Names are given oldest first in each month, so that adding newer
     photos to an export later doesn't rename the files it already has
     """
-    in_photos = people.names_in_photos(names)
     index = {name: number for number, name in enumerate(names)}
     used = {}
     items = {}
@@ -196,8 +196,8 @@ def _with_password(spec, password):
 def create(title, photo_ids=None, files=JPEG, password='', zipped=True, publish=False, filters=None, description=None):
     """
     An export of these photos, selected in the library, or of a whole list of them by its filters,
-    which then takes in photos added to it later.  Its site names nobody.  With publish, it goes on
-    R2 once it's made
+    which then takes in photos added to it later.  Its site names everyone in them.  With publish,
+    it goes on R2 once it's made
     """
     spec = _with_password({
         'slug': _make_slug(title),
@@ -238,17 +238,27 @@ def start(slug):
         photos = exif.photos_with_ids(spec['photo_ids'])
     else:
         photos = chosen_photos(spec['names'], spec['match'])
+    # who the site names: the people an export was once made of, or else everyone named in its
+    # photos, those in the most first
+    if spec['names']:
+        names = spec['names']
+        in_photos = people.names_in_photos(names)
+    else:
+        _refresh_hidden_faces()
+        in_photos = people.names_by_photo([photo['id'] for photo in photos])
+        counts = Counter(name for found in in_photos.values() for name in found)
+        names = sorted(counts, key=lambda name: (-counts[name], name.casefold()))
     spec.update(
         action='export',
         folder=folder(slug),
         secret=_secret(spec),
         state='running',
         started=int(time.time()),
-        people=_covers(spec['names']),
+        people=_covers(names),
         total=len(photos)
     )
     save_json(_spec_path(slug), spec)
-    if not job.start(_items(photos, spec['names'], spec['files']), _spec_path(slug)):
+    if not job.start(_items(photos, names, spec['files'], in_photos), _spec_path(slug)):
         return None
     return spec
 

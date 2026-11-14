@@ -32,9 +32,13 @@
         </a>
         <div id="people" class="people" role="group" aria-label="Show photos with"></div>
       </header>
-      <nav id="years" class="years" aria-label="Years"></nav>
+      <nav id="dates" class="dates" aria-label="Show only a year or month">
+        <div id="years" class="years"></div>
+        <div id="month-filter" class="years month-filter" hidden></div>
+        <p id="showing" class="showing" aria-live="polite"></p>
+      </nav>
       <main id="months" class="months"></main>
-      <p id="empty" class="empty" hidden>No photos have everyone chosen. <button type="button" id="show-all">Show all photos</button></p>
+      <p id="empty" class="empty" hidden>Nothing matches. <button type="button" id="show-all">Show all photos</button></p>
       <p class="footer"><button type="button" id="lock-again" hidden>Lock</button></p>
     </div>
     <noscript><p class="empty">This page needs JavaScript to show the photos.</p></noscript>

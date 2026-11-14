@@ -130,6 +130,15 @@ button {
   font-size: 13px;
 }
 
+.more-people {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+}
+
 .person[aria-pressed="true"] {
   border-color: var(--strong);
   background: #333;
@@ -137,18 +146,38 @@ button {
 }
 
 /* the years, kept at the top while scrolling, and scrolled sideways on a phone */
-.years {
+/* the years, and the months of the one chosen, kept at the top while scrolling, each row scrolled
+   sideways on a phone */
+.dates {
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
-  gap: 4px;
-  padding: 10px var(--margin);
-  overflow-x: auto;
+  padding: 10px var(--margin) 6px;
   background: rgba(0, 0, 0, 0.85);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
+}
+
+.years {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
   scrollbar-width: none;
+}
+
+.month-filter {
+  margin-top: 6px;
+}
+
+.showing {
+  min-height: 1.2em;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.showing:empty {
+  display: none;
 }
 
 .years::-webkit-scrollbar {
@@ -165,9 +194,14 @@ button {
   color: var(--muted);
 }
 
-.years button:hover,
-.years button.current {
+.years button:hover {
   border-color: var(--border);
+  color: var(--strong);
+}
+
+.years button[aria-pressed="true"] {
+  border-color: var(--strong);
+  background: #333;
   color: var(--strong);
 }
 
@@ -176,8 +210,6 @@ button {
 }
 
 .month {
-  /* below the row of years when gone to */
-  scroll-margin-top: 60px;
   /* a long export has thousands of tiles; only those near the screen are laid out */
   content-visibility: auto;
   contain-intrinsic-size: auto 600px;

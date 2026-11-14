@@ -1,5 +1,5 @@
-// The website of an export: every photo by month, newest first, people to narrow them to, and a
-// viewer.  Everything comes from data.js, and every address is relative, so the folder works
+// The website of an export: every photo by month, newest first, people, years and months to
+// narrow them to, and a viewer.  Everything comes from data.js, and every address is relative, so the folder works
 // wherever it's put: S3, any other static host, or opened straight from a disk.  With a password,
 // data.js and the photos are in a folder named after it, which unlock.js works out
 (function () {
@@ -11,6 +11,12 @@
   const UNDATED = 'undated';
   // people chosen to narrow the photos to: each one chosen narrows them further, as in the library
   const chosen = new Set();
+  // a year (or 'undated') and a month (YYYY-MM) to narrow them to, or '' for any
+  let year = '';
+  let month = '';
+  // how many people show before More, the most photographed first
+  const PEOPLE_SHOWN = 10;
+  let allPeople = false;
   let shown = [];
   let current = -1;
   // whether the viewer was opened from a tile, so closing it can go back instead of adding a step
@@ -42,16 +48,47 @@
     const people = element('people');
     // when every photo has everyone, such as with one person, there's nothing to narrow to
     people.hidden = data.people.every(person => person.photos === data.photos.length);
-    people.innerHTML = data.people.map((person, number) => `
+    const listed = data.people
+      .map((person, number) => ({person, number}))
+      .filter(({number}, place) => allPeople || place < PEOPLE_SHOWN || chosen.has(number));
+    const hidden = data.people.length - listed.length;
+    people.innerHTML = listed.map(({person, number}) => `
       <button type="button" class="person" data-person="${number}" aria-pressed="${chosen.has(number)}">
         ${person.face ? `<img src="${escape(base + person.face)}" alt="">` : '<span class="no-face" aria-hidden="true"></span>'}
         <span class="person-name">${escape(person.name)}</span>
         <span class="person-count">${person.photos.toLocaleString()}</span>
-      </button>`).join('');
+      </button>`).join('') + (data.people.length > PEOPLE_SHOWN ? `
+      <button type="button" class="more-people" aria-expanded="${allPeople}">${allPeople ? 'Fewer' : `${hidden.toLocaleString()} more`}</button>` : '');
+  }
+
+  const yearOf = photo => photo.date ? photo.date.slice(0, 4) : UNDATED;
+
+  // the years and the chosen year's months, from every photo, so that choosing one never hides
+  // the others
+  function renderDates() {
+    const years = [...new Set(data.photos.map(yearOf))];
+    const button = (value, text, on, kind) => `<button type="button" data-${kind}="${value}" aria-pressed="${on}">${text}</button>`;
+    element('years').innerHTML = button('', 'All', !year, 'year') + years.map(each => button(each, each === UNDATED ? 'Undated' : each, each === year, 'year')).join('');
+    const months = year && year !== UNDATED ? [...new Set(data.photos.filter(photo => yearOf(photo) === year).map(monthKey))] : [];
+    element('month-filter').innerHTML = months.map(key => button(key, MONTHS[Number(key.slice(5, 7)) - 1].slice(0, 3), key === month, 'month')).join('');
+    element('month-filter').hidden = !months.length;
+    element('dates').hidden = years.length < 2;
+    // on a phone the years run off the side, so the one chosen is kept in view
+    const on = element('years').querySelector('[aria-pressed="true"]');
+    const row = element('years');
+    if (on && row.scrollWidth > row.clientWidth) {
+      row.scrollLeft = on.offsetLeft - row.clientWidth / 2 + on.offsetWidth / 2;
+    }
+  }
+
+  function matches(photo) {
+    return [...chosen].every(number => photo.people.includes(number))
+      && (!year || yearOf(photo) === year)
+      && (!month || monthKey(photo) === month);
   }
 
   function renderList() {
-    shown = data.photos.filter(photo => [...chosen].every(number => photo.people.includes(number)));
+    shown = data.photos.filter(matches);
     const months = [];
     shown.forEach((photo, index) => {
       const key = monthKey(photo);
@@ -60,52 +97,31 @@
       }
       months[months.length - 1].photos.push({photo, index});
     });
-    element('months').innerHTML = months.map(month => `
-      <section class="month" id="month-${month.key}" data-year="${month.key === UNDATED ? UNDATED : month.key.slice(0, 4)}">
-        <h2>${monthLabel(month.key)} <span class="month-count">${month.photos.length.toLocaleString()}</span></h2>
-        <div class="grid">${month.photos.map(({photo, index}) => `
+    element('months').innerHTML = months.map(each => `
+      <section class="month">
+        <h2>${monthLabel(each.key)} <span class="month-count">${each.photos.length.toLocaleString()}</span></h2>
+        <div class="grid">${each.photos.map(({photo, index}) => `
           <a class="tile" href="#photo=${photo.key}" data-index="${index}" title="${escape(photo.when || 'Undated')}">
             <img src="${thumbUrl(photo)}" loading="lazy" decoding="async" alt="${escape(names(photo).join(', '))}">
           </a>`).join('')}
         </div>
       </section>`).join('');
-    const years = [...new Set(months.map(month => month.key === UNDATED ? UNDATED : month.key.slice(0, 4)))];
-    element('years').innerHTML = years.map(year => `<button type="button" data-year="${year}">${year === UNDATED ? 'Undated' : year}</button>`).join('');
-    element('years').hidden = years.length < 2;
+    const narrowed = chosen.size || year;
+    element('showing').textContent = narrowed ? `${shown.length.toLocaleString()} of ${count(data.photos.length, 'photo')}` : '';
     element('empty').hidden = shown.length > 0;
-    watchYears();
+    renderDates();
   }
 
-  // the year being looked at is picked out in the row of years: that of the last month whose
-  // heading has reached the row
-  let yearPending = false;
-  function markYear() {
-    yearPending = false;
-    const row = element('years');
-    const below = row.getBoundingClientRect().bottom + 4;
-    let year = null;
-    for (const section of document.querySelectorAll('.month')) {
-      if (section.getBoundingClientRect().top > below) {
-        break;
-      }
-      year = section.dataset.year;
-    }
-    year = year || (document.querySelector('.month') || {dataset: {}}).dataset.year;
-    row.querySelectorAll('button').forEach(button => {
-      const on = button.dataset.year === year;
-      if (on && !button.classList.contains('current') && row.scrollWidth > row.clientWidth) {
-        // on a phone the years run off the side, so the one being looked at is kept in the middle
-        row.scrollLeft = button.offsetLeft - row.clientWidth / 2 + button.offsetWidth / 2;
-      }
-      button.classList.toggle('current', on);
-    });
+  function render() {
+    renderPeople();
+    renderList();
   }
 
-  function watchYears() {
-    if (!yearPending) {
-      yearPending = true;
-      requestAnimationFrame(markYear);
-    }
+  function showEverything() {
+    chosen.clear();
+    year = '';
+    month = '';
+    render();
   }
 
   function step(by) {
@@ -186,11 +202,9 @@
       return;
     }
     let index = shown.findIndex(photo => photo.key === match[1]);
-    if (index < 0 && chosen.size && data.photos.some(photo => photo.key === match[1])) {
-      // a photo the people chosen leave out
-      chosen.clear();
-      renderPeople();
-      renderList();
+    if (index < 0 && data.photos.some(photo => photo.key === match[1])) {
+      // a photo the people or dates chosen leave out
+      showEverything();
       index = shown.findIndex(photo => photo.key === match[1]);
     }
     if (index < 0) {
@@ -227,29 +241,39 @@
     element('album').hidden = false;
     element('summary').textContent = summary();
     offerZip();
-    renderPeople();
-    renderList();
+    render();
 
     element('people').addEventListener('click', event => {
+      if (event.target.closest('.more-people')) {
+        allPeople = !allPeople;
+        renderPeople();
+        return;
+      }
       const button = event.target.closest('.person');
       if (!button) {
         return;
       }
       const number = Number(button.dataset.person);
       chosen.has(number) ? chosen.delete(number) : chosen.add(number);
-      renderPeople();
-      renderList();
+      render();
     });
-    element('show-all').addEventListener('click', () => {
-      chosen.clear();
-      renderPeople();
-      renderList();
-    });
+    element('show-all').addEventListener('click', showEverything);
+    // choosing the year or month that's chosen takes it off
     element('years').addEventListener('click', event => {
       const button = event.target.closest('button');
-      const section = button && document.querySelector(`.month[data-year="${button.dataset.year}"]`);
-      if (section) {
-        section.scrollIntoView();
+      if (button) {
+        year = button.dataset.year === year ? '' : button.dataset.year;
+        month = '';
+        renderList();
+        window.scrollTo(0, 0);
+      }
+    });
+    element('month-filter').addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (button) {
+        month = button.dataset.month === month ? '' : button.dataset.month;
+        renderList();
+        window.scrollTo(0, 0);
       }
     });
     element('months').addEventListener('click', event => {
@@ -298,8 +322,6 @@
         close();
       }
     });
-    window.addEventListener('scroll', watchYears, {passive: true});
-    window.addEventListener('resize', watchYears);
     window.addEventListener('hashchange', followAddress);
     followAddress();
   }

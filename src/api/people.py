@@ -1220,6 +1220,25 @@ def names_in_photos(names):
     return found
 
 
+def names_by_photo(photo_ids):
+    """
+    Everyone named in each of these photos, as {photo id: {name}}, leaving out photos with nobody
+    """
+    found = {}
+    for start in range(0, len(photo_ids), 500):
+        part = [to_db(photo_id) for photo_id in photo_ids[start:start + 500]]
+        marks = ','.join('?' * len(part))
+        for photo_id, name in _db().execute(
+            f"""
+            SELECT DISTINCT faces.photo_id, names.name FROM names JOIN faces ON faces.id = names.face_id
+            WHERE faces.photo_id IN ({marks}) AND names.name <> ?
+            """,
+            (*part, NOBODY)
+        ):
+            found.setdefault(from_db(photo_id), set()).add(name)
+    return found
+
+
 def face_box(face_id):
     """
     Where a face is, for making a picture of it somewhere thumbs is all there is, as
