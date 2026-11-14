@@ -37,6 +37,8 @@ CONTENT = ('photos', 'site/thumbs', 'site/large', 'site/people', 'site/data.js')
 # the name of that folder, which the password works out
 SECRET_FOLDER = re.compile(r'[0-9a-f]{32}')
 JPEG_QUALITY = 92
+# how the zip of the photos is laid out, which changes when that does: the years at the top
+ZIP_LAYOUT = 2
 # how many photos could be copied again if this is killed
 SAVE_EVERY = 20
 # the EXIF tags written into a JPEG copy: its orientation, as the copy is already upright, and
@@ -255,8 +257,8 @@ def _tidy(root, kept):
 def _zip(spec, content, progress, progress_path, stopping):
     """
     The photos as a zip, beside them, unless the one there already has them as they are now: a
-    folder named after the export with the years in it and the months in those, and nothing of the
-    website.  Stored, not compressed, as photos hardly compress.  Returns how it was left
+    folder for each year with the months in it, and nothing of the website.  Stored, not
+    compressed, as photos hardly compress.  Returns how it was left
     """
     target = os.path.join(content, _zip_name(spec))
     photos = os.path.join(content, 'photos')
@@ -268,7 +270,8 @@ def _zip(spec, content, progress, progress_path, stopping):
                 full = os.path.join(directory, name)
                 stat = os.stat(full)
                 files.append((full, os.path.relpath(full, photos), stat.st_size, stat.st_mtime_ns))
-    signature = hashlib.sha1(json.dumps([file[1:] for file in files]).encode('utf-8', 'surrogateescape')).hexdigest()
+    # with how the zip is laid out, so that a zip laid out another way is made again
+    signature = hashlib.sha1(json.dumps([ZIP_LAYOUT, *(file[1:] for file in files)]).encode('utf-8', 'surrogateescape')).hexdigest()
     if spec.get('zip_signature') == signature and os.path.exists(target):
         return signature
     progress.update(phase='zipping', started=int(time.time()), done=0, total=sum(file[2] for file in files))
@@ -279,7 +282,7 @@ def _zip(spec, content, progress, progress_path, stopping):
         for full, relative, size, _ in files:
             if stopping:
                 break
-            info = zipfile.ZipInfo.from_file(full, os.path.join(spec['slug'], relative), strict_timestamps=False)
+            info = zipfile.ZipInfo.from_file(full, relative, strict_timestamps=False)
             with open(full, 'rb') as source, archive.open(info, 'w', force_zip64=True) as written:
                 shutil.copyfileobj(source, written, 1 << 20)
             progress['done'] += size
