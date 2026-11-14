@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from api import duplicates, exif, faces, info, movies, people, places, scans, tags, thumbs, trash
+from api import duplicates, exif, exports, faces, info, movies, people, places, scans, tags, thumbs, trash
 
 
 @asynccontextmanager
@@ -1455,6 +1455,133 @@ async def _person(request: Request, name: str):
         faces_url=f"/people/{quote(name)}/faces",
         person=name
     )
+
+
+# ---- exports: photos of chosen people copied into a folder of their own, with a site for sharing
+
+
+class ExportPeople(BaseModel):
+    names: list[str]
+    match: Literal['any', 'all'] = 'any'
+
+
+class ExportPassword(BaseModel):
+    # one password shared by everyone the export is for, or '' for none
+    password: str = Field(default='', max_length=200)
+
+
+class ExportRequest(ExportPeople, ExportPassword):
+    title: str = Field(min_length=1, max_length=80)
+    files: Literal['original', 'jpeg'] = 'original'
+    # a zip of everything in the export, for its site to offer
+    zip: bool = True
+
+
+@app.get("/exports")
+def _exports(request: Request):
+    update_hidden_faces()
+    return templates.TemplateResponse(
+        request=request,
+        name="exports.html",
+        context={"people": people.named_people(), "chosen": request.query_params.getlist('person')}
+    )
+
+
+@app.get("/api/exports")
+def _list_exports():
+    return {'exports': exports.listing(), 'running': exports.job.running()}
+
+
+# not async: finding a family's photos takes the NAS a moment
+@app.post("/api/exports/preview")
+def _preview_export(choice: ExportPeople):
+    return exports.preview(choice.names, choice.match)
+
+
+@app.post("/api/exports")
+def _create_export(request: ExportRequest):
+    if exports.job.running():
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    if not request.names:
+        raise HTTPException(status_code=422, detail="Choose someone to export photos of")
+    title = ' '.join(request.title.split())
+    if not title:
+        raise HTTPException(status_code=422, detail="Give the export a name")
+    made = exports.create(title, request.names, request.match, request.files, request.password.strip(), request.zip)
+    if made is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return {'slug': made['slug'], 'total': made['total']}
+
+
+# again, to add photos new to the library and take away those that have gone from it
+@app.post("/api/exports/{slug}/update")
+def _update_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.start(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+# moves the photos to where the new password says, so it waits for any export being made
+@app.post("/api/exports/{slug}/password")
+def _set_export_password(slug: str, change: ExportPassword):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.set_password(slug, change.password.strip()) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+@app.delete("/api/exports/running")
+def _stop_export():
+    if not exports.stop():
+        raise HTTPException(status_code=409, detail="No export is being made")
+    return "stopping"
+
+
+@app.delete("/api/exports/{slug}")
+def _delete_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if not exports.delete(slug):
+        raise HTTPException(status_code=409, detail="Stop this export before deleting it")
+    return "deleted"
+
+
+@app.get("/api/exports/{slug}/download")
+def _download_export(slug: str):
+    spec = exports.get(slug)
+    if not spec or not os.path.isdir(exports.folder(slug)):
+        raise HTTPException(status_code=404)
+    # the export's own zip where it's up to date, which a browser can resume; otherwise one made
+    # as it's sent
+    ready = exports.ready_zip(slug)
+    if ready:
+        return FileResponse(ready, media_type='application/zip', filename=f"{slug}.zip")
+    return StreamingResponse(
+        exports.zipped(slug),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{slug}.zip"'}
+    )
+
+
+# an export's site, as it will be once shared, for looking at before sharing it.  Its addresses are
+# relative, so it needs the slash at the end
+@app.get("/exports/{slug}")
+def _export_site_root(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    return RedirectResponse(url=f"{quote(slug)}/")
+
+
+# HEAD too, which the site asks its zip's size with
+@app.api_route("/exports/{slug}/{path:path}", methods=["GET", "HEAD"])
+def _export_site(slug: str, path: str):
+    full = exports.get(slug) and exports.site_file(slug, path)
+    if not full:
+        raise HTTPException(status_code=404)
+    return FileResponse(full, headers={'Cache-Control': 'no-cache'})
 
 
 @app.get("/places")

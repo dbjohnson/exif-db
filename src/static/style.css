@@ -3994,6 +3994,150 @@ kbd {
 }
 
 
+/* exports: choosing people to export the photos of, and the exports made */
+.manage.exports {
+  max-width: 900px;
+}
+
+.manage .export-title input {
+  box-sizing: border-box;
+  width: min(320px, 100%);
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--input-font);
+}
+
+.export-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.export-people-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 16px 0 8px;
+}
+
+.export-label,
+.export-options legend {
+  color: var(--muted);
+}
+
+.export-people-head .people-filter button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--text-strong);
+}
+
+.manage .export-person {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-tile);
+  background: var(--surface);
+  color: var(--text-strong);
+  font-size: 14px;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+
+/* everyone not chosen is dimmed, and those chosen get a ring and a tick */
+.export-people:has(.export-person[aria-pressed="true"]) .export-person[aria-pressed="false"] img {
+  opacity: 0.45;
+}
+
+.manage .export-person[aria-pressed="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.export-person[aria-pressed="true"]::after {
+  content: "\2713";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: center;
+}
+
+.export-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 16px 0 0;
+  padding: 0;
+  border: none;
+}
+
+.export-options legend {
+  float: left;
+  margin-right: 4px;
+  padding: 0;
+}
+
+.manage .export-zip {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+.export-zip input {
+  flex: none;
+  margin: 3px 0 0;
+}
+
+.manage.exports .actions {
+  margin-top: 16px;
+}
+
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.export-card {
+  padding: 12px;
+  border: 1px solid var(--selected);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.manage.exports .export-card .actions {
+  margin-top: 10px;
+}
+
+.export-card-title {
+  color: var(--text-strong);
+  font-size: 16px;
+}
+
+.export-card-detail {
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.manage code {
+  overflow-wrap: anywhere;
+}
+
 /* last, so that an armed delete is red whichever kind of button it is */
 button.confirming,
 button.confirming:hover,

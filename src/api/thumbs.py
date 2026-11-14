@@ -244,6 +244,20 @@ def developed(path, rotation=0, enhanced=False):
     return _cached(path, _developed_variant(rotation, enhanced), 85, make)
 
 
+def full_size(path, rotation=0, enhanced=False):
+    """
+    A photo at its full size, upright, turned and enhanced as it's been set to be, for an export.
+    A raw file is developed from what its sensor recorded, as the preview inside can be small.  Not
+    cached, as each is only wanted once
+    """
+    if path.split('.')[-1].upper() in RAW_EXTENSIONS:
+        with rawpy.imread(path) as raw:
+            im = Image.fromarray(raw.postprocess(use_camera_wb=True))
+    else:
+        im = _decode(path)
+    return _adjust(im, rotation, enhanced)
+
+
 # an enhanced copy is cached next to the plain one, so that turning enhancing off is instant
 def _enhanced_variant(enhanced):
     return ':enhanced' if enhanced else ''

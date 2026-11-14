@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#000000">
+    <title>{{title}}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="site/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="site/apple-touch-icon.png">
+    <link rel="stylesheet" href="site/export.css?v={{version}}">
+    <script src="site/settings.js?v={{version}}" defer></script>
+    <script src="site/unlock.js?v={{version}}" defer></script>
+    <script src="site/export.js?v={{version}}" defer></script>
+  </head>
+  <body>
+    <form id="lock" class="lock" hidden>
+      <h1>{{title}}</h1>
+      <label for="lock-password">Password</label>
+      <div class="lock-row">
+        <input id="lock-password" type="password" autocomplete="current-password" required>
+        <button type="submit">Open</button>
+      </div>
+      <p id="lock-error" class="lock-error" role="alert"></p>
+    </form>
+    <div id="album" hidden>
+      <header class="intro">
+        <h1 id="title">{{title}}</h1>
+        <p id="summary" class="summary"></p>
+        <a id="download-all" class="download-all" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          <span id="download-all-label">Download all</span>
+        </a>
+        <div id="people" class="people" role="group" aria-label="Show photos with"></div>
+      </header>
+      <nav id="years" class="years" aria-label="Years"></nav>
+      <main id="months" class="months"></main>
+      <p id="empty" class="empty" hidden>No photos have everyone chosen. <button type="button" id="show-all">Show all photos</button></p>
+      <p class="footer"><button type="button" id="lock-again" hidden>Lock</button></p>
+    </div>
+    <noscript><p class="empty">This page needs JavaScript to show the photos.</p></noscript>
+
+    <div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Photo" hidden>
+      <img id="viewer-image" class="viewer-image" alt="">
+      <div class="viewer-bar">
+        <button type="button" id="viewer-close" title="Close (Esc)" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+        <div class="viewer-info">
+          <div id="viewer-when" class="viewer-when"></div>
+          <div id="viewer-detail" class="viewer-detail"></div>
+        </div>
+        <a id="viewer-download" class="viewer-download" download title="Download the original" aria-label="Download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        </a>
+      </div>
+      <button type="button" id="viewer-prev" class="viewer-step prev" title="Previous (←)" aria-label="Previous photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <button type="button" id="viewer-next" class="viewer-step next" title="Next (→)" aria-label="Next photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+      </button>
+    </div>
+  </body>
+</html>

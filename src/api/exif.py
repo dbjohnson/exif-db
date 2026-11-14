@@ -644,6 +644,15 @@ def photos_with_ids(photo_ids, hidden=False):
     return _library_rows("photo_id IN (SELECT UNNEST(?::VARCHAR[]))", [photo_ids], hidden)
 
 
+def file_sizes(photo_ids):
+    # how big each photo's file was when it was last scanned, in bytes, by photo id
+    load_csv()
+    return dict(db.execute(
+        "SELECT photo_id, TRY_CAST(FileSize AS BIGINT) FROM exif WHERE photo_id IN (SELECT UNNEST(?::VARCHAR[]))",
+        [list(photo_ids)]
+    ).fetchall())
+
+
 def copies_of(path):
     """
     Every file in the index that's the same photo as this one, including this one, such as
