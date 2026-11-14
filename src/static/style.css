@@ -4134,6 +4134,10 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+.export-card-web a {
+  color: var(--text-strong);
+}
+
 .manage code {
   overflow-wrap: anywhere;
 }

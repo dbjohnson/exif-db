@@ -71,6 +71,7 @@
       <h2>Exports</h2>
       <div id="export-list" class="export-list"><p class="hint">Loading…</p></div>
       <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download folder gives as a zip, website and all, for putting it somewhere else. Update brings an export up to date with the library, adding photos since named and taking away those since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
+      <p id="publish-hint" class="hint" hidden>To publish exports on Cloudflare R2 from here, set <code>CLOUDFLARE_API_TOKEN</code> to a token with Workers R2 Storage: Edit, and <code>CLOUDFLARE_ACCOUNT_ID</code>, in the app's environment.</p>
     </div>
 
     <script>
@@ -81,6 +82,8 @@
       let previewing = 0;
       let previewTimer = null;
       let running = false;
+      // whether CLOUDFLARE_API_TOKEN is set, for putting exports on R2
+      let canPublish = false;
 
       function chosenNames() {
         return tiles.filter(tile => tile.getAttribute('aria-pressed') === 'true').map(tile => tile.dataset.name);
@@ -219,6 +222,11 @@
       }
 
       function stateText(item) {
+        if (item.progress && item.progress.phase === 'publishing') {
+          return item.progress.total
+            ? `Publishing to Cloudflare, ${formatSize(item.progress.done)} of ${formatSize(item.progress.total)}, ${formatRemaining(item.progress.remaining_secs)}`
+            : 'Publishing to Cloudflare: taking off what the export no longer has';
+        }
         if (item.progress && item.progress.phase === 'zipping') {
           return `Making the zip, ${formatSize(item.progress.done)} of ${formatSize(item.progress.total)}, ${formatRemaining(item.progress.remaining_secs)}`;
         }
@@ -259,6 +267,23 @@
         state.className = 'export-card-detail';
         state.textContent = stateText(item);
         card.append(head, who, state);
+        if (item.published) {
+          const web = document.createElement('div');
+          web.className = 'export-card-detail export-card-web';
+          const link = document.createElement('a');
+          link.href = item.published.url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = item.published.url;
+          web.append('On the web at ', link);
+          card.append(web);
+        }
+        if (item.publish_error) {
+          const problem = document.createElement('div');
+          problem.className = 'export-card-detail error';
+          problem.textContent = `Couldn't publish: ${item.publish_error}`;
+          card.append(problem);
+        }
         if (item.progress) {
           const bar = document.createElement('progress');
           bar.max = item.progress.total || 1;
@@ -293,7 +318,37 @@
         } else {
           button('Update', () => send(`/api/exports/${encodeURIComponent(item.slug)}/update`, 'POST'), running);
           button('Password', () => changePassword(item), running);
+          if (canPublish && item.publish) {
+            if (item.publish_error) {
+              button('Try again', () => send(`/api/exports/${encodeURIComponent(item.slug)}/publish`, 'POST'), running);
+            }
+            if (item.published) {
+              button('Copy link', async () => {
+                try {
+                  await navigator.clipboard.writeText(item.published.url);
+                } catch (error) {
+                  prompt('Copy this link', item.published.url);
+                }
+              }, false);
+            }
+            button('Unpublish', () => {
+              if (confirm(`Take "${item.title}" off the web? Its link stops working. The export stays here, and can be published again.`)) {
+                send(`/api/exports/${encodeURIComponent(item.slug)}/unpublish`, 'POST');
+              }
+            }, running);
+          } else if (canPublish) {
+            button('Publish', () => {
+              const warning = item.password ? '' : ' It has no password, so anyone with the link can see every photo.';
+              if (confirm(`Put "${item.title}" on the web, on Cloudflare R2?${warning} Updating it publishes it again.`)) {
+                send(`/api/exports/${encodeURIComponent(item.slug)}/publish`, 'POST');
+              }
+            }, running);
+          }
           button('Delete', () => {
+            if (item.published) {
+              showError(`Unpublish "${item.title}" before deleting it, so it's taken off the web too.`);
+              return;
+            }
             if (confirm(`Delete the export "${item.title}"? Its folder in the storage volume goes too. The photos stay in the library.`)) {
               send(`/api/exports/${encodeURIComponent(item.slug)}`, 'DELETE');
             }
@@ -333,7 +388,9 @@
           if (!response.ok) {
             throw new Error(await failure(response));
           }
-          const {exports, running: busy} = await response.json();
+          const {exports, running: busy, can_publish: publishing} = await response.json();
+          canPublish = publishing;
+          document.getElementById('publish-hint').hidden = canPublish;
           const changed = busy !== running;
           running = busy;
           const list = document.getElementById('export-list');

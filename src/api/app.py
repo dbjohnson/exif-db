@@ -1489,7 +1489,7 @@ def _exports(request: Request):
 
 @app.get("/api/exports")
 def _list_exports():
-    return {'exports': exports.listing(), 'running': exports.job.running()}
+    return {'exports': exports.listing(), 'running': exports.job.running(), 'can_publish': exports.can_publish()}
 
 
 # not async: finding a family's photos takes the NAS a moment
@@ -1533,6 +1533,27 @@ def _set_export_password(slug: str, change: ExportPassword):
     return "started"
 
 
+# on Cloudflare R2, from its r2.dev address, and again after each update
+@app.post("/api/exports/{slug}/publish")
+def _publish_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if not exports.can_publish():
+        raise HTTPException(status_code=409, detail="Set CLOUDFLARE_API_TOKEN to publish exports")
+    if exports.publish(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
+@app.post("/api/exports/{slug}/unpublish")
+def _unpublish_export(slug: str):
+    if not exports.get(slug):
+        raise HTTPException(status_code=404)
+    if exports.unpublish(slug) is None:
+        raise HTTPException(status_code=409, detail="Another export is being made. Try again when it's finished.")
+    return "started"
+
+
 @app.delete("/api/exports/running")
 def _stop_export():
     if not exports.stop():
@@ -1542,8 +1563,11 @@ def _stop_export():
 
 @app.delete("/api/exports/{slug}")
 def _delete_export(slug: str):
-    if not exports.get(slug):
+    spec = exports.get(slug)
+    if not spec:
         raise HTTPException(status_code=404)
+    if spec.get('published'):
+        raise HTTPException(status_code=409, detail="Unpublish this export before deleting it, so it's taken off the web too")
     if not exports.delete(slug):
         raise HTTPException(status_code=409, detail="Stop this export before deleting it")
     return "deleted"

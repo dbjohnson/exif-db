@@ -236,6 +236,7 @@ def start(slug):
     spec = _load(slug)
     photos = chosen_photos(spec['names'], spec['match'])
     spec.update(
+        action='export',
         folder=folder(slug),
         secret=_secret(spec),
         state='running',
@@ -258,6 +259,35 @@ def set_password(slug, password):
         return None
     save_json(_spec_path(slug), _with_password(_load(slug), password))
     return start(slug)
+
+
+def can_publish():
+    # the same setting scripts/r2.py goes by
+    return bool(os.getenv('CLOUDFLARE_API_TOKEN'))
+
+
+def _run(slug, action, **changes):
+    # publishing goes through the same worker as making an export, so only one runs at a time
+    if job.running():
+        return None
+    spec = _load(slug)
+    spec.update(changes, action=action, folder=folder(slug), state='running', started=int(time.time()))
+    save_json(_spec_path(slug), spec)
+    if not job.start([], _spec_path(slug)):
+        return None
+    return spec
+
+
+def publish(slug):
+    """
+    Puts an export on Cloudflare R2, and keeps it there: updating it publishes it again.  Returns
+    the export, or None if another is being made
+    """
+    return _run(slug, 'publish', publish=True)
+
+
+def unpublish(slug):
+    return _run(slug, 'unpublish', publish=False)
 
 
 def stop():
@@ -284,7 +314,7 @@ def listing():
                 spec['state'] = 'interrupted'
             if this_one and status['running']:
                 spec['progress'] = {key: progress.get(key) for key in ('phase', 'done', 'total', 'failed', 'remaining_secs')}
-            for internal in ('people', 'folder', 'secret', 'salt', 'iterations', 'zip_signature'):
+            for internal in ('people', 'folder', 'secret', 'salt', 'iterations', 'zip_signature', 'action'):
                 spec.pop(internal, None)
             found.append(spec)
     return sorted(found, key=lambda spec: spec['created'], reverse=True)
@@ -292,13 +322,14 @@ def listing():
 
 def delete(slug):
     """
-    Deletes an export's folder and what's kept about it.  False if it's being made
+    Deletes an export's folder and what's kept about it.  False if it's being made.  One that's
+    published has to be taken off R2 first, so that deleting it doesn't leave it on the web
     """
     status = job.status()
     if status['running'] and (status['progress'] or {}).get('slug') == slug:
         return False
     shutil.rmtree(folder(slug), ignore_errors=True)
-    for path in (_spec_path(slug), os.path.join(EXPORTS_DIR, f"{slug}.files.json")):
+    for path in (_spec_path(slug), os.path.join(EXPORTS_DIR, f"{slug}.files.json"), os.path.join(EXPORTS_DIR, f"{slug}.r2.json")):
         try:
             os.remove(path)
         except FileNotFoundError:

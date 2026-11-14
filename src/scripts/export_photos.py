@@ -233,7 +233,9 @@ def _move_content(root, content):
     for source in earlier:
         if source == content:
             continue
-        for part in CONTENT:
+        # and the zip of the photos, which is named after the export
+        zips = [name for name in os.listdir(source) if name.endswith('.zip')] if os.path.isdir(source) else []
+        for part in (*CONTENT, *zips):
             old, new = os.path.join(source, part), os.path.join(content, part)
             if os.path.exists(old) and not os.path.exists(new):
                 os.makedirs(os.path.dirname(new), exist_ok=True)
@@ -300,23 +302,13 @@ def _size(root):
     return sum(os.path.getsize(os.path.join(directory, name)) for directory, _, names in os.walk(root) for name in names)
 
 
-def main(queue_path, spec_path, progress_path, lock_path):
-    # only one at a time
-    lock = worklog.hold_lock(lock_path)
-    if lock is None:
-        return
-
-    stopping = []
-    signal.signal(signal.SIGTERM, lambda *_: stopping.append(True))
-    # only now, so that the lock shows this is running during these slow imports
+def _export(spec, spec_path, queue, progress, progress_path, stopping):
+    """
+    Copies the photos and writes the site, and returns what to note about the export
+    """
     import thumbs
     from PIL import Image
 
-    os.nice(10)
-    with open(spec_path) as fh:
-        spec = json.load(fh)
-    with open(queue_path) as fh:
-        queue = [json.loads(line) for line in fh]
     root = spec['folder']
     content = os.path.join(root, spec['secret']) if spec.get('secret') else root
     os.makedirs(content, exist_ok=True)
@@ -328,17 +320,6 @@ def main(queue_path, spec_path, progress_path, lock_path):
             made = json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
         made = {}
-    progress = {
-        'pid': os.getpid(),
-        'slug': spec['slug'],
-        'state': 'running',
-        'started': int(time.time()),
-        'finished': None,
-        'total': len(queue),
-        'done': 0,
-        'failed': 0
-    }
-    worklog.save_json(progress_path, progress)
 
     kept = set()
     faces = _people_faces(thumbs, spec, content, kept)
@@ -373,12 +354,155 @@ def main(queue_path, spec_path, progress_path, lock_path):
         if spec.get('zip'):
             zipped = _zip(spec, content, progress, progress_path, stopping)
     worklog.save_json(made_path, made)
-    state = 'stopped' if stopping else 'finished'
+    return {
+        'state': 'stopped' if stopping else 'finished',
+        'photos': len(shown),
+        'failed': progress['failed'],
+        'bytes': _size(root),
+        'zip_signature': zipped
+    }
+
+
+def _publish_order(key):
+    # the photos first, then what lists them, and the page last, so that nobody gets a page whose
+    # photos aren't there yet
+    if key.endswith('/index.html'):
+        return 2
+    return 1 if key.endswith(('.js', '.css')) else 0
+
+
+def _publish(spec, spec_path, progress, progress_path, stopping):
+    """
+    Puts the export on R2 under its name, sending only what's new or changed since it was last
+    sent, then deleting what it no longer has.  Returns what to note about the export
+    """
+    import r2
+
+    root = spec['folder']
+    prefix = f"{spec['slug']}/"
+    # what was sent from each file, kept beside the folder
+    sent_path = f"{spec_path[:-len('.json')]}.r2.json"
+    try:
+        with open(sent_path) as fh:
+            sent = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        sent = {}
+    bucket = r2.Bucket()
+    remote = bucket.remote(prefix)
+    local = {}
+    for directory, _, names in os.walk(root):
+        for name in names:
+            if not name.endswith('.part'):
+                full = os.path.join(directory, name)
+                stat = os.stat(full)
+                key = prefix + os.path.relpath(full, root).replace(os.sep, '/')
+                local[key] = (full, [stat.st_size, stat.st_mtime_ns])
+    waiting = sorted(
+        (key for key, (_, stamp) in local.items() if remote.get(key) != stamp[0] or sent.get(key) != stamp),
+        key=lambda key: (_publish_order(key), key)
+    )
+    progress.update(phase='publishing', started=int(time.time()), done=0, total=sum(local[key][1][0] for key in waiting))
+    worklog.save_json(progress_path, progress)
+    saved = [time.time()]
+
+    def on_bytes(count):
+        progress['done'] += count
+        if time.time() - saved[0] > 2:
+            worklog.save_json(progress_path, progress)
+            saved[0] = time.time()
+
+    def within(key):
+        # a key without the export's name or a password's folder, which is the same before and
+        # after the password changes
+        first, _, rest = key[len(prefix):].partition('/')
+        return rest if SECRET_FOLDER.fullmatch(first) else key[len(prefix):]
+
+    # files on R2 already, by where they are in the export and what they were sent from, so that
+    # one that's only moved, as when the password changes, is copied there by R2 itself
+    already = {
+        (within(key), tuple(stamp)): key
+        for key, stamp in sent.items()
+        if remote.get(key) == stamp[0]
+    }
+    for key in waiting:
+        if stopping:
+            break
+        full, stamp = local[key]
+        source = already.get((within(key), tuple(stamp)))
+        if source and source != key:
+            bucket.copy(source, key)
+            on_bytes(stamp[0])
+            progress['copied'] = progress.get('copied', 0) + stamp[0]
+        else:
+            bucket.upload(full, key, on_bytes)
+        sent[key] = stamp
+        worklog.save_json(sent_path, sent)
+    if stopping:
+        return {}
+    # such as photos since hidden, or an earlier password's folder
+    bucket.delete(set(remote) - set(local))
+    worklog.save_json(sent_path, {key: stamp for key, (_, stamp) in local.items()})
+    return {'published': {'url': f"{bucket.address}/{prefix}index.html", 'at': int(time.time())}, 'publish_error': None}
+
+
+def _unpublish(spec, spec_path):
+    import r2
+
+    bucket = r2.Bucket()
+    bucket.delete(bucket.remote(f"{spec['slug']}/"))
+    try:
+        os.remove(f"{spec_path[:-len('.json')]}.r2.json")
+    except FileNotFoundError:
+        pass
+    return {'published': None, 'publish_error': None}
+
+
+def main(queue_path, spec_path, progress_path, lock_path):
+    # only one at a time
+    lock = worklog.hold_lock(lock_path)
+    if lock is None:
+        return
+
+    stopping = []
+    signal.signal(signal.SIGTERM, lambda *_: stopping.append(True))
+    os.nice(10)
     with open(spec_path) as fh:
         spec = json.load(fh)
-    spec.update(state=state, finished=int(time.time()), photos=len(shown), failed=progress['failed'], bytes=_size(root), zip_signature=zipped)
+    with open(queue_path) as fh:
+        queue = [json.loads(line) for line in fh]
+    # export: copy the photos, and publish them again if they're published; publish: only that;
+    # unpublish: take them off R2
+    action = spec.get('action', 'export')
+    progress = {
+        'pid': os.getpid(),
+        'slug': spec['slug'],
+        'state': 'running',
+        'started': int(time.time()),
+        'finished': None,
+        'total': len(queue),
+        'done': 0,
+        'failed': 0
+    }
+    worklog.save_json(progress_path, progress)
+
+    changes = {'state': 'finished'}
+    if action == 'export':
+        changes = _export(spec, spec_path, queue, progress, progress_path, stopping)
+    try:
+        if action == 'unpublish':
+            changes.update(_unpublish(spec, spec_path))
+        elif spec.get('publish') and not stopping:
+            changes.update(_publish(spec, spec_path, progress, progress_path, stopping))
+    except Exception as error:
+        # such as a token Cloudflare doesn't take: the export itself is fine
+        changes['publish_error'] = str(error) or type(error).__name__
+    if stopping:
+        changes['state'] = 'stopped'
+    with open(spec_path) as fh:
+        spec = json.load(fh)
+    spec.update(changes, finished=int(time.time()))
     worklog.save_json(spec_path, spec)
-    progress.update(state=state, finished=int(time.time()))
+    progress.update(state=changes['state'], finished=int(time.time()))
     worklog.save_json(progress_path, progress)
 
 
