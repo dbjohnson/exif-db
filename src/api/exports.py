@@ -306,10 +306,13 @@ def listing():
     found = []
     if os.path.isdir(EXPORTS_DIR):
         for name in os.listdir(EXPORTS_DIR):
-            if not name.endswith('.json') or name.endswith('.files.json'):
+            # each export's settings are <slug>.json; beside them are what was made from each
+            # file and what was sent to R2, <slug>.files.json and <slug>.r2.json
+            slug = name[:-len('.json')] if name.endswith('.json') else ''
+            if not SLUG.fullmatch(slug):
                 continue
-            spec = _load(name[:-len('.json')])
-            if not spec:
+            spec = _load(slug)
+            if not spec or spec.get('slug') != slug:
                 continue
             this_one = progress and progress.get('slug') == spec['slug']
             if spec.get('state') == 'running' and not (this_one and status['running']):
