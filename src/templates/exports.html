@@ -55,12 +55,12 @@
       </fieldset>
       <fieldset class="export-options">
         <legend>Files</legend>
-        <label><input type="radio" name="files" value="original" checked /> the original files</label>
-        <label><input type="radio" name="files" value="jpeg" /> JPEGs, turned and enhanced as shown here</label>
+        <label><input type="radio" name="files" value="jpeg" checked /> JPEGs, turned and enhanced as shown here</label>
+        <label><input type="radio" name="files" value="original" /> the original files</label>
       </fieldset>
-      <p class="hint">Original files are as they are in the library, which can include HEIC and raw files that some computers can't open. JPEGs can be opened anywhere, at full size, with their camera, date and place kept, and take longer to make.</p>
-      <label class="export-zip"><input id="export-zip" type="checkbox" checked /> Add a zip of everything, for the website to download in one go</label>
-      <p class="hint">Unzipped, it has the photos by year and month and the website, which works opened from the folder. It takes as much room again, in the storage volume and wherever the export is shared.</p>
+      <p class="hint">JPEGs can be opened anywhere, at full size, with their camera, date and place kept, and take about 1.5 seconds a photo to make. Original files are as they are in the library, which can include HEIC and raw files that some computers can't open.</p>
+      <label class="export-zip"><input id="export-zip" type="checkbox" checked /> Add a zip of the photos, for the website to download in one go</label>
+      <p class="hint">It has a folder for each year with a folder for each month in it. It takes as much room again as the photos, in the storage volume and wherever the export is shared.</p>
 
       <div class="actions">
         <button id="export-start" disabled>Start export</button>
@@ -70,7 +70,7 @@
 
       <h2>Exports</h2>
       <div id="export-list" class="export-list"><p class="hint">Loading…</p></div>
-      <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download gives as a zip. Update brings an export up to date with the library, adding photos since named and taking away those since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
+      <p class="hint">Each export is the folder named under it in <code>exports</code> in the storage volume, which Download folder gives as a zip, website and all, for putting it somewhere else. Update brings an export up to date with the library, adding photos since named and taking away those since hidden or deleted. To share one on S3, copy its folder into a bucket with static website hosting on and <code>index.html</code> as its index document, such as with <code>aws s3 sync exports/family-photos s3://your-bucket --delete</code>, and let anyone read its files but not list them. Without a password, anyone with the address can see every photo in it.</p>
     </div>
 
     <script>
@@ -253,7 +253,7 @@
         who.className = 'export-card-detail';
         const joined = new Intl.ListFormat('en', {type: 'conjunction'}).format(item.names);
         const whose = item.names.length < 2 ? `Photos of ${joined}` : item.match === 'all' ? `Photos with ${joined} together` : `Photos with any of ${joined}`;
-        const locked = [item.password ? 'a password' : '', item.zip ? 'a zip of everything' : ''].filter(Boolean).join(' and ');
+        const locked = [item.password ? 'a password' : '', item.zip ? 'a zip of the photos' : ''].filter(Boolean).join(' and ');
         who.textContent = `${whose}, as ${item.files === 'jpeg' ? 'JPEGs' : 'original files'}${locked ? `, with ${locked}` : ''}. In exports/${item.slug}.`;
         const state = document.createElement('div');
         state.className = 'export-card-detail';
@@ -277,7 +277,7 @@
           const download = document.createElement('a');
           download.className = 'link-button';
           download.href = `/api/exports/${encodeURIComponent(item.slug)}/download`;
-          download.textContent = 'Download';
+          download.textContent = 'Download folder';
           actions.append(open, download);
         }
         const button = (label, action, disabled) => {

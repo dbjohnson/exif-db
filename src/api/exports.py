@@ -205,14 +205,14 @@ def _with_password(spec, password):
     return spec
 
 
-def create(title, names, match, files, password='', zipped=True):
+def create(title, names, match, files=JPEG, password='', zipped=True):
     spec = _with_password({
         'slug': _make_slug(title),
         'title': title,
         'names': names,
         'match': match,
         'files': files,
-        # a zip of the whole folder in it, for downloading everything from the site
+        # a zip of the photos in it, for downloading them all from the site
         'zip': zipped,
         'created': int(time.time())
     }, password)
@@ -317,17 +317,6 @@ def site_file(slug, path):
     return full
 
 
-def ready_zip(slug):
-    """
-    The zip an export keeps of itself, if it has everything as it was last made, or None
-    """
-    spec = _load(slug)
-    if not spec or not spec.get('zip') or not spec.get('zip_signature') or spec.get('state') != 'finished':
-        return None
-    path = os.path.join(folder(slug), spec.get('secret') or '', f"{slug}.zip")
-    return path if os.path.isfile(path) else None
-
-
 class _Pipe:
     # where zipfile writes, handing on what it's written.  With no tell(), zipfile writes each
     # file's size after it, as it can't go back
@@ -349,8 +338,8 @@ class _Pipe:
 
 def zipped(slug):
     """
-    The export's folder as a zip, made as it's sent: there's nowhere to keep a second copy of
-    tens of gigabytes.  Stored, not compressed, as photos hardly compress
+    The export's whole folder as a zip, website and all, for putting it somewhere else, made as
+    it's sent: there's nowhere to keep another copy of tens of gigabytes.  Stored, not compressed, as photos hardly compress
     """
     root = folder(slug)
     pipe = _Pipe()
@@ -359,7 +348,7 @@ def zipped(slug):
         for directory, directories, names in os.walk(root):
             directories.sort()
             for name in sorted(names):
-                # nor the zip it keeps of itself
+                # nor the zip of its photos, which is in it already
                 if name.endswith('.part') or name == f"{slug}.zip":
                     continue
                 full = os.path.join(directory, name)

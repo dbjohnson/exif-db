@@ -190,7 +190,7 @@ def _write_site(spec, root, content, shown, faces, kept):
             }
             for photo in shown
         ],
-        # beside the photos, for downloading everything at once
+        # beside the photos, for downloading them all at once
         'zip': _zip_name(spec) if spec.get('zip') else None
     }
     # escaped to ASCII, as a file's name on disk needn't be valid text
@@ -252,20 +252,22 @@ def _tidy(root, kept):
             os.rmdir(directory)
 
 
-def _zip(spec, root, content, progress, progress_path, stopping):
+def _zip(spec, content, progress, progress_path, stopping):
     """
-    The whole folder as a zip, beside the photos, unless the one there already has everything as
-    it is now.  Stored, not compressed, as photos hardly compress.  Returns how it was left
+    The photos as a zip, beside them, unless the one there already has them as they are now: a
+    folder named after the export with the years in it and the months in those, and nothing of the
+    website.  Stored, not compressed, as photos hardly compress.  Returns how it was left
     """
     target = os.path.join(content, _zip_name(spec))
+    photos = os.path.join(content, 'photos')
     files = []
-    for directory, directories, names in os.walk(root):
+    for directory, directories, names in os.walk(photos):
         directories.sort()
         for name in sorted(names):
-            full = os.path.join(directory, name)
-            if full != target and not name.endswith('.part'):
+            if not name.endswith('.part'):
+                full = os.path.join(directory, name)
                 stat = os.stat(full)
-                files.append((full, os.path.relpath(full, root), stat.st_size, stat.st_mtime_ns))
+                files.append((full, os.path.relpath(full, photos), stat.st_size, stat.st_mtime_ns))
     signature = hashlib.sha1(json.dumps([file[1:] for file in files]).encode('utf-8', 'surrogateescape')).hexdigest()
     if spec.get('zip_signature') == signature and os.path.exists(target):
         return signature
@@ -366,7 +368,7 @@ def main(queue_path, spec_path, progress_path, lock_path):
         made = {file: signature for file, signature in made.items() if os.path.join(content, file) in kept}
         worklog.save_json(made_path, made)
         if spec.get('zip'):
-            zipped = _zip(spec, root, content, progress, progress_path, stopping)
+            zipped = _zip(spec, content, progress, progress_path, stopping)
     worklog.save_json(made_path, made)
     state = 'stopped' if stopping else 'finished'
     with open(spec_path) as fh:

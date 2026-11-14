@@ -1472,8 +1472,8 @@ class ExportPassword(BaseModel):
 
 class ExportRequest(ExportPeople, ExportPassword):
     title: str = Field(min_length=1, max_length=80)
-    files: Literal['original', 'jpeg'] = 'original'
-    # a zip of everything in the export, for its site to offer
+    files: Literal['original', 'jpeg'] = 'jpeg'
+    # a zip of the export's photos, for its site to offer
     zip: bool = True
 
 
@@ -1554,11 +1554,6 @@ def _download_export(slug: str):
     spec = exports.get(slug)
     if not spec or not os.path.isdir(exports.folder(slug)):
         raise HTTPException(status_code=404)
-    # the export's own zip where it's up to date, which a browser can resume; otherwise one made
-    # as it's sent
-    ready = exports.ready_zip(slug)
-    if ready:
-        return FileResponse(ready, media_type='application/zip', filename=f"{slug}.zip")
     return StreamingResponse(
         exports.zipped(slug),
         media_type='application/zip',
