@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="/static/vendor/font-awesome/css/font-awesome.min.css">
     <script src="/static/toast.js"></script>
     <script src="/static/faces.js"></script>
+    <script src="/static/zoom.js"></script>
     <script src="/static/info.js"></script>
     <script src="/static/timeline.js"></script>
     {% if person %}<script src="/static/people.js"></script>{% endif %}
@@ -86,6 +87,10 @@
       const rawUrl = photo => `/api/raw${encodePath(photo.raw)}${lookQuery(photo)}`;
       // what the viewer shows of a photo, which is its raw file if that's been asked for
       const viewerUrl = photo => showingRaw && photo.raw ? rawUrl(photo) : photoUrl('image', photo);
+      // the same at full size, for zooming into.  A photo in the trash only has its copy for the screen
+      const fullUrl = photo => IN_TRASH ? null : `/api/full${encodePath(showingRaw && photo.raw ? photo.raw : photo.path)}${lookQuery(photo)}`;
+      // zooming into the open photo, once the page has loaded
+      let viewerZoom = null;
 
       function renderTile(photo) {
         const tile = document.createElement('a');
@@ -843,12 +848,14 @@
         const isCurrent = () => photo === current && rotation === photo.rotation && url === viewerUrl(photo);
         const image = document.getElementById('viewer-image');
         const missing = document.getElementById('viewer-missing');
+        viewerZoom?.reset();
         image.hidden = false;
         missing.hidden = true;
         image.src = photoUrl('thumb', photo);
         const large = new Image();
         large.onload = () => {
-          if (isCurrent()) {
+          // zooming in may already have brought the photo at full size
+          if (isCurrent() && !viewerZoom?.showingFull()) {
             image.src = large.src;
           }
         };
@@ -1430,6 +1437,7 @@
         document.body.classList.remove('viewing');
         document.getElementById('viewer').hidden = true;
         document.getElementById('viewer-image').removeAttribute('src');
+        viewerZoom?.reset();
       }
 
       function closeViewer() {
@@ -1870,6 +1878,12 @@
           showInfo(current.path);
         } else if (event.key === 'e' && !IN_TRASH) {
           toggleEnhanced();
+        } else if (event.key === '+' || event.key === '=') {
+          viewerZoom?.zoomBy(1.5);
+        } else if (event.key === '-') {
+          viewerZoom?.zoomBy(1 / 1.5);
+        } else if (event.key === '0') {
+          viewerZoom?.fit();
         } else if (event.key === 'ArrowLeft') {
           step(-1);
         } else if (event.key === 'ArrowRight') {
@@ -1915,11 +1929,15 @@
 
         const viewer = document.getElementById('viewer');
         let swipeStart = null;
+        viewerZoom = photoZoom(viewer, document.getElementById('viewer-image'), {fullUrl: () => current && fullUrl(current)});
         document.getElementById('viewer-image').addEventListener('load', fitFaceLayer);
-        window.addEventListener('resize', fitFaceLayer);
+        window.addEventListener('resize', () => {
+          fitFaceLayer();
+          viewerZoom.refit();
+        });
         viewer.addEventListener('touchstart', event => {
-          // the row of faces scrolls sideways by itself
-          swipeStart = event.touches.length === 1 && !event.target.closest('.viewer-people')
+          // the row of faces scrolls sideways by itself, and a zoomed photo moves instead
+          swipeStart = event.touches.length === 1 && !event.target.closest('.viewer-people') && !viewerZoom.zoomed()
             ? event.touches[0].clientX
             : null;
         }, {passive: true});

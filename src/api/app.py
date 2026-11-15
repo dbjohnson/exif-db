@@ -294,6 +294,12 @@ def _raw(path: str, rotate: int = Depends(rotation_param), enhance: bool = False
     return cached_image(thumbs.developed, path, rotate, enhance)
 
 
+# not async, for the same reason.  A photo or raw file at full size, for zooming into in the viewer
+@app.get("/api/full{path:path}")
+def _full(path: str, rotate: int = Depends(rotation_param), enhance: bool = False):
+    return cached_image(thumbs.zoomable, path, rotate, enhance)
+
+
 @app.get("/api/original{path:path}")
 def _original(path: str):
     path = library_path(path)

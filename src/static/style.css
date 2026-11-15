@@ -1660,14 +1660,42 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 10;
+  overflow: hidden;
   background: #000;
 }
 
+/* zoom.js zooms and moves the photo itself, and the page doesn't zoom with it */
 .library-viewer > img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transform-origin: 0 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.library-viewer #viewer-boxes,
+.library-viewer .face-box {
+  touch-action: none;
+}
+
+.library-viewer.zoomed > img {
+  cursor: grab;
+}
+
+.library-viewer.zoomed.panning > img {
+  cursor: grabbing;
+}
+
+/* the boxes are drawn for the whole photo, so they go while it's zoomed */
+.library-viewer.zoomed #viewer-boxes {
+  visibility: hidden;
+}
+
+.zoom-animating {
+  transition: transform 0.2s ease;
 }
 
 /* the row of faces sits under the photo, so that it doesn't cover anyone in it */
