@@ -1366,14 +1366,28 @@ async def _people(request: Request, tab: Literal['suggested', 'groups', 'map'] =
     )
 
 
-def faces_by_year(faces):
+def faces_by_year(faces, photos=None):
     # which year each (face, photo)'s photo is from, going by the same dates as the person's photos
-    taken = {photo['id']: photo_year(photo) for photo in exif.photos_with_ids(list({photo for _, photo in faces}))}
+    taken = {photo['id']: photo_year(photo) for photo in (photos_of_faces(faces) if photos is None else photos)}
     by_year = {}
     for face, photo in faces:
         if photo in taken:
             by_year.setdefault(taken[photo], []).append(face)
     return by_year
+
+
+def photos_of_faces(faces):
+    return exif.photos_with_ids(list({photo for _, photo in faces}))
+
+
+def faces_newest_first(faces, photos):
+    """
+    (face, photo)s by when their photo was taken, newest first, with undated photos and any not in
+    the library last.  Faces from the same moment keep the order they came in.
+    """
+    taken = {photo['id']: photo['taken'] for photo in photos if photo_year(photo) != UNDATED_YEAR}
+    dated = sorted((pair for pair in faces if pair[1] in taken), key=lambda pair: taken[pair[1]], reverse=True)
+    return dated + [pair for pair in faces if pair[1] not in taken]
 
 
 def years_newest_first(by_year):
@@ -1382,7 +1396,11 @@ def years_newest_first(by_year):
 
 
 def people_faces_page(request, title, faces, url, year=None, photos_url=None, name=None, group=None, page=1, comparing=None, show_map=False):
-    by_year = faces_by_year(faces)
+    photos = photos_of_faces(faces)
+    # a person's faces go by date, while a group's stay best first, to help say who they are
+    if name:
+        faces = faces_newest_first(faces, photos)
+    by_year = faces_by_year(faces, photos)
     # a year whose faces have all gone by now leaves all of them
     shown_year = year if year in by_year and not comparing else None
     face_ids = by_year[shown_year] if shown_year else [face for face, _ in faces]
