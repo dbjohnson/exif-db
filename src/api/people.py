@@ -414,6 +414,26 @@ def chosen_cover(name):
     return row[0] if row else None
 
 
+def cover_face(name):
+    """
+    The face standing for a person: the one chosen, or else their biggest, clearest one, as /people
+    shows it.  None for someone with no faces
+    """
+    chosen = chosen_cover(name)
+    if chosen:
+        return chosen
+    row = _db().execute(
+        f"""
+        SELECT faces.id FROM names JOIN faces ON faces.id = names.face_id
+        WHERE names.name = ? AND {SHOWN}
+        ORDER BY pixels * score DESC
+        LIMIT 1
+        """,
+        (name,)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def set_cover(name, face_id):
     """
     Chooses the face standing for a person, or None to go back to automatic.  Returns the one chosen

@@ -9,8 +9,9 @@
 </span>
 {% endfor %}
 {% for name in chosen_people %}
-<span class="filter-chip">
-  <i class="fa fa-user" aria-hidden="true"></i>
+{% set cover = person_cover(name) %}
+<span class="filter-chip{{ ' has-face' if cover }}">
+  {% if cover %}<img class="filter-chip-face" src="/api/face/{{ cover }}" alt="" />{% else %}<i class="fa fa-user" aria-hidden="true"></i>{% endif %}
   {{ name }}
   <button type="button" class="filter-remove" data-kind="person" data-name="{{ name }}" title="Clear" aria-label="Take off {{ name }}">×</button>
 </span>

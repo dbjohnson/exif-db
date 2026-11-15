@@ -41,6 +41,8 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # for a person's Edit panel, which is on more than one page
 templates.env.globals['is_family'] = lambda name: name in people.family()
 templates.env.globals['family_of'] = lambda name: {'parents': people.parents_of(name), **people.relatives(name)}
+# for the picture on a person's filter chip
+templates.env.globals['person_cover'] = lambda name: people.cover_face(name) if people.available() else None
 # for suggesting tags wherever photos can be tagged
 templates.env.globals['tag_names'] = tags.names
 templates.env.globals['earliest_year'] = exif.LIBRARY_EARLIEST_YEAR

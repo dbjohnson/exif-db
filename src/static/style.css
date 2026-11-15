@@ -568,6 +568,19 @@ button:disabled {
   font-size: 13px;
 }
 
+/* a person's chip leads with their cover face in place of the icon */
+.filter-chip.has-face {
+  padding-left: 3px;
+}
+
+.filter-chip-face {
+  width: calc(var(--control-height) - 8px);
+  height: calc(var(--control-height) - 8px);
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
 /* bigger than it looks, as it's the way to clear a filter */
 .library-toolbar .filter-chip button,
 .filter-chip button {
