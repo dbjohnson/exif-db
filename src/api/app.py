@@ -1159,18 +1159,33 @@ async def check_photos_after_scans():
         try:
             # not straight after people, whose worker may not have its lock yet
             if not started:
-                find_new_dogs()
+                started = find_new_dogs()
         except Exception as e:
             logger.warning(f"Can't start finding dogs: {e}")
+        try:
+            if not started:
+                started = find_people_in_new_videos()
+        except Exception as e:
+            logger.warning(f"Can't start finding people in videos: {e}")
         try:
             if not started:
                 await warm_up_people()
         except Exception as e:
             logger.warning(f"Can't get the people page ready: {e}")
+        try:
+            if not started:
+                await name_people_in_videos()
+        except Exception as e:
+            logger.warning(f"Can't name the people in videos: {e}")
 
 
 _people_checked = {}
 _people_warmed = {}
+
+
+def jobs_running():
+    # the jobs that each want all the processor they can get, so that only one runs at a time
+    return scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running() or people.video_job.running()
 
 
 def _finished(progress):
@@ -1183,10 +1198,15 @@ async def warm_up_people():
     and once after starting, so that /people doesn't wait a minute or two for them.  They're worked
     out again as names change, but only when someone looks
     """
-    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    busy = jobs_running()
     if busy or not people.available():
         return
-    key = (_finished(scans.last_result()), _finished(people.job.progress()), _finished(people.dogs_job.progress()))
+    key = (
+        _finished(scans.last_result()),
+        _finished(people.job.progress()),
+        _finished(people.dogs_job.progress()),
+        _finished(people.video_job.progress())
+    )
     if _people_warmed.get('key') == key:
         return
 
@@ -1204,7 +1224,7 @@ def find_new_people():
     Once the library has been gone through, that is: the first time takes days here, so it's only
     started on request
     """
-    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    busy = jobs_running()
     if busy or not people.has_scanned():
         return False
     stamp = exif.faces_stamp()
@@ -1222,18 +1242,51 @@ _dogs_checked = {}
 def find_new_dogs():
     """
     Finds the dogs in photos that haven't been looked at for them, after the faces in them have been
-    found, as both want the processor.  Like finding people, only once the library has been gone
-    through, which was done for this one on a faster computer
+    found, as both want the processor, and says whether it started.  Like finding people, only once
+    the library has been gone through, which was done for this one on a faster computer
     """
-    busy = scans.running() or faces.job.running() or people.job.running() or people.dogs_job.running()
+    busy = jobs_running()
     if busy or not people.has_looked_for_dogs():
-        return
+        return False
     stamp, _ = exif.shown_photos()
     if _dogs_checked.get('stamp') != stamp:
         _dogs_checked['stamp'] = stamp
         photos = people.to_look_for_dogs(exif.shown_photo_list())
         if photos:
-            people.look_for_dogs(photos)
+            return people.look_for_dogs(photos)
+    return False
+
+
+_videos_checked = {}
+
+
+def find_people_in_new_videos():
+    """
+    Finds the people in videos that haven't been looked at yet, after the jobs on photos, as they all
+    want the processor, and says whether it started.  Like finding people, only once every video has been gone through, which was
+    done for this library on a faster computer
+    """
+    if jobs_running() or not people.has_looked_in_videos():
+        return False
+    clips = movies.clips()
+    # so that a video that can't be read is tried again only once the videos have changed
+    stamp = [clip['id'] for clip in clips]
+    if _videos_checked.get('stamp') != stamp:
+        _videos_checked['stamp'] = stamp
+        videos = people.videos_to_look_in(clips)
+        if videos:
+            return people.look_in_videos(videos)
+    return False
+
+
+async def name_people_in_videos():
+    """
+    Works out who's in videos again once names in photos have changed, while nothing else is running
+    """
+    if jobs_running() or not people.available() or not people.has_looked_in_videos():
+        return
+    update_hidden_faces()
+    await asyncio.to_thread(people.name_videos_again)
 
 
 def update_hidden_faces():
@@ -1497,6 +1550,7 @@ async def _person(request: Request, name: str):
         back_url="/people",
         back_label="People",
         faces_url=f"/people/{quote(name)}/faces",
+        videos_url=f"/movies?{urlencode({'person': name})}" if people.has_videos(name) else None,
         person=name
     )
 
@@ -2185,34 +2239,56 @@ async def _stop_faces():
     return "stopping"
 
 
-def movie_filters(tag, place_kind, place_key):
-    # as the library's, with no people, as nobody's found in movies
+def movie_filters(tag, person, place_kind, place_key):
+    # as the library's, though tags and people are always all needed
     place = places.describe(place_kind, place_key) if place_kind and place_key else None
-    tag = [name for name in tag if name]
+    tag, person = [name for name in tag if name], [name for name in person if name]
     return {
         key: value
-        for key, value in (('tag', tag), ('place_kind', place and place_kind), ('place_key', place and place_key))
+        for key, value in (('tag', tag), ('person', person), ('place_kind', place and place_kind), ('place_key', place and place_key))
         if value
     }, place
 
 
 @app.get("/movies")
-async def _movies_page(request: Request, tag: list[str] = Query(default=[]), place_kind: str = None, place_key: str = None):
-    filters, place = movie_filters(tag, place_kind, place_key)
+async def _movies_page(
+    request: Request,
+    tag: list[str] = Query(default=[]),
+    person: list[str] = Query(default=[]),
+    place_kind: str = None,
+    place_key: str = None
+):
+    filters, place = movie_filters(tag, person, place_kind, place_key)
     return templates.TemplateResponse(
         request=request,
         name="movies.html",
-        context={"filters": filters, "place": place, "filter_tags": filters.get('tag', []), "tag_names_shown": tags.names()}
+        context={
+            "filters": filters,
+            "place": place,
+            "filter_tags": filters.get('tag', []),
+            "filter_people": filters.get('person', []),
+            "tag_names_shown": tags.names(),
+            # only those found in a video, so that choosing one always finds something
+            "known_names": people.names_in_videos() if people.available() else []
+        }
     )
 
 
 @app.get("/api/movies")
-async def _movies(tag: list[str] = Query(default=[]), place_kind: str = None, place_key: str = None):
-    filters, _ = movie_filters(tag, place_kind, place_key)
-    clips = movies.clips()
+async def _movies(
+    tag: list[str] = Query(default=[]),
+    person: list[str] = Query(default=[]),
+    place_kind: str = None,
+    place_key: str = None
+):
+    filters, _ = movie_filters(tag, person, place_kind, place_key)
+    who = people.video_people() if people.available() else {}
+    clips = [{**clip, 'people': who.get(clip['id'], [])} for clip in movies.clips()]
     for name in filters.get('tag', []):
         tagged = set(tags.photo_ids(name))
         clips = [clip for clip in clips if clip['id'] in tagged]
+    for name in filters.get('person', []):
+        clips = [clip for clip in clips if name in clip['people']]
     if filters.get('place_kind'):
         located = places.paths_at(filters['place_kind'], filters['place_key'])
         clips = [clip for clip in clips if clip['path'] in located]

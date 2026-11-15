@@ -20,6 +20,7 @@ from api.people_db import from_db, to_db
 logger = logging.getLogger('uvicorn.error')
 job = Job('people', 'find_people.py')
 dogs_job = Job('dogs', 'find_dogs.py')
+video_job = Job('video_people', 'find_video_people.py')
 # a face that's been looked at and isn't anyone worth naming
 NOBODY = ''
 # below these, a face isn't good enough to compare or to offer for naming: they're mostly blurs,
@@ -78,6 +79,9 @@ DOUBT_BATCH = 1000
 # a face looks like someone only with at least this many of those being them, as one close face can
 # be a coincidence.  Hiding a whole person's names, 5% of their faces still pass for a relative
 LIKE_NEIGHBOURS = 3
+# the people in videos are worked out again from the names in photos once those have changed, but no
+# more often than this, as it takes the NAS a minute or two
+VIDEO_NAMING_SECS = 3600
 # what Rekognition's results left behind, for the names given then to be carried over
 OLD_FACES = '/storage/rekognition/indexed.jsonl'
 OLD_NAMES_CSV = '/storage/people.csv'
@@ -243,6 +247,8 @@ def rename(old, new):
     _record_names([(face_id, new) for face_id in members])
     with _db() as db:
         db.execute('UPDATE OR REPLACE not_person SET name = ? WHERE name = ?', (new, old))
+        # rather than waiting for videos to be named again
+        db.execute('UPDATE video_names SET name = ? WHERE name = ?', (new, old))
     if cover_face and not joining_with_cover:
         with _db() as db:
             db.execute('INSERT OR REPLACE INTO covers (name, face_id) VALUES (?, ?)', (new, cover_face))
@@ -388,6 +394,8 @@ def remove(name):
     members = _named(name)
     if not members:
         return None
+    with _db() as db:
+        db.execute('DELETE FROM video_names WHERE name = ?', (name,))
     return clear_names(members)
 
 
@@ -1354,6 +1362,76 @@ def to_look_for_dogs(photos):
 
 def look_for_dogs(photos):
     return dogs_job.start(photos, people_db.PATH)
+
+
+def has_looked_in_videos():
+    return _db().execute('SELECT 1 FROM videos_scanned LIMIT 1').fetchone() is not None
+
+
+def videos_to_look_in(clips):
+    """
+    Those of these videos that haven't been looked at for faces yet, as the job wants them
+    """
+    scanned = people_db.scanned_videos(_db())
+    return [
+        {'id': clip['id'], 'path': clip['path'], 'duration': clip['duration'], 'rotation': clip['rotation']}
+        for clip in clips if clip['id'] not in scanned
+    ]
+
+
+def look_in_videos(clips):
+    return video_job.start(clips, people_db.PATH)
+
+
+def _video_naming_stamp(db):
+    # changes when a name, a face or which photos are shown does, or more videos have been looked at
+    return json.dumps([
+        db.execute('SELECT MAX(rowid) FROM name_history').fetchone()[0],
+        db.execute('SELECT MAX(rowid) FROM faces').fetchone()[0],
+        db.execute('SELECT COUNT(*) FROM hidden_photos').fetchone()[0],
+        db.execute('SELECT COUNT(*) FROM videos_scanned').fetchone()[0]
+    ])
+
+
+def name_videos_again():
+    """
+    Works out who's in every video again if names in photos have changed since the last time, and
+    that was long enough ago.  Returns whether it did.  Slow, so for a thread of its own, with a
+    connection of its own
+    """
+    if time.time() - _cache.get('videos_named_at', 0) < VIDEO_NAMING_SECS:
+        return False
+    db = people_db.connect()
+    try:
+        stamp = _video_naming_stamp(db)
+        saved = db.execute("SELECT value FROM meta WHERE key = 'video_names_stamp'").fetchone()
+        if saved and saved[0] == stamp:
+            return False
+        _cache['videos_named_at'] = time.time()
+        people_db.name_videos(db)
+        with db:
+            db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('video_names_stamp', ?)", (stamp,))
+        return True
+    finally:
+        db.close()
+
+
+def video_people():
+    """
+    Who's in each video they're in, as {video id: [name]}
+    """
+    found = {}
+    for video_id, name in _db().execute('SELECT video_id, name FROM video_names ORDER BY name'):
+        found.setdefault(from_db(video_id), []).append(name)
+    return found
+
+
+def names_in_videos():
+    return [row[0] for row in _db().execute('SELECT DISTINCT name FROM video_names ORDER BY name')]
+
+
+def has_videos(name):
+    return _db().execute('SELECT 1 FROM video_names WHERE name = ? LIMIT 1', (name,)).fetchone() is not None
 
 
 def _overlap(first, second):
