@@ -1817,6 +1817,12 @@ button:disabled {
   text-decoration: none;
 }
 
+.person-chip {
+  gap: 6px;
+  padding-right: 10px;
+  color: var(--muted);
+}
+
 .tag-chip button {
   align-self: stretch;
   padding: 0 10px;

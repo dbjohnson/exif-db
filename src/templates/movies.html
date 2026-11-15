@@ -823,7 +823,20 @@
           if (clip !== clips[current]) {
             return;
           }
-          list.replaceChildren(...tagged.map(name => {
+          // who's in it, found automatically, so there's nothing to take off
+          const people = clip.people.map(name => {
+            const chip = document.createElement('span');
+            chip.className = 'tag-chip person-chip';
+            const icon = document.createElement('i');
+            icon.className = 'fa fa-user';
+            icon.setAttribute('aria-hidden', 'true');
+            const link = document.createElement('a');
+            link.href = `/movies?${new URLSearchParams({person: name})}`;
+            link.textContent = name;
+            chip.append(icon, link);
+            return chip;
+          });
+          list.replaceChildren(...people, ...tagged.map(name => {
             const chip = document.createElement('span');
             chip.className = 'tag-chip';
             const link = document.createElement('a');
@@ -1142,10 +1155,10 @@
         <select id="jump-month" aria-label="Go to a month"></select>
       </span>
       {% from '_filters.html' import who_chips, who_select %}
-      {{ who_chips(filter_tags, []) }}
-      <label class="filter-pick" title="Show only videos with a tag">
+      {{ who_chips(filter_tags, filter_people) }}
+      <label class="filter-pick" title="{{ 'Show only videos with a tag or person' if known_names else 'Show only videos with a tag' }}">
         <i class="fa fa-tag" aria-hidden="true"></i>
-        {{ who_select('filter-tag', tag_names_shown, [], filter_tags, [], false) }}
+        {{ who_select('filter-tag', tag_names_shown, known_names, filter_tags, filter_people, known_names | length > 0) }}
       </label>
       {% if place %}
       <span class="filter-chip">
@@ -1162,7 +1175,7 @@
     </div>
     </header>
     <div class="library-layout">
-    {% set filtering = true %}{% set side_people = false %}{% set filter_people = [] %}{% set side_folders = false %}{% include '_sidebar.html' %}
+    {% set filtering = true %}{% set side_people = known_names | length > 0 %}{% set all_needed = true %}{% set side_folders = false %}{% include '_sidebar.html' %}
     <main class="library-main">
     <div id="empty" class="no-images" hidden>
       {% if filters %}No videos match these filters.{% else %}No videos yet.{% endif %} They're added at the end of each scan, which can be started from <a href="/manage">Manage</a>.

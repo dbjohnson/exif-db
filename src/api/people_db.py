@@ -31,6 +31,14 @@ NAME_NEIGHBOURS = 10
 NAME_SIMILARITY = 0.45
 NAME_VOTES = 6
 NAME_VOTE_SHARE = 0.9
+# faces from two frames of a video are taken to be the same person at this similarity, and a person
+# in a video is named only when the faces of at least this many frames are each named
+# them by the rule for photos' faces, and none is named anyone else.  On a sample of 200 videos, half
+# the people named from one frame had no other frame named at all
+VIDEO_SIMILARITY = 0.5
+VIDEO_NAMED_FRAMES = 2
+# how many video faces are compared with the library's at once, which takes about 300MB
+VIDEO_BATCH = 1000
 # who a face is when it's been looked at and isn't anyone worth naming
 NOBODY = ''
 # someone said to be in a photo without a face to go on, such as one turned away, is kept as a face
@@ -101,6 +109,31 @@ SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS animals_photo ON animals (photo_id);
     CREATE TABLE IF NOT EXISTS animals_scanned (photo_id BLOB PRIMARY KEY, animals INTEGER NOT NULL, at INTEGER NOT NULL);
+    -- faces in frames taken from videos, a few seconds apart.  They're kept apart from photos' faces so
+    -- that many frames of one moment don't swamp the groups, and are only ever named automatically.
+    -- person is which of the video's people a face is, by how alike its faces are, and null for one too
+    -- poor to compare
+    CREATE TABLE IF NOT EXISTS video_faces (
+        id TEXT PRIMARY KEY,
+        video_id BLOB NOT NULL,
+        -- seconds into the video
+        at REAL NOT NULL,
+        rotation INTEGER NOT NULL,
+        left REAL NOT NULL,
+        top REAL NOT NULL,
+        width REAL NOT NULL,
+        height REAL NOT NULL,
+        score REAL NOT NULL,
+        pixels REAL NOT NULL,
+        norm REAL NOT NULL,
+        embedding BLOB NOT NULL,
+        person INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS video_faces_video ON video_faces (video_id);
+    CREATE TABLE IF NOT EXISTS videos_scanned (video_id BLOB PRIMARY KEY, faces INTEGER NOT NULL, at INTEGER NOT NULL);
+    -- who each of a video's people is, worked out again from the names in photos as those change
+    CREATE TABLE IF NOT EXISTS video_names (video_id BLOB NOT NULL, person INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY (video_id, person));
+    CREATE INDEX IF NOT EXISTS video_names_name ON video_names (name);
 """
 
 
@@ -291,3 +324,191 @@ def name_new_faces(connection, face_ids):
         chosen.append((rows[place][0], name))
     record_names(connection, chosen)
     return len(chosen)
+
+
+def _video_people(found):
+    """
+    Which of a video's faces are the same person, as a number for each usable face and None for the
+    rest.  The most alike faces are joined first, and never two from the same frame, as nobody is in
+    a frame twice
+    """
+    usable = [place for place, face in enumerate(found) if face['score'] >= MIN_SCORE and face['pixels'] >= MIN_PIXELS]
+    people = [None] * len(found)
+    if not usable:
+        return people
+    vectors = np.stack([found[place]['embedding'] for place in usable])
+    similar = vectors @ vectors.T
+    parent = list(range(len(usable)))
+    frames = {each: {found[place]['at']} for each, place in enumerate(usable)}
+
+    def root(each):
+        while parent[each] != each:
+            parent[each] = parent[parent[each]]
+            each = parent[each]
+        return each
+    pairs = sorted(
+        ((similar[first, second], first, second)
+         for first in range(len(usable)) for second in range(first + 1, len(usable))
+         if similar[first, second] >= VIDEO_SIMILARITY),
+        reverse=True
+    )
+    for _, first, second in pairs:
+        first, second = root(first), root(second)
+        if first == second or frames[first] & frames[second]:
+            continue
+        parent[second] = first
+        frames[first] |= frames.pop(second)
+    numbers = {}
+    for each, place in enumerate(usable):
+        people[place] = numbers.setdefault(root(each), len(numbers))
+    return people
+
+
+def save_video(connection, video, found):
+    """
+    A video's faces, each with when in the video it was found, and that it's been looked at, together
+    """
+    people = _video_people(found)
+    with connection:
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO video_faces
+                (id, video_id, at, rotation, left, top, width, height, score, pixels, norm, embedding, person)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    face_id(f"{video['id']}@{face['at']:.3f}", face),
+                    to_db(video['id']),
+                    face['at'],
+                    video['rotation'],
+                    face['left'],
+                    face['top'],
+                    face['width'],
+                    face['height'],
+                    face['score'],
+                    face['pixels'],
+                    face['norm'],
+                    face['embedding'].tobytes(),
+                    person
+                )
+                for face, person in zip(found, people)
+            ]
+        )
+        connection.execute(
+            'INSERT OR REPLACE INTO videos_scanned (video_id, faces, at) VALUES (?, ?, ?)',
+            (to_db(video['id']), len(found), int(time.time()))
+        )
+
+
+def scanned_videos(connection):
+    return {from_db(row[0]) for row in connection.execute('SELECT video_id FROM videos_scanned')}
+
+
+def import_videos(connection, path):
+    """
+    Adds the video faces in another file like this one, such as from a first scan on a faster computer
+    """
+    connection.execute('ATTACH DATABASE ? AS other', (path,))
+    try:
+        with connection:
+            connection.execute('INSERT OR IGNORE INTO video_faces SELECT * FROM other.video_faces')
+            connection.execute('INSERT OR IGNORE INTO videos_scanned SELECT * FROM other.videos_scanned')
+    finally:
+        connection.execute('DETACH DATABASE other')
+
+
+def _name_by_photo_rule(similar, clusters, named, who, group_names):
+    """
+    What the rule for naming new photos' faces calls a video face, from how alike it is to each usable
+    face in photos, or NOBODY
+    """
+    nearest = np.argpartition(-similar, CLUSTER_NEIGHBOURS - 1)[:CLUSTER_NEIGHBOURS]
+    votes = Counter()
+    for place in nearest:
+        if similar[place] >= CLUSTER_SIMILARITY:
+            votes[clusters[place]] += float(similar[place])
+    counts = group_names.get(max(votes, key=votes.get)) if votes else None
+    if not counts:
+        return NOBODY
+    name, count = counts.most_common(1)[0]
+    if count < NAME_GROUP_FACES or count < NAME_GROUP_SHARE * sum(counts.values()):
+        return NOBODY
+    similar_named = similar[named]
+    closest = np.argpartition(-similar_named, NAME_NEIGHBOURS - 1)[:NAME_NEIGHBOURS]
+    votes, weights = 0, Counter()
+    for place in closest:
+        weight = float(similar_named[place])
+        if weight >= NAME_SIMILARITY:
+            weights[who[named[place]]] += weight
+            votes += who[named[place]] == name
+    if votes < NAME_VOTES or weights[name] < NAME_VOTE_SHARE * sum(weights.values()):
+        return NOBODY
+    return name
+
+
+def name_videos(connection, video_ids=None):
+    """
+    Works out who the people in these videos are, or in every video, from the names faces in photos
+    have now, and returns how many were named.  A person is named when the faces of at least
+    VIDEO_NAMED_FRAMES frames are each named them by the rule for photos, and no frame says otherwise;
+    and nobody is named twice in one video
+    """
+    rows = connection.execute(
+        f"""
+        SELECT faces.cluster, COALESCE(names.name, ''), faces.embedding
+        FROM faces LEFT JOIN names ON names.face_id = faces.id
+        WHERE {_usable_where()} AND faces.cluster IS NOT NULL AND (names.name IS NULL OR names.name <> ?)
+            AND faces.photo_id NOT IN (SELECT photo_id FROM hidden_photos)
+        """,
+        (NOBODY,)
+    ).fetchall()
+    clusters = np.array([row[0] for row in rows])
+    who = np.array([row[1] for row in rows], dtype=object)
+    named = np.flatnonzero(who != '')
+    group_names = {}
+    for place in named:
+        group_names.setdefault(clusters[place], Counter())[who[place]] += 1
+    embeddings = np.frombuffer(b''.join(row[2] for row in rows), dtype=np.float32).reshape(-1, EMBEDDING_SIZE)
+    del rows
+    # only people seen in enough frames could be named
+    chosen = 'video_id IN (SELECT video_id FROM chosen_videos)' if video_ids is not None else 'true'
+    with connection:
+        connection.execute('CREATE TEMP TABLE IF NOT EXISTS chosen_videos (video_id BLOB PRIMARY KEY)')
+        connection.execute('DELETE FROM chosen_videos')
+        connection.executemany('INSERT OR IGNORE INTO chosen_videos VALUES (?)', [(to_db(each),) for each in video_ids or []])
+    faces = connection.execute(
+        f"""
+        SELECT video_id, person, embedding FROM video_faces
+        WHERE person IS NOT NULL AND {chosen} AND (video_id, person) IN (
+            SELECT video_id, person FROM video_faces WHERE person IS NOT NULL AND {chosen}
+            GROUP BY video_id, person HAVING COUNT(*) >= ?
+        )
+        """,
+        (VIDEO_NAMED_FRAMES,)
+    ).fetchall()
+    found = {}
+    if len(named) >= max(NAME_NEIGHBOURS, CLUSTER_NEIGHBOURS) and faces:
+        for start in range(0, len(faces), VIDEO_BATCH):
+            part = faces[start:start + VIDEO_BATCH]
+            vectors = np.frombuffer(b''.join(row[2] for row in part), dtype=np.float32).reshape(-1, EMBEDDING_SIZE)
+            similar = vectors @ embeddings.T
+            for row, (video_id, person, _) in enumerate(part):
+                name = _name_by_photo_rule(similar[row], clusters, named, who, group_names)
+                found.setdefault((video_id, person), Counter())[name] += 1
+    chosen_names = []
+    taken = {}
+    # the person with the most frames named first, should two in a video be named the same
+    for (video_id, person), counts in sorted(found.items(), key=lambda item: item[1][NOBODY] - item[1].total()):
+        names = [name for name in counts if name != NOBODY]
+        if len(names) != 1 or counts[names[0]] < VIDEO_NAMED_FRAMES:
+            continue
+        if names[0] in taken.setdefault(video_id, set()):
+            continue
+        taken[video_id].add(names[0])
+        chosen_names.append((video_id, person, names[0]))
+    with connection:
+        connection.execute(f'DELETE FROM video_names WHERE {chosen}')
+        connection.executemany('INSERT INTO video_names (video_id, person, name) VALUES (?, ?, ?)', chosen_names)
+        connection.execute('DELETE FROM chosen_videos')
+    return len(chosen_names)
