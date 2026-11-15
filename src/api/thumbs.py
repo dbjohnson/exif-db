@@ -11,6 +11,9 @@ from PIL import Image, ImageEnhance, ImageOps
 
 CACHE_DIR = '/storage/thumbs'
 THUMB_SIZE = 480
+# the most a copy for zooming into is on its longest side, so that a very big photo doesn't use up
+# the NAS's or a phone's memory.  A 48 megapixel iPhone photo is 8,064 pixels across
+ZOOM_SIZE = 6000
 FACE_SIZE = 240
 # how much of what's around a face to show, as a share of the face's size
 FACE_MARGIN = 0.25
@@ -258,6 +261,19 @@ def full_size(path, rotation=0, enhanced=False):
     return _adjust(im, rotation, enhanced)
 
 
+def zoomable(path, rotation=0, enhanced=False):
+    """
+    A photo as big as it is, up to ZOOM_SIZE, for zooming into in the viewer.  A raw file is
+    developed from what its sensor recorded.  Cached, as a zoomed photo is often zoomed into again
+    """
+    def make():
+        im = full_size(path, rotation, enhanced)
+        im.thumbnail((ZOOM_SIZE, ZOOM_SIZE))
+        return im
+
+    return _cached(path, _zoom_variant(rotation, enhanced), 90, make)
+
+
 # an enhanced copy is cached next to the plain one, so that turning enhancing off is instant
 def _enhanced_variant(enhanced):
     return ':enhanced' if enhanced else ''
@@ -275,14 +291,23 @@ def _developed_variant(rotation, enhanced=False):
     return f":developed:{rotation}" + _enhanced_variant(enhanced)
 
 
+def _zoom_variant(rotation, enhanced=False):
+    return f":zoom:{rotation}" + _enhanced_variant(enhanced)
+
+
 def forget(path, at):
     """
-    Delete the thumbnails and screen-sized copies made from a photo in the trash, at any rotation,
-    enhanced or not.  Not pictures of its faces, which are only found by face
+    Delete the thumbnails, screen-sized copies and copies for zooming made from a photo in the
+    trash, at any rotation, enhanced or not.  Not pictures of its faces, which are only found by face
     """
     for rotation in CLOCKWISE.keys() | {0}:
         for enhanced in (False, True):
-            for variant in (_thumb_variant(rotation, enhanced), _display_variant(rotation, enhanced), _developed_variant(rotation, enhanced)):
+            for variant in (
+                _thumb_variant(rotation, enhanced),
+                _display_variant(rotation, enhanced),
+                _developed_variant(rotation, enhanced),
+                _zoom_variant(rotation, enhanced)
+            ):
                 try:
                     os.remove(_cache_file(path, variant, at))
                 except FileNotFoundError:
