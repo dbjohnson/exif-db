@@ -2294,6 +2294,7 @@ async def _movies_page(
             "filter_tags": filters.get('tag', []),
             "filter_people": filters.get('person', []),
             "tag_names_shown": tags.names(),
+            "today": datetime.date.today().isoformat(),
             # only those found in a video, so that choosing one always finds something
             "known_names": people.names_in_videos() if people.available() else []
         }
@@ -2330,6 +2331,30 @@ class MovieHidden(BaseModel):
 async def _set_movie_hidden(change: MovieHidden):
     exif.set_movie_hidden(change.id, change.hidden)
     return "saved"
+
+
+class MovieDate(BaseModel):
+    id: str
+    # None for the movie's own
+    date: datetime.date | None = None
+
+
+@app.post("/api/movies/date")
+async def _set_movie_date(change: MovieDate):
+    if change.date and not valid_photo_date(change.date):
+        raise HTTPException(
+            status_code=422,
+            detail=f"The date has to be from {exif.LIBRARY_EARLIEST_YEAR} up to today"
+        )
+    if not any(clip['id'] == change.id for clip in movies.clips()):
+        raise HTTPException(status_code=404, detail="There's no video with that ID")
+    previous = exif.set_movie_date(change.id, change.date.isoformat() if change.date else '')
+    clip = next(clip for clip in movies.clips() if clip['id'] == change.id)
+    # what it had before, to undo with, and when it's from now
+    return {
+        'previous': previous or None,
+        **{key: clip[key] for key in ('taken', 'precision', 'date_assigned')}
+    }
 
 
 class MovieRotation(BaseModel):

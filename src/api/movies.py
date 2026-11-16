@@ -217,15 +217,32 @@ def _load():
         _built_from = built_from
 
 
+def _given_date(day):
+    # a day given by hand, as the movie's date would be with only a day in its name
+    try:
+        taken = datetime.datetime.strptime(day or '', '%Y-%m-%d')
+    except ValueError:
+        return {'date_assigned': False}
+    return {'taken': taken.isoformat(sep=' '), 'precision': 'day', 'date_assigned': True}
+
+
 def clips():
     """
     Every home movie in the order they were filmed, which is the order they play in, including
-    hidden ones so that they can be brought back
+    hidden ones so that they can be brought back.  A date given by hand leaves the movie's ID as
+    it was, so that what's kept by ID stays with it
     """
     _load()
     hidden = exif.hidden_movies()
     rotations = exif.movie_rotations()
-    return [{**clip, 'hidden': clip['id'] in hidden, 'rotation': rotations.get(clip['id'], 0)} for clip in _clips]
+    dates = exif.movie_dates()
+    shown = [
+        {**clip, 'hidden': clip['id'] in hidden, 'rotation': rotations.get(clip['id'], 0), **_given_date(dates.get(clip['id']))}
+        for clip in _clips
+    ]
+    if dates:
+        shown.sort(key=lambda clip: (not clip['taken'], clip['taken'] or '', _natural(clip['path'])))
+    return shown
 
 
 def files_of(path):

@@ -25,6 +25,8 @@ DELETIONS_CSV = '/storage/deletions.csv'
 MOVIES_HIDDEN_CSV = '/storage/movies_hidden.csv'
 # how far each movie is turned clockwise to play upright, by movie ID
 MOVIE_ROTATIONS_CSV = '/storage/movie_rotations.csv'
+# days given to movies by hand, as YYYY-MM-DD or '' for the movie's own, by movie ID
+MOVIE_DATES_CSV = '/storage/movie_dates.csv'
 # which photos have been dealt with as duplicates, as in api/copies.py
 DUPLICATES_CSV = '/storage/duplicates.csv'
 # what each photo looks like, by path, written by scripts/find_duplicates.py
@@ -276,6 +278,22 @@ def movie_rotations():
         movie_id: int(value)
         for movie_id, value in db.execute("SELECT photo_id, value FROM movie_rotations").fetchall()
         if value in ('90', '180', '270')
+    }
+
+
+def set_movie_date(movie_id, day):
+    # a day as YYYY-MM-DD, or '' for the movie's own.  Returns what it had before, the same way
+    previous = movie_dates().get(movie_id, '')
+    _append_log(MOVIE_DATES_CSV, [(movie_id, day)])
+    return previous
+
+
+def movie_dates():
+    _load_log('movie_dates', MOVIE_DATES_CSV)
+    return {
+        movie_id: value
+        for movie_id, value in db.execute("SELECT photo_id, value FROM movie_dates").fetchall()
+        if value
     }
 
 

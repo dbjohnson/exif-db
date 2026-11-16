@@ -357,6 +357,7 @@
           byId('month-label').textContent = formatMonth(key);
         }
         renderMovieTags();
+        renderDate(clip);
         for (const [index, tile] of shownTiles) {
           tile.classList.toggle('playing', index === current);
         }
@@ -812,6 +813,84 @@
         }
       }
 
+      // ---- when the movie playing was filmed, given by hand
+
+      function renderDate(clip) {
+        const input = byId('movie-date');
+        input.value = clip.taken ? clip.taken.slice(0, 10) : '';
+        // cleared, a date given by hand goes back to the movie's own
+        input.required = !clip.date_assigned;
+      }
+
+      // a date box shows its picker only from its own small button, so this opens it from anywhere on it
+      function openDatePicker(input) {
+        try {
+          input.showPicker();
+        } catch (error) {
+          // a phone opens it by itself, and older browsers have none
+        }
+      }
+
+      // as the server has them: in the order filmed, undated last, then by path with part 2 before part 10
+      function filmedOrder(first, second) {
+        if (!first.taken !== !second.taken) {
+          return first.taken ? -1 : 1;
+        }
+        if (first.taken !== second.taken) {
+          return first.taken < second.taken ? -1 : 1;
+        }
+        return first.path.toLowerCase().localeCompare(second.path.toLowerCase(), undefined, {numeric: true});
+      }
+
+      // a movie with a new date moves to its place in the stream, and what's playing carries on
+      function redate(clip, {taken, precision, date_assigned}) {
+        Object.assign(clip, {taken, precision, date_assigned});
+        const playing = clips[current];
+        const preparedClip = prepared >= 0 ? clips[prepared] : null;
+        const loaded = [active, standby].map(video => [video, clips[video.clipIndex]]);
+        clips.splice(clips.indexOf(clip), 1);
+        const after = clips.findIndex(other => filmedOrder(clip, other) < 0);
+        clips.splice(after < 0 ? clips.length : after, 0, clip);
+        current = clips.indexOf(playing);
+        prepared = preparedClip ? clips.indexOf(preparedClip) : -1;
+        for (const [video, loadedClip] of loaded) {
+          if (loadedClip) {
+            video.clipIndex = clips.indexOf(loadedClip);
+          }
+        }
+        // the list's tiles are made again, for where each movie is now
+        shownTiles.clear();
+        renderRemaining();
+        renderClip();
+      }
+
+      async function datePicked(input) {
+        const clip = clips[current];
+        const date = input.value || null;
+        // so that the player's keys work again
+        input.blur();
+        if (!date && !clip.date_assigned) {
+          renderDate(clip);
+          return;
+        }
+        try {
+          const result = await postJson('/api/movies/date', {id: clip.id, date});
+          redate(clip, result);
+          showToast(date ? `Date set to ${formatWhen(clip)}` : "Back to the video's own date", async () => {
+            try {
+              redate(clip, await postJson('/api/movies/date', {id: clip.id, date: result.previous}));
+            } catch (error) {
+              console.log(error);
+              showToast(`Couldn't undo: ${error.message}`);
+            }
+          });
+        } catch (error) {
+          console.log(error);
+          renderDate(clips[current]);
+          showToast(`Couldn't change the date: ${error.message}`);
+        }
+      }
+
       // ---- tags of the movie playing, which the list can be narrowed to
 
       async function renderMovieTags() {
@@ -1230,6 +1309,12 @@
             <button id="rotate" onclick="rotateCurrent()" title="Rotate 90° clockwise (R)" aria-label="Rotate">
               <i class="fa fa-rotate-right" aria-hidden="true"></i>
             </button>
+            <span class="select-date-pick" title="Say when this was filmed">
+              <button tabindex="-1" aria-hidden="true">
+                <i class="fa fa-calendar" aria-hidden="true"></i>
+              </button>
+              <input id="movie-date" type="date" min="{{ earliest_year }}-01-01" max="{{ today }}" aria-label="Date filmed" onclick="openDatePicker(this)" onchange="datePicked(this)" />
+            </span>
             <button id="mute" onclick="toggleMute()" title="Mute (M)" aria-label="Mute">
               <i class="fa fa-volume-up" aria-hidden="true"></i>
             </button>

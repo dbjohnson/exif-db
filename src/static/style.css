@@ -1565,7 +1565,8 @@ button:disabled {
   flex: 1;
 }
 
-.select-bar .select-date-pick input[type="date"] {
+.select-bar .select-date-pick input[type="date"],
+.movie-buttons .select-date-pick input[type="date"] {
   position: absolute;
   inset: 0;
   width: 100%;
