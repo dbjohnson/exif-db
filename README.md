@@ -190,6 +190,8 @@ Videos are read by the end of each scan into `movies.csv` in the storage volume,
 
 Rotating turns a video a quarter turn clockwise each press, for one filmed sideways (stored in `movie_rotations.csv` by video).  The player turns the video and its pictures as it shows them, and the file isn't changed, so AirPlay and shared links still play it as filmed.
 
+The calendar button beside it sets the day a video was filmed, for one whose file, name and folder don't say, or say wrong (stored in `movie_dates.csv` by video, and undoable).  The video moves to that day in the stream and the list while it carries on playing.  Clearing the date goes back to the video's own.  As with photos, the file isn't changed, and the date survives a rescan.
+
 Hiding takes a video out of the stream (stored in `movies_hidden.csv`) and can be undone from the list at the bottom of the page.  Deleting takes two presses and moves the video and any other copies of it to `deleted/` in the storage volume, with the same undo and `/manage` trash as photos.  A same-named photo is left alone.  A large video can take minutes to reach the trash, as it's copied there, and only then can the delete be undone.
 
 Browsers get the original where they can play it, which is any H.264 and also HEVC if the browser has it.  Otherwise they get a copy Synology made in `@eaDir`, such as for old MPEG-4 and AVI files, and nothing is converted here.  A video with neither is skipped with a message.
